@@ -1,0 +1,59 @@
+# Controllers for the 3VN Arm.
+#
+# IDENTICAL across all three hardware targets (mock, gz, esp32). That is
+# the point: because the controllers do not change, the public API does
+# not change either, so the same commands drive the simulator and the
+# physical robot.
+#
+# This file also fixes the ROS interface split the spec asks for, and it
+# comes free with ros2_control rather than from a bespoke RPC layer:
+#
+#   topic   /joint_states                            continuous state
+#   service /controller_manager/switch_controller    short command
+#   action  /arm_controller/follow_joint_trajectory  long-running motion
+#   action  /gripper_controller/gripper_cmd          long-running motion
+
+controller_manager:
+  ros__parameters:
+    # 50 Hz. Matches hardware.esp32.control_rate_hz in the robot profile
+    # so simulation and hardware run the same loop rate; a mismatch makes
+    # tuning done in sim meaningless on the real arm.
+    update_rate: 50
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    arm_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+    gripper_controller:
+      type: position_controllers/GripperActionController
+
+arm_controller:
+  ros__parameters:
+    joints:
+      - shoulder_pan_joint
+      - shoulder_lift_joint
+      - elbow_joint
+      - wrist_joint
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+    # Hobby servos have no torque feedback and meaningful backlash.
+    # Tight tolerances would make every trajectory abort; these are
+    # deliberately loose and should be re-tuned against the physical arm
+    # in Phase 5.
+    allow_partial_joints_goal: false
+    constraints:
+      stopped_velocity_tolerance: 0.05
+      goal_time: 2.0
+
+gripper_controller:
+  ros__parameters:
+    # Only the left finger is commanded. The right one follows via the
+    # URDF <mimic> tag, which is what a single-servo gripper does.
+    joint: gripper_left_finger_joint
+    allow_stalling: true
+    max_effort: 10.0

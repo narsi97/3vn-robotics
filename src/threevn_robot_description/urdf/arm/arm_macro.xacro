@@ -1,0 +1,110 @@
+<?xml version="1.0"?>
+<!--
+  The 4-DOF arm chain: base -> shoulder_pan(Z) -> shoulder_lift(Y)
+  -> elbow(Y) -> wrist(Y).
+
+  Every dimension, mass and limit is read from the 'cfg' dictionary, which
+  the top-level xacro loaded from YAML. Nothing here is a literal.
+
+  Macros take only 'parent' and 'prefix' - plain strings that xacro
+  substitutes textually with no ambiguity. 'cfg' is read from the global
+  property scope rather than passed as a macro parameter: xacro can pass
+  dictionaries through macro params, but the stringification semantics are
+  subtle enough that depending on them would create an obscure failure
+  mode. Globals are unambiguous here and the file count is small.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- One revolute joint, built entirely from its YAML spec. The
+       deg -> rad conversion happens HERE and nowhere else. -->
+  <xacro:macro name="threevn_revolute_joint" params="name prefix">
+    <xacro:property name="j" value="${cfg['joints'][name]}"/>
+    <joint name="${prefix}${name}" type="revolute">
+      <parent link="${prefix}${j['parent']}"/>
+      <child  link="${prefix}${j['child']}"/>
+      <origin xyz="${j['origin']['xyz'][0]} ${j['origin']['xyz'][1]} ${j['origin']['xyz'][2]}"
+              rpy="${j['origin']['rpy'][0]} ${j['origin']['rpy'][1]} ${j['origin']['rpy'][2]}"/>
+      <axis xyz="${j['axis'][0]} ${j['axis'][1]} ${j['axis'][2]}"/>
+      <limit lower="${radians(j['limit']['lower_deg'])}"
+             upper="${radians(j['limit']['upper_deg'])}"
+             effort="${j['limit']['effort']}"
+             velocity="${j['limit']['velocity']}"/>
+      <dynamics damping="${cfg['defaults']['joint_damping']}"
+                friction="${cfg['defaults']['joint_friction']}"/>
+    </joint>
+  </xacro:macro>
+
+  <!-- One link, built from its YAML spec. origin_z centres the geometry
+       on the link axis: a link's frame sits at its proximal end, so the
+       body is drawn half its length further along. -->
+  <xacro:macro name="threevn_link" params="name prefix material:=threevn_slate origin_z:=0">
+    <xacro:property name="l" value="${cfg['links'][name]}"/>
+    <link name="${prefix}${name}">
+      <visual>
+        <xacro:link_geometry_from_spec spec="${l}" tag="visual" margin="0" origin_z="${origin_z}"/>
+        <material name="${material}"/>
+      </visual>
+      <collision>
+        <xacro:link_geometry_from_spec spec="${l}" tag="collision"
+                                       margin="${cfg['defaults']['collision_margin']}"
+                                       origin_z="${origin_z}"/>
+      </collision>
+      <xacro:link_inertial_from_spec spec="${l}" origin_z="${origin_z}"/>
+    </link>
+  </xacro:macro>
+
+  <xacro:macro name="threevn_arm" params="parent prefix">
+
+    <!-- base_footprint (the root, defined by the caller) -> base_link.
+         base_footprint carries no inertial by design: it is a pure
+         reference frame. Gazebo's SDF converter drops inertial-less
+         links, which is expected and harmless - TF comes from
+         robot_state_publisher, never from Gazebo. See docs/gazebo.md. -->
+    <joint name="${prefix}base_joint" type="fixed">
+      <parent link="${parent}"/>
+      <child  link="${prefix}base_link"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </joint>
+
+    <xacro:threevn_link name="base_link" prefix="${prefix}"
+                        material="threevn_dark"
+                        origin_z="${cfg['links']['base_link']['geometry']['z'] / 2.0}"/>
+
+    <xacro:threevn_link name="shoulder_link" prefix="${prefix}"
+                        material="threevn_orange"
+                        origin_z="${cfg['links']['shoulder_link']['geometry']['length'] / 2.0}"/>
+    <xacro:threevn_revolute_joint name="shoulder_pan_joint" prefix="${prefix}"/>
+
+    <xacro:threevn_link name="upper_arm_link" prefix="${prefix}"
+                        origin_z="${cfg['links']['upper_arm_link']['geometry']['z'] / 2.0}"/>
+    <xacro:threevn_revolute_joint name="shoulder_lift_joint" prefix="${prefix}"/>
+
+    <xacro:threevn_link name="forearm_link" prefix="${prefix}"
+                        origin_z="${cfg['links']['forearm_link']['geometry']['z'] / 2.0}"/>
+    <xacro:threevn_revolute_joint name="elbow_joint" prefix="${prefix}"/>
+
+    <xacro:threevn_link name="wrist_link" prefix="${prefix}"
+                        material="threevn_orange"
+                        origin_z="${cfg['links']['wrist_link']['geometry']['length'] / 2.0}"/>
+    <xacro:threevn_revolute_joint name="wrist_joint" prefix="${prefix}"/>
+
+    <!-- tool0: the ROS-Industrial tool-centre-point convention. MoveIt,
+         every IK solver and every tutorial expect this name. One fixed
+         joint now saves renaming things later. -->
+    <xacro:threevn_fixed_frame name="tool0" prefix="${prefix}"/>
+
+  </xacro:macro>
+
+  <!-- A pure frame from cfg['frames']: no mass, no geometry. -->
+  <xacro:macro name="threevn_fixed_frame" params="name prefix">
+    <xacro:property name="f" value="${cfg['frames'][name]}"/>
+    <link name="${prefix}${name}"/>
+    <joint name="${prefix}${name}_joint" type="fixed">
+      <parent link="${prefix}${f['parent']}"/>
+      <child  link="${prefix}${name}"/>
+      <origin xyz="${f['xyz'][0]} ${f['xyz'][1]} ${f['xyz'][2]}"
+              rpy="${f['rpy'][0]} ${f['rpy'][1]} ${f['rpy'][2]}"/>
+    </joint>
+  </xacro:macro>
+
+</robot>

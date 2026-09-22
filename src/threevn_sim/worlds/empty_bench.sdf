@@ -1,0 +1,58 @@
+<?xml version="1.0"?>
+<!--
+  Minimal deterministic world: ground plane, one light, nothing else.
+
+  Determinism matters because this world backs CI integration tests. Every
+  extra object is another source of contact jitter and another reason for
+  a test to fail for reasons unrelated to the robot.
+
+  Physics: 1 ms step at real-time factor 1.0. The arm's links are small
+  and light, so a larger step makes the gripper contacts unstable.
+-->
+<sdf version="1.10">
+  <world name="empty_bench">
+
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <plugin filename="gz-sim-physics-system"
+            name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system"
+            name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system"
+            name="gz::sim::systems::SceneBroadcaster"/>
+    <!-- Required for ros_gz_bridge to see /clock and for controllers to
+         run on simulation time. -->
+    <plugin filename="gz-sim-sensors-system"
+            name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry><plane><normal>0 0 1</normal><size>10 10</size></plane></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><plane><normal>0 0 1</normal><size>10 10</size></plane></geometry>
+          <material>
+            <ambient>0.3 0.32 0.35 1</ambient>
+            <diffuse>0.35 0.37 0.40 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+  </world>
+</sdf>

@@ -1,0 +1,87 @@
+<?xml version="1.0"?>
+<!--
+  Inertia tensors are COMPUTED, never typed.
+
+  Each macro derives the tensor from the same mass and dimensions that
+  produced the link's geometry. That means the tensor cannot disagree with
+  the shape it describes - which a hand-typed tensor silently does, and
+  which the physics engine turns into NaN the first time a contact force
+  is applied. It also means changing a dimension in YAML automatically
+  corrects the inertia, with no second place to remember.
+
+  Standard rigid-body results for solids of uniform density about their
+  centre of mass, principal axes aligned with the link frame.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- Solid cuboid of side lengths x, y, z. -->
+  <xacro:macro name="box_inertial" params="mass x y z *origin">
+    <inertial>
+      <xacro:insert_block name="origin"/>
+      <mass value="${mass}"/>
+      <inertia
+        ixx="${max(mass * (y*y + z*z) / 12.0, min_inertia)}" ixy="0.0" ixz="0.0"
+        iyy="${max(mass * (x*x + z*z) / 12.0, min_inertia)}" iyz="0.0"
+        izz="${max(mass * (x*x + y*y) / 12.0, min_inertia)}"/>
+    </inertial>
+  </xacro:macro>
+
+  <!-- Solid cylinder, symmetry axis = link-frame +Z. -->
+  <xacro:macro name="cylinder_inertial" params="mass radius length *origin">
+    <inertial>
+      <xacro:insert_block name="origin"/>
+      <mass value="${mass}"/>
+      <inertia
+        ixx="${max(mass * (3.0*radius*radius + length*length) / 12.0, min_inertia)}" ixy="0.0" ixz="0.0"
+        iyy="${max(mass * (3.0*radius*radius + length*length) / 12.0, min_inertia)}" iyz="0.0"
+        izz="${max(mass * radius * radius / 2.0, min_inertia)}"/>
+    </inertial>
+  </xacro:macro>
+
+  <!--
+    Dispatch on the YAML 'geometry.type' so callers pass a link spec and
+    get the right tensor without branching at every call site.
+    'origin_z' offsets the centre of mass along the link axis, because a
+    link's frame sits at its proximal end while its mass is centred.
+  -->
+  <xacro:macro name="link_inertial_from_spec" params="spec origin_z:=0">
+    <xacro:if value="${spec['geometry']['type'] == 'box'}">
+      <xacro:box_inertial mass="${spec['mass']}"
+                          x="${spec['geometry']['x']}"
+                          y="${spec['geometry']['y']}"
+                          z="${spec['geometry']['z']}">
+        <origin xyz="0 0 ${origin_z}" rpy="0 0 0"/>
+      </xacro:box_inertial>
+    </xacro:if>
+    <xacro:if value="${spec['geometry']['type'] == 'cylinder'}">
+      <xacro:cylinder_inertial mass="${spec['mass']}"
+                               radius="${spec['geometry']['radius']}"
+                               length="${spec['geometry']['length']}">
+        <origin xyz="0 0 ${origin_z}" rpy="0 0 0"/>
+      </xacro:cylinder_inertial>
+    </xacro:if>
+  </xacro:macro>
+
+  <!-- Visual + collision geometry from the same spec. Collision is a
+       single primitive inflated by collision_margin; visual is exact.
+       Primitives are analytic in DART, which is what keeps physics
+       real-time on a CPU-only (llvmpipe) container. -->
+  <xacro:macro name="link_geometry_from_spec" params="spec tag margin:=0 origin_z:=0">
+    <xacro:if value="${spec['geometry']['type'] == 'box'}">
+      <origin xyz="0 0 ${origin_z}" rpy="0 0 0"/>
+      <geometry>
+        <box size="${spec['geometry']['x'] + 2*margin}
+                   ${spec['geometry']['y'] + 2*margin}
+                   ${spec['geometry']['z'] + 2*margin}"/>
+      </geometry>
+    </xacro:if>
+    <xacro:if value="${spec['geometry']['type'] == 'cylinder'}">
+      <origin xyz="0 0 ${origin_z}" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="${spec['geometry']['radius'] + margin}"
+                  length="${spec['geometry']['length'] + 2*margin}"/>
+      </geometry>
+    </xacro:if>
+  </xacro:macro>
+
+</robot>

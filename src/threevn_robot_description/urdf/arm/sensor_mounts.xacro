@@ -1,0 +1,50 @@
+<?xml version="1.0"?>
+<!--
+  Sensor attachment points.
+
+  These are frames, not sensors. No Gazebo <sensor> tags are emitted in
+  Phase 1: the camera plugin belongs to Phase 12 (perception), and adding
+  it now would make every headless test pay for CPU-rendered images it
+  never reads. The frames exist now so that later work is additive and so
+  the optical-frame convention is settled while it is cheap.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:macro name="threevn_sensor_mounts" params="prefix">
+
+    <!-- Attaches the whole arm to a mobile base in Phase 11. Having it
+         now turns "re-parent the arm onto a rover" into a one-joint
+         change instead of a description rewrite. -->
+    <xacro:threevn_fixed_frame name="mount_plate_link" prefix="${prefix}"/>
+
+    <xacro:threevn_fixed_frame name="imu_link" prefix="${prefix}"/>
+
+    <xacro:if value="${cfg['sensors']['camera']['enabled']}">
+      <xacro:property name="cam" value="${cfg['sensors']['camera']}"/>
+
+      <xacro:threevn_fixed_frame name="camera_mount_link" prefix="${prefix}"/>
+
+      <!-- camera_link is the physical body; camera_optical_frame is the
+           REP-103 optical convention (+z forward, +x right, +y down).
+           They are NOT the same frame, and conflating them is the most
+           common perception bug in ROS. Separating them costs one fixed
+           joint here and saves a day in Phase 12. -->
+      <link name="${prefix}camera_link"/>
+      <joint name="${prefix}camera_joint" type="fixed">
+        <parent link="${prefix}camera_mount_link"/>
+        <child  link="${prefix}camera_link"/>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+      </joint>
+
+      <link name="${prefix}camera_optical_frame"/>
+      <joint name="${prefix}camera_optical_joint" type="fixed">
+        <parent link="${prefix}camera_link"/>
+        <child  link="${prefix}camera_optical_frame"/>
+        <origin xyz="0 0 0"
+                rpy="${cam['optical_rpy'][0]} ${cam['optical_rpy'][1]} ${cam['optical_rpy'][2]}"/>
+      </joint>
+    </xacro:if>
+
+  </xacro:macro>
+
+</robot>

@@ -1,0 +1,170 @@
+# 3VN Arm v1 "long reach" -- a longer-link variant.
+#
+# This profile exists to PROVE the parameter mechanism. It shares every
+# line of xacro with threevn_arm_v1 and differs only in numbers. If a
+# dimension ever has to be edited in a .xacro to make this work, the
+# single-source-of-truth design has been broken and the tests should fail.
+#
+# Derived from threevn_arm_v1.yaml: longer upper arm and forearm, heavier
+# links to match, and reduced joint velocity to reflect the larger inertia.
+meta:
+  # ROS-legal identifier: lowercase, leading letter. Used for the URDF
+  # robot name and anywhere a namespace or frame prefix might be derived.
+  # See docs/decisions/0001-package-naming.md -- "3vn_arm_v1" would be a
+  # latent runtime failure the first time it reached DDS.
+  model: threevn_arm_v1_long_reach
+  display_name: "3VN Arm v1 (long reach)"
+  dof: 4
+  revision: 1
+  variant_of: threevn_arm_v1
+
+defaults:
+  # kg.m^2 floor. Near-zero inertia is a reliable way to make the physics
+  # engine emit NaN the instant a contact force appears.
+  min_inertia: 1.0e-7
+  collision_margin: 0.002   # m, added to every collision primitive
+  joint_damping: 0.05
+  joint_friction: 0.01
+
+links:
+  base_link:
+    geometry: {type: box, x: 0.100, y: 0.100, z: 0.030}
+    mass: 0.250
+    provenance: estimated
+  shoulder_link:
+    geometry: {type: cylinder, radius: 0.022, length: 0.040}
+    mass: 0.060
+    provenance: estimated
+  upper_arm_link:
+    geometry: {type: box, x: 0.020, y: 0.030, z: 0.160}
+    mass: 0.080
+    provenance: estimated
+  forearm_link:
+    geometry: {type: box, x: 0.018, y: 0.026, z: 0.140}
+    mass: 0.066
+    provenance: estimated
+  wrist_link:
+    geometry: {type: cylinder, radius: 0.016, length: 0.030}
+    mass: 0.030
+    provenance: estimated
+  gripper_base_link:
+    geometry: {type: box, x: 0.030, y: 0.040, z: 0.025}
+    mass: 0.035
+    provenance: estimated
+  gripper_left_finger_link:
+    geometry: {type: box, x: 0.008, y: 0.006, z: 0.035}
+    mass: 0.006
+    provenance: estimated
+  gripper_right_finger_link:
+    geometry: {type: box, x: 0.008, y: 0.006, z: 0.035}
+    mass: 0.006
+    provenance: estimated
+
+joints:
+  shoulder_pan_joint:
+    type: revolute
+    parent: base_link
+    child: shoulder_link
+    origin: {xyz: [0.0, 0.0, 0.030], rpy: [0.0, 0.0, 0.0]}
+    axis: [0, 0, 1]
+    limit: {lower_deg: -90.0, upper_deg: 90.0, effort: 1.5, velocity: 2.0}
+    initial_position_deg: 0.0
+  shoulder_lift_joint:
+    type: revolute
+    parent: shoulder_link
+    child: upper_arm_link
+    origin: {xyz: [0.0, 0.0, 0.020], rpy: [0.0, 0.0, 0.0]}
+    axis: [0, 1, 0]
+    # Asymmetric on purpose: the arm cannot fold back through its own base.
+    limit: {lower_deg: -15.0, upper_deg: 120.0, effort: 1.5, velocity: 2.0}
+    initial_position_deg: 0.0
+  elbow_joint:
+    type: revolute
+    parent: upper_arm_link
+    child: forearm_link
+    origin: {xyz: [0.0, 0.0, 0.160], rpy: [0.0, 0.0, 0.0]}
+    axis: [0, 1, 0]
+    limit: {lower_deg: -120.0, upper_deg: 10.0, effort: 1.2, velocity: 2.0}
+    initial_position_deg: 0.0
+  wrist_joint:
+    type: revolute
+    parent: forearm_link
+    child: wrist_link
+    origin: {xyz: [0.0, 0.0, 0.140], rpy: [0.0, 0.0, 0.0]}
+    axis: [0, 1, 0]
+    limit: {lower_deg: -90.0, upper_deg: 90.0, effort: 0.8, velocity: 4.0}
+    initial_position_deg: 0.0
+  gripper_left_finger_joint:
+    type: prismatic
+    parent: gripper_base_link
+    child: gripper_left_finger_link
+    origin: {xyz: [0.0, 0.010, 0.025], rpy: [0.0, 0.0, 0.0]}
+    axis: [0, 1, 0]
+    limit: {lower: 0.0, upper: 0.018, effort: 10.0, velocity: 0.05}
+    initial_position: 0.0
+  gripper_right_finger_joint:
+    type: prismatic
+    parent: gripper_base_link
+    child: gripper_right_finger_link
+    origin: {xyz: [0.0, -0.010, 0.025], rpy: [0.0, 0.0, 0.0]}
+    axis: [0, -1, 0]
+    limit: {lower: 0.0, upper: 0.018, effort: 10.0, velocity: 0.05}
+    initial_position: 0.0
+    # The right finger follows the left through the URDF <mimic> tag, which
+    # both mock_components and gz_ros2_control parse. It therefore gets no
+    # <joint> entry in the ros2_control block -- it is not independently
+    # commanded.
+    mimic: {joint: gripper_left_finger_joint, multiplier: 1.0, offset: 0.0}
+
+# Fixed attachment points. No mass, no geometry -- pure frames.
+frames:
+  tool0:
+    parent: wrist_link
+    xyz: [0.0, 0.0, 0.030]
+    rpy: [0.0, 0.0, 0.0]
+  gripper_base_mount:
+    parent: wrist_link
+    xyz: [0.0, 0.0, 0.015]
+    rpy: [0.0, 0.0, 0.0]
+  grasp_frame:
+    parent: gripper_base_link
+    xyz: [0.0, 0.0, 0.055]
+    rpy: [0.0, 0.0, 0.0]
+  camera_mount_link:
+    parent: base_link
+    xyz: [0.045, 0.0, 0.030]
+    rpy: [0.0, -0.35, 0.0]
+  imu_link:
+    parent: base_link
+    xyz: [0.0, 0.0, 0.015]
+    rpy: [0.0, 0.0, 0.0]
+  # Phase 11 attaches the mobile base HERE. Costs one fixed joint now and
+  # turns "re-parent the arm onto a rover" into a one-line change.
+  mount_plate_link:
+    parent: base_link
+    xyz: [0.0, 0.0, -0.015]
+    rpy: [0.0, 0.0, 0.0]
+
+sensors:
+  camera:
+    enabled: true
+    parent: camera_mount_link
+    # REP-103 optical frame: +z forward, +x right, +y down. Getting this
+    # wrong is the single most common perception bug and costs a day in
+    # Phase 8; it costs one fixed joint here.
+    optical_rpy: [-1.5707963, 0.0, -1.5707963]
+    width: 640
+    height: 480
+    hfov_deg: 62.0
+    # llvmpipe is CPU rendering. 30 Hz will not hold; do not raise this
+    # without measuring.
+    update_rate: 15.0
+
+hardware:
+  # Phase 5. Declared now so the seam has a concrete shape and the
+  # ros2_control block can reference real parameters rather than guesses.
+  esp32:
+    transport: serial        # serial | tcp
+    endpoint: /dev/ttyUSB0
+    baud: 921600
+    control_rate_hz: 50

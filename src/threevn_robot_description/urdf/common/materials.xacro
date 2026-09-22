@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+<!-- Named materials for RViz. Gazebo visual materials are set separately
+     in urdf/gazebo/materials.gazebo.xacro, because the two renderers do
+     not share a material system. -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <material name="threevn_slate">  <color rgba="0.24 0.27 0.32 1.0"/></material>
+  <material name="threevn_orange"> <color rgba="0.90 0.49 0.13 1.0"/></material>
+  <material name="threevn_light">  <color rgba="0.78 0.80 0.83 1.0"/></material>
+  <material name="threevn_dark">   <color rgba="0.12 0.13 0.16 1.0"/></material>
+</robot>

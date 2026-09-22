@@ -1,0 +1,58 @@
+# Dev environment for 3VN Robotics.
+#
+# ONE container, on purpose. Splitting ROS nodes across containers means
+# fighting DDS multicast discovery, which is not the lesson this project
+# exists to teach. The split happens in Phase 6, when there is a real
+# network boundary to model. See docs/decisions/0002-dev-environment.md.
+services:
+  ros:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: dev
+      args:
+        ROS_DISTRO: jazzy
+        UID: "${TVN_UID:-10001}"
+    image: threevn-robotics-dev:local
+    container_name: threevn-ros
+    init: true
+    # Gazebo and RViz render on llvmpipe (CPU). Docker Desktop needs at
+    # least 6 GB / 4 CPUs under Settings > Resources or gz gets swapped
+    # out and looks like it hung. `make doctor` checks this.
+    shm_size: "1gb"
+    ports:
+      # 8083/8085/8087/8100/8102/8104 belong to the other 3VN products.
+      - "127.0.0.1:8106:8080"
+    environment:
+      ROS_DOMAIN_ID: "42"
+      # Jazzy's replacement for the deprecated ROS_LOCALHOST_ONLY. Keeps
+      # DDS discovery traffic off the LAN so two machines on the same
+      # network don't silently join each other's graph.
+      ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
+      RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+      DISPLAY: ":1"
+      LIBGL_ALWAYS_SOFTWARE: "1"
+      GALLIUM_DRIVER: llvmpipe
+    volumes:
+      - ../src:/ws/src
+      - ../scripts:/ws/scripts:ro
+      # build/install/log are NAMED VOLUMES, not bind mounts. colcon
+      # writes tens of thousands of small files; through VirtioFS on
+      # macOS that cost dominates every build. It also keeps generated
+      # artifacts out of the host repo.
+      - build:/ws/build
+      - install:/ws/install
+      - log:/ws/log
+    healthcheck:
+      # 127.0.0.1, never localhost -- house rule. websockify binds IPv4
+      # only, and a container's /etc/hosts resolves localhost to ::1 first.
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/vnc.html"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    command: ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
+
+volumes:
+  build:
+  install:
+  log:

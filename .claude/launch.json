@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "3vn-robotics",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["/Users/narsip/Documents/triveni-systems/3vn-robotics/run-local.sh"],
+      "port": 8106
+    }
+  ]
+}

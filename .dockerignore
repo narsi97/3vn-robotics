@@ -1,0 +1,13 @@
+# Keep the build context small: the image is already 5-6GB and every
+# unnecessary byte here is copied on every build.
+.git
+build/
+install/
+log/
+__pycache__/
+*.pyc
+.pytest_cache/
+docs/
+*.md
+!README.md
+.DS_Store

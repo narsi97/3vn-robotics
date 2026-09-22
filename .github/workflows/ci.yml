@@ -1,0 +1,136 @@
+# 3VN Robotics CI.
+#
+# The first GitHub Actions workflow in the 3VN estate. Deliberately small:
+# it builds the same image you run locally and executes the same targets,
+# so a green tick here means the thing you ran on your machine passed --
+# not a parallel pipeline that happens to agree.
+#
+# Gazebo integration tests are NOT here. They arrive in Phase 2 as
+# simulation-tests.yml, where the simulation itself is the deliverable.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: build + test (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Two architectures on purpose. Development happens on an Apple
+          # Silicon Mac (arm64) while most CI and most servers are x86.
+          # Running both is the only way to catch divergence in either
+          # direction, and arm64 runners are free for public repos.
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the CI image
+        run: |
+          docker build \
+            --file docker/Dockerfile \
+            --target ci \
+            --tag threevn-robotics-ci:local \
+            .
+
+      - name: Guard against a mixed Gazebo installation
+        # Gazebo must come from packages.ros.org (the ROS vendor packages),
+        # never from packages.osrfoundation.org. Mixing them yields two
+        # incompatible sets of libgz-*.so, which surfaces far downstream as
+        # a `gz sim` segfault rather than an apt error. Fail loudly here.
+        run: |
+          docker run --rm threevn-robotics-ci:local bash -lc '
+            n=$(apt-cache policy ros-jazzy-gz-sim-vendor | grep -c osrfoundation || true)
+            echo "osrfoundation sources for gz-sim-vendor: $n"
+            test "$n" -eq 0
+          '
+
+      - name: Verify the load_yaml assumption still holds
+        # The whole single-source-of-truth design rests on xacro exposing
+        # load_yaml. If a future xacro release removes it, fail here rather
+        # than in a confusing expansion error.
+        run: |
+          docker run --rm threevn-robotics-ci:local \
+            python3 -c 'import xacro; assert callable(xacro.load_yaml)'
+
+      - name: Build the workspace
+        run: |
+          docker run --rm -v "$PWD/src:/ws/src" -w /ws \
+            threevn-robotics-ci:local \
+            bash -lc 'colcon build --symlink-install --event-handlers console_direct+'
+
+      - name: Test (lint + unit, no simulator)
+        run: |
+          docker run --rm -v "$PWD/src:/ws/src" -w /ws \
+            threevn-robotics-ci:local \
+            bash -lc '
+              colcon build --symlink-install > /dev/null &&
+              colcon test --event-handlers console_direct+ --pytest-args -m "not slow" &&
+              colcon test-result --verbose
+            '
+
+      - name: Verify the hardware seam
+        # The project's central architectural claim, checked as a build
+        # artifact rather than only as a unit test: a description destined
+        # for real hardware must contain no simulator reference at all.
+        run: |
+          docker run --rm -v "$PWD/src:/ws/src" -w /ws \
+            threevn-robotics-ci:local \
+            bash -lc '
+              colcon build --symlink-install > /dev/null
+              source install/setup.bash
+              S=/ws/install/threevn_robot_description/share/threevn_robot_description
+              for t in mock gz esp32; do
+                ros2 run xacro xacro "$S/urdf/threevn_arm.urdf.xacro" \
+                  params_file:="$S/config/threevn_arm_v1.yaml" target:=$t > /tmp/$t.urdf
+              done
+              ! grep -q "gz_ros2_control\|<gazebo" /tmp/mock.urdf
+              ! grep -q "gz_ros2_control\|<gazebo" /tmp/esp32.urdf
+              grep -q "GazeboSimSystem"          /tmp/gz.urdf
+              grep -q "Esp32SystemInterface"     /tmp/esp32.urdf
+              ! grep -q "Esp32SystemInterface"   /tmp/gz.urdf
+              echo "hardware seam intact"
+            '
+
+      - name: Cross-check every profile with the C++ URDF parser
+        run: |
+          docker run --rm -v "$PWD/src:/ws/src" -v "$PWD/scripts:/ws/scripts:ro" -w /ws \
+            threevn-robotics-ci:local \
+            bash -lc 'colcon build --symlink-install > /dev/null && source install/setup.bash && bash scripts/check_description.sh'
+
+      - name: Publish the expanded URDF as an artifact
+        if: matrix.arch == 'amd64'
+        run: |
+          mkdir -p artifacts
+          docker run --rm -v "$PWD/src:/ws/src" -v "$PWD/artifacts:/out" -w /ws \
+            threevn-robotics-ci:local \
+            bash -lc '
+              colcon build --symlink-install > /dev/null
+              source install/setup.bash
+              S=/ws/install/threevn_robot_description/share/threevn_robot_description
+              for p in "$S"/config/threevn_*.yaml; do
+                n=$(basename "$p" .yaml)
+                ros2 run xacro xacro "$S/urdf/threevn_arm.urdf.xacro" \
+                  params_file:="$p" target:=mock > "/out/${n}.urdf"
+              done
+            '
+
+      - uses: actions/upload-artifact@v4
+        if: matrix.arch == 'amd64'
+        with:
+          name: expanded-urdf
+          path: artifacts/*.urdf

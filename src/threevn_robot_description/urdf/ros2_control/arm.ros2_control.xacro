@@ -1,0 +1,124 @@
+<?xml version="1.0"?>
+<!--
+  ============================================================
+   THE HARDWARE ABSTRACTION SEAM
+  ============================================================
+
+  This file is the single place where "simulation" and "real hardware"
+  differ. Exactly one <plugin> is emitted, chosen by the `target` xacro
+  argument. Everything above it (the kinematics) and everything below it
+  (controllers, application nodes, tests, the dashboard) is byte-identical
+  in all three cases.
+
+  Switching target is a LAUNCH ARGUMENT, never a code fork:
+
+      mock  - no simulator, no hardware. Commands echo back as state.
+              Runs in CI in under a second. Available today.
+      gz    - Gazebo Harmonic. controller_manager is hosted inside the
+              simulator process by the gz_ros2_control system plugin.
+      esp32 - Phase 5. A SystemInterface we write. It does not exist yet;
+              the argument value and the plugin name are fixed NOW so
+              Phase 5 is purely additive and confined to one new package.
+
+  Because the controllers are identical across all three, the public API
+  is fixed on day one:
+      topic   /joint_states                              (continuous state)
+      service /controller_manager/switch_controller      (short command)
+      action  /arm_controller/follow_joint_trajectory    (long-running motion)
+      action  /gripper_controller/gripper_cmd
+  That is exactly the topics/services/actions split the spec asks for, and
+  it comes free with ros2_control rather than from a bespoke RPC layer.
+
+  See docs/decisions/0003-hardware-seam.md.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!--
+    Per-joint command and state interfaces, with limits mirrored from the
+    same YAML that produced the <limit> tags. Defined at FILE scope, not
+    nested inside the macro below: nested xacro macro definitions have
+    surprising scope behaviour.
+  -->
+  <xacro:macro name="threevn_joint_ifaces" params="name prefix">
+    <xacro:property name="j" value="${cfg['joints'][name]}"/>
+    <joint name="${prefix}${name}">
+      <command_interface name="position">
+        <xacro:if value="${j['type'] == 'revolute'}">
+          <param name="min">${radians(j['limit']['lower_deg'])}</param>
+          <param name="max">${radians(j['limit']['upper_deg'])}</param>
+        </xacro:if>
+        <xacro:if value="${j['type'] == 'prismatic'}">
+          <param name="min">${j['limit']['lower']}</param>
+          <param name="max">${j['limit']['upper']}</param>
+        </xacro:if>
+      </command_interface>
+      <state_interface name="position">
+        <xacro:if value="${j['type'] == 'revolute'}">
+          <param name="initial_value">${radians(j['initial_position_deg'])}</param>
+        </xacro:if>
+        <xacro:if value="${j['type'] == 'prismatic'}">
+          <param name="initial_value">${j['initial_position']}</param>
+        </xacro:if>
+      </state_interface>
+      <state_interface name="velocity"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:macro name="threevn_arm_ros2_control" params="prefix">
+
+    <ros2_control name="${prefix}threevn_arm" type="system">
+      <hardware>
+        <!--
+          NOTE the quoting: ${$(arg target) == 'mock'} substitutes the
+          argument INSIDE a quoted Python string. The obvious-looking
+          ${target == 'mock'} substitutes a bare token and raises
+          NameError at expansion time. test_ros2_control_targets.py
+          exercises all three targets so a regression here fails loudly.
+        -->
+        <xacro:if value="${'$(arg target)' == 'mock'}">
+          <plugin>mock_components/GenericSystem</plugin>
+          <param name="calculate_dynamics">true</param>
+        </xacro:if>
+
+        <xacro:if value="${'$(arg target)' == 'gz'}">
+          <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+        </xacro:if>
+
+        <xacro:if value="${'$(arg target)' == 'esp32'}">
+          <plugin>threevn_hardware/Esp32SystemInterface</plugin>
+          <param name="transport">${cfg['hardware']['esp32']['transport']}</param>
+          <param name="endpoint">${cfg['hardware']['esp32']['endpoint']}</param>
+          <param name="baud">${cfg['hardware']['esp32']['baud']}</param>
+          <param name="control_rate_hz">${cfg['hardware']['esp32']['control_rate_hz']}</param>
+        </xacro:if>
+      </hardware>
+
+      <xacro:threevn_joint_ifaces name="shoulder_pan_joint"  prefix="${prefix}"/>
+      <xacro:threevn_joint_ifaces name="shoulder_lift_joint" prefix="${prefix}"/>
+      <xacro:threevn_joint_ifaces name="elbow_joint"         prefix="${prefix}"/>
+      <xacro:threevn_joint_ifaces name="wrist_joint"         prefix="${prefix}"/>
+      <!-- Only the LEFT finger. The right one follows via URDF <mimic>
+           and is not independently commanded. -->
+      <xacro:threevn_joint_ifaces name="gripper_left_finger_joint" prefix="${prefix}"/>
+    </ros2_control>
+
+    <!--
+      Gazebo needs a system plugin to host controller_manager inside the
+      simulator process. Emitted ONLY for target=gz, so a real-robot or
+      mock build never references a Gazebo library at all.
+      test_ros2_control_targets.py asserts exactly that, and that
+      assertion IS the architecture.
+    -->
+    <xacro:if value="${'$(arg target)' == 'gz'}">
+      <gazebo>
+        <plugin filename="gz_ros2_control-system"
+                name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+          <parameters>$(find threevn_bringup)/config/controllers.yaml</parameters>
+          <controller_manager_name>controller_manager</controller_manager_name>
+        </plugin>
+      </gazebo>
+    </xacro:if>
+
+  </xacro:macro>
+
+</robot>

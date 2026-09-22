@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>threevn_bringup</name>
+  <version>0.1.0</version>
+  <description>
+    Launch and controller configuration for the 3VN Arm, independent of
+    execution target.
+
+    ARCHITECTURAL RULE: this package must NEVER depend on ros_gz,
+    gz_ros2_control, or anything else Gazebo-specific. If it did,
+    deploying to the physical robot would drag the simulator along and the
+    project's central claim - that the application does not care whether
+    it talks to Gazebo or to hardware - would be false at the
+    dependency level. Gazebo lives in threevn_sim, which depends on THIS
+    package and not the other way round.
+
+    test_package_dependencies.py enforces this.
+  </description>
+  <maintainer email="narsipasham@gmail.com">3VN Systems</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>threevn_robot_description</exec_depend>
+  <exec_depend>controller_manager</exec_depend>
+  <exec_depend>joint_state_broadcaster</exec_depend>
+  <exec_depend>joint_trajectory_controller</exec_depend>
+  <exec_depend>position_controllers</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

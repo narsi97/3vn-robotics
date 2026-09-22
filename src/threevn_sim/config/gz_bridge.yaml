@@ -1,0 +1,15 @@
+# ros_gz_bridge topic mapping.
+#
+# Deliberately minimal. /clock is the one bridge that is NOT optional:
+# without it, controllers run on wall time while the simulator runs on
+# simulation time, and every trajectory finishes at the wrong moment for
+# reasons that are very hard to see.
+#
+# Joint states and commands do NOT appear here: gz_ros2_control publishes
+# them through ros2_control directly, so bridging them would create a
+# second, conflicting source of the same data.
+- ros_topic_name: "/clock"
+  gz_topic_name: "/clock"
+  ros_type_name: "rosgraph_msgs/msg/Clock"
+  gz_type_name: "gz.msgs.Clock"
+  direction: GZ_TO_ROS

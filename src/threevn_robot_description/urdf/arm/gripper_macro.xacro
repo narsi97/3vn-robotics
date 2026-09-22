@@ -1,0 +1,69 @@
+<?xml version="1.0"?>
+<!--
+  Two-finger parallel gripper.
+
+  The right finger follows the left through the URDF <mimic> tag rather
+  than being commanded independently. Both mock_components and
+  gz_ros2_control parse <mimic>, so one command interface drives both
+  jaws - which is what a real single-servo gripper actually does.
+  Consequently the right finger gets NO entry in the ros2_control block.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:macro name="threevn_prismatic_joint" params="name prefix">
+    <xacro:property name="j" value="${cfg['joints'][name]}"/>
+    <joint name="${prefix}${name}" type="prismatic">
+      <parent link="${prefix}${j['parent']}"/>
+      <child  link="${prefix}${j['child']}"/>
+      <origin xyz="${j['origin']['xyz'][0]} ${j['origin']['xyz'][1]} ${j['origin']['xyz'][2]}"
+              rpy="${j['origin']['rpy'][0]} ${j['origin']['rpy'][1]} ${j['origin']['rpy'][2]}"/>
+      <axis xyz="${j['axis'][0]} ${j['axis'][1]} ${j['axis'][2]}"/>
+      <!-- Prismatic limits are metres, so no conversion - unlike the
+           revolute joints, whose YAML is in degrees. -->
+      <limit lower="${j['limit']['lower']}"
+             upper="${j['limit']['upper']}"
+             effort="${j['limit']['effort']}"
+             velocity="${j['limit']['velocity']}"/>
+      <dynamics damping="${cfg['defaults']['joint_damping']}"
+                friction="${cfg['defaults']['joint_friction']}"/>
+      <xacro:if value="${'mimic' in j}">
+        <mimic joint="${prefix}${j['mimic']['joint']}"
+               multiplier="${j['mimic']['multiplier']}"
+               offset="${j['mimic']['offset']}"/>
+      </xacro:if>
+    </joint>
+  </xacro:macro>
+
+  <xacro:macro name="threevn_gripper" params="parent prefix">
+
+    <!-- gripper_base_mount is a frame in YAML; the gripper body hangs
+         off it so the wrist/gripper interface is one editable number. -->
+    <xacro:threevn_fixed_frame name="gripper_base_mount" prefix="${prefix}"/>
+
+    <joint name="${prefix}gripper_base_joint" type="fixed">
+      <parent link="${prefix}gripper_base_mount"/>
+      <child  link="${prefix}gripper_base_link"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </joint>
+
+    <xacro:threevn_link name="gripper_base_link" prefix="${prefix}"
+                        material="threevn_dark"
+                        origin_z="${cfg['links']['gripper_base_link']['geometry']['z'] / 2.0}"/>
+
+    <xacro:threevn_link name="gripper_left_finger_link"  prefix="${prefix}"
+                        material="threevn_light"
+                        origin_z="${cfg['links']['gripper_left_finger_link']['geometry']['z'] / 2.0}"/>
+    <xacro:threevn_prismatic_joint name="gripper_left_finger_joint" prefix="${prefix}"/>
+
+    <xacro:threevn_link name="gripper_right_finger_link" prefix="${prefix}"
+                        material="threevn_light"
+                        origin_z="${cfg['links']['gripper_right_finger_link']['geometry']['z'] / 2.0}"/>
+    <xacro:threevn_prismatic_joint name="gripper_right_finger_joint" prefix="${prefix}"/>
+
+    <!-- The point between the jaws that actually grasps. Perception and
+         planning target THIS, not tool0. -->
+    <xacro:threevn_fixed_frame name="grasp_frame" prefix="${prefix}"/>
+
+  </xacro:macro>
+
+</robot>

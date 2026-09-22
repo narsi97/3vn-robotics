@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<!--
+  Gazebo visual materials.
+
+  <gazebo> tags are ignored by URDF parsers (check_urdf, urdf_parser_py,
+  RViz), which is precisely why simulation-specific content can live in
+  the SAME description without a second file. Keeping one description for
+  all four consumers - RViz, Gazebo, TF2 and tests - is what makes a
+  green test say something about what actually runs.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+  <xacro:macro name="threevn_gazebo_material" params="link color">
+    <gazebo reference="${link}">
+      <visual>
+        <material>
+          <ambient>${color}</ambient>
+          <diffuse>${color}</diffuse>
+          <specular>0.1 0.1 0.1 1</specular>
+        </material>
+      </visual>
+    </gazebo>
+  </xacro:macro>
+
+  <xacro:macro name="threevn_gazebo_materials" params="prefix">
+    <xacro:threevn_gazebo_material link="${prefix}base_link"     color="0.12 0.13 0.16 1"/>
+    <xacro:threevn_gazebo_material link="${prefix}shoulder_link" color="0.90 0.49 0.13 1"/>
+    <xacro:threevn_gazebo_material link="${prefix}upper_arm_link" color="0.24 0.27 0.32 1"/>
+    <xacro:threevn_gazebo_material link="${prefix}forearm_link"  color="0.24 0.27 0.32 1"/>
+    <xacro:threevn_gazebo_material link="${prefix}wrist_link"    color="0.90 0.49 0.13 1"/>
+    <xacro:threevn_gazebo_material link="${prefix}gripper_base_link" color="0.12 0.13 0.16 1"/>
+    <xacro:threevn_gazebo_material link="${prefix}gripper_left_finger_link"  color="0.78 0.80 0.83 1"/>
+    <xacro:threevn_gazebo_material link="${prefix}gripper_right_finger_link" color="0.78 0.80 0.83 1"/>
+  </xacro:macro>
+</robot>

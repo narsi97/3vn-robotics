@@ -1,0 +1,66 @@
+<?xml version="1.0"?>
+<!--
+  3VN Arm - top-level robot description.
+
+  THREE arguments are the entire external interface:
+
+    params_file  the YAML holding every physical number. Swapping this
+                 file yields a different robot from identical code.
+    target       mock | gz | esp32 - selects the ros2_control hardware
+                 plugin. This is the whole hardware-abstraction seam.
+    prefix       lets these macros be instantiated more than once, or
+                 namespaced onto a mobile base, without editing anything.
+
+  The geometry is our own: primitive boxes and cylinders, no meshes.
+  That is deliberate, not a shortcut - see
+  docs/decisions/0004-own-geometry.md. In short: it keeps the project
+  clear of third-party CAD licensing, keeps collision checking analytic
+  (and therefore real-time on a CPU-only container), and keeps the repo
+  free of binary blobs.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="threevn_arm">
+
+  <xacro:arg name="params_file"
+             default="$(find threevn_robot_description)/config/threevn_arm_v1.yaml"/>
+  <xacro:arg name="target" default="mock"/>
+  <xacro:arg name="prefix" default=""/>
+
+  <!-- xacro.load_yaml is native to ROS 2 xacro. This is what makes the
+       YAML a genuine single source of truth: there is no generated URDF
+       to drift out of sync, and no code generator to run.
+
+       Trap worth knowing: CMake's xacro_add_files() does NOT work with
+       xacro.load_yaml() (ros/xacro#298). Expansion therefore happens at
+       LAUNCH and TEST time only; CMakeLists.txt installs directories and
+       nothing else. -->
+  <xacro:property name="cfg" value="${xacro.load_yaml('$(arg params_file)')}"/>
+  <xacro:property name="prefix" value="$(arg prefix)"/>
+  <xacro:property name="min_inertia" value="${cfg['defaults']['min_inertia']}"/>
+
+  <xacro:include filename="$(find threevn_robot_description)/urdf/common/inertials.xacro"/>
+  <xacro:include filename="$(find threevn_robot_description)/urdf/common/materials.xacro"/>
+  <xacro:include filename="$(find threevn_robot_description)/urdf/arm/arm_macro.xacro"/>
+  <xacro:include filename="$(find threevn_robot_description)/urdf/arm/gripper_macro.xacro"/>
+  <xacro:include filename="$(find threevn_robot_description)/urdf/arm/sensor_mounts.xacro"/>
+  <xacro:include filename="$(find threevn_robot_description)/urdf/ros2_control/arm.ros2_control.xacro"/>
+  <xacro:include filename="$(find threevn_robot_description)/urdf/gazebo/materials.gazebo.xacro"/>
+
+  <!-- The kinematic root. Zero inertia, pure reference frame: it is the
+       projection of the robot onto the floor, and in Phase 11 it becomes
+       the attachment point to a mobile base. -->
+  <link name="${prefix}base_footprint"/>
+
+  <xacro:threevn_arm            parent="${prefix}base_footprint" prefix="${prefix}"/>
+  <xacro:threevn_gripper        parent="${prefix}wrist_link"     prefix="${prefix}"/>
+  <xacro:threevn_sensor_mounts                                   prefix="${prefix}"/>
+  <xacro:threevn_arm_ros2_control                                prefix="${prefix}"/>
+  <!-- Gazebo visual materials are emitted ONLY for the simulator target.
+       They are inert on real hardware (URDF parsers ignore <gazebo>), but
+       a build destined for a physical robot should contain no simulator
+       content at all - that is the property test_ros2_control_targets.py
+       asserts, and a "harmless" exception is how such properties rot. -->
+  <xacro:if value="${'$(arg target)' == 'gz'}">
+    <xacro:threevn_gazebo_materials prefix="${prefix}"/>
+  </xacro:if>
+
+</robot>

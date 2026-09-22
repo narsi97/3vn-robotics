@@ -1,0 +1,26 @@
+# colcon
+build/
+install/
+log/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+
+# Expanded URDFs are build artifacts, never sources. The YAML plus the
+# xacro is the single source of truth; a committed URDF would drift.
+*.urdf
+!**/test/fixtures/*.urdf
+
+# Secrets and environment. Config lives in Git, state lives on the server.
+.env
+*.env
+!*.env.example
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
