@@ -94,15 +94,35 @@ jobs:
           ref="$image:sha-$(git rev-parse --short HEAD)"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
 
-          # The image must already exist. A release that builds its own
-          # artifact would ship something no test ever saw; this points at
-          # the image docker.yml already built and verified.
-          if ! docker manifest inspect "$ref" > /tmp/manifest.json 2>/dev/null; then
-            echo "::error::$ref is not in the registry."
-            echo "Docker builds and verifies the image on push to main."
-            echo "Tag a commit that has already been through it."
-            exit 1
-          fi
+          # A release must not build its own artifact: that would ship
+          # something no test ever saw. This points at the image
+          # docker.yml already built and verified.
+          #
+          # Wait for it, rather than demanding it already be there.
+          #
+          # `git push origin main --tags` sends both refs at once, so
+          # Docker (on main) and this workflow (on the tag) start
+          # together and this one loses: the image for this commit is
+          # still building. Failing immediately made tagging a release a
+          # two-step ritual - push main, wait, push the tag - or a
+          # guaranteed red run and a manual re-run, which is how v0.10.0
+          # went.
+          #
+          # Ten minutes covers a cold multi-arch build on native runners.
+          # It is a wait, not a retry of something that failed: if the
+          # image never appears, this still fails with the same message.
+          deadline=$(( SECONDS + 600 ))
+          until docker manifest inspect "$ref" > /tmp/manifest.json 2>/dev/null; do
+            if (( SECONDS >= deadline )); then
+              echo "::error::$ref is not in the registry after 10 minutes."
+              echo "Docker builds and verifies the image on push to main."
+              echo "Tag a commit that has already been through it, and"
+              echo "check whether the Docker workflow for this commit failed."
+              exit 1
+            fi
+            echo "waiting for $ref to be published ($SECONDS s elapsed)"
+            sleep 20
+          done
           {
             echo 'digests<<EOF'
             jq -r '.manifests[]
