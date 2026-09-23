@@ -59,6 +59,43 @@ services:
       retries: 6
     command: ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
 
+  # The image that ships to a robot. Not started by default: `make up`
+  # brings up the dev container, and running both would put two control
+  # stacks on one ROS graph.
+  #
+  #   docker compose -f docker/compose.yml --profile runtime up runtime
+  #
+  # TARGET picks the hardware backend. esp32 needs a real device passed
+  # through with --device, which Docker Desktop on macOS cannot do - see
+  # docs/firmware.md.
+  runtime:
+    profiles: ["runtime"]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: runtime
+      args:
+        THREEVN_GIT_COMMIT: "${THREEVN_GIT_COMMIT:-unknown}"
+        THREEVN_GIT_BRANCH: "${THREEVN_GIT_BRANCH:-unknown}"
+        THREEVN_BUILD_TIME: "${THREEVN_BUILD_TIME:-unknown}"
+    image: threevn-robotics-runtime:local
+    container_name: threevn-runtime
+    init: true
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8108:8107"          # dashboard, distinct from dev's 8107
+    environment:
+      ROS_DOMAIN_ID: "43"
+      ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
+      THREEVN_TARGET: "${TARGET:-mock}"
+    command:
+      - ros2
+      - launch
+      - threevn_bringup
+      - robot.launch.py
+      - "target:=${TARGET:-mock}"
+
+
 volumes:
   build:
   install:

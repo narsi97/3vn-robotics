@@ -12,8 +12,8 @@ One system that evolves. Not twelve disconnected tutorials.
 | 3 | ROS 2 control runtime, dashboard | **done** |
 | 4 | Full automated test layers | **done** |
 | 5 | ESP32 firmware + `Esp32SystemInterface` | **done** (software) |
-| 6 | Docker runtime images | next |
-| 7 | CI/CD pipelines | |
+| 6 | Docker runtime images | **done** |
+| 7 | CI/CD pipelines | next |
 | 8 | VPS deployment | |
 | 9 | Monitoring (OpenTelemetry → self-hosted stack) | |
 | 10 | Mobile base | |

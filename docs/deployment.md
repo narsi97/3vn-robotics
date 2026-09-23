@@ -57,6 +57,46 @@ stream looks exactly like a frozen dashboard.
 robot is not on the VPS. What lands on the VPS in Phase 8 is telemetry
 ingestion and a remote view, not this node.
 
+## Images and rollback
+
+The runtime image is published to GHCR on every push to `main`:
+
+```
+ghcr.io/narsi97/3vn-robotics:latest        moves
+ghcr.io/narsi97/3vn-robotics:sha-<short>   immutable
+ghcr.io/narsi97/3vn-robotics:v1.2.3        on a release tag
+```
+
+Built for **linux/amd64 and linux/arm64**, so the same tag runs on a mini
+PC or on a Raspberry Pi beside the arm, natively either way.
+
+### Rolling back is a pull
+
+```bash
+docker pull ghcr.io/narsi97/3vn-robotics:sha-b708737
+docker stop threevn-runtime && docker rm threevn-runtime
+docker run -d --name threevn-runtime --restart unless-stopped \
+  --device /dev/ttyUSB0 \
+  -p 127.0.0.1:8107:8107 \
+  ghcr.io/narsi97/3vn-robotics:sha-b708737
+```
+
+That is the whole procedure, and it is deliberate. Spec §22 requires that
+returning to a previous version never depends on rebuilding: **if the only
+way back is a successful build, you do not have a rollback, you have a
+hope.** The `sha-` tags are immutable, so the version you roll back to is
+the version that was tested.
+
+`docker inspect` answers what a container is running without starting
+anything, because the image carries OCI labels:
+
+```bash
+docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' \
+  ghcr.io/narsi97/3vn-robotics:latest
+```
+
+and the running robot answers the same question at `/api/version`.
+
 ## Versioning
 
 Every deployment must expose:

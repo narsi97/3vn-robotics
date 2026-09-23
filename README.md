@@ -162,7 +162,7 @@ Full audit: [`THIRD_PARTY.md`](THIRD_PARTY.md) ·
 
 ## Status
 
-**Phases 0–5 complete** (Phase 5 in software; no arm has been built yet).
+**Phases 0–6 complete** (Phase 5 in software; no arm has been built yet).
 
 - The robot description expands for all three hardware targets.
 - The arm spawns in Gazebo Harmonic, with all three controllers active
@@ -209,7 +209,15 @@ make acceptance  # the full sequence + report
 attached — the honest state until an arm exists. See
 [`docs/firmware.md`](docs/firmware.md).
 
-Phase 6 is the runtime Docker images.
+- A runtime image that ships to the robot with **no simulator in it** —
+  4.96 GB dev → **1.67 GB** runtime — published multi-arch to GHCR and
+  rollback-able by immutable `sha-` tag.
+
+```bash
+make runtime-verify   # asserts it is clean AND that it runs
+```
+
+Phase 7 is the rest of the CI/CD pipeline.
 
 See [`docs/roadmap.md`](docs/roadmap.md) for the 15-phase plan and
 [`docs/risks.md`](docs/risks.md) for what is known to be fragile.

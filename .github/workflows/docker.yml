@@ -1,0 +1,153 @@
+# Build and publish the runtime image.
+#
+# The image that ships to a robot is built here, tagged immutably by
+# commit, and pushed to GHCR (free for public repositories).
+#
+# Rollback is the reason for the sha- tags. Spec section 22 requires that
+# returning to a previous version never depends on rebuilding: if the
+# only way back is a successful build, you do not have a rollback, you
+# have a hope. Re-pointing a robot at ghcr.io/...:sha-<old> is a pull.
+name: Docker
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    paths:
+      - 'docker/**'
+      - 'src/**'
+      - '.github/workflows/docker.yml'
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ${{ github.repository }}
+
+concurrency:
+  group: docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  runtime:
+    name: runtime image
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      # Only pushes need credentials. A pull request from a fork has no
+      # write token, so it builds and verifies without publishing.
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=short
+            type=semver,pattern=v{{version}}
+            type=ref,event=pr
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: runtime
+          # arm64 for a Raspberry Pi or SBC beside the arm; amd64 for a
+          # mini PC or a workstation. Both native manifests exist
+          # upstream, so nothing is emulated at runtime.
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            THREEVN_GIT_COMMIT=${{ github.sha }}
+            THREEVN_GIT_BRANCH=${{ github.ref_name }}
+            THREEVN_BUILD_TIME=${{ github.event.repository.updated_at }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The architectural claim, checked on the artifact rather than in
+      # the source. threevn_bringup and threevn_hardware have no
+      # simulator dependency, which is what lets the robot image drop
+      # Gazebo entirely - and a dependency added by accident would
+      # silently put it back.
+      - name: The runtime image must contain no simulator
+        run: |
+          docker build -f docker/Dockerfile --target runtime -t verify:local .
+          docker run --rm verify:local bash -lc '
+            set -e
+            fail=0
+            for pkg in ros-jazzy-ros-gz-sim ros-jazzy-gz-sim-vendor \
+                       ros-jazzy-gz-ros2-control ros-jazzy-ros-gz-bridge; do
+              if dpkg -l 2>/dev/null | grep -q " $pkg "; then
+                echo "FAIL: $pkg is in the robot image"; fail=1
+              fi
+            done
+            # GPL/LGPL components live only in the dev stage. Nothing
+            # distributed may carry them -- see THIRD_PARTY.md.
+            for pkg in x11vnc websockify novnc; do
+              if dpkg -l 2>/dev/null | grep -q " $pkg "; then
+                echo "FAIL: $pkg is in a distributed image"; fail=1
+              fi
+            done
+            test -d /opt/threevn/share/threevn_sim && {
+              echo "FAIL: threevn_sim was installed into the robot image"; fail=1; }
+            exit $fail
+          '
+          echo "runtime image carries no simulator"
+
+      - name: It must also actually run
+        # An image that is small and clean but cannot start the control
+        # stack is worse than a large one that can.
+        run: |
+          docker run --rm -d --name verify \
+            -e ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST \
+            verify:local \
+            ros2 launch threevn_bringup robot.launch.py target:=mock
+          for i in $(seq 1 30); do
+            if docker exec verify bash -lc \
+                 'ros2 control list_controllers 2>/dev/null' \
+               | grep -q 'arm_controller.*active'; then
+              echo "control stack active"
+              docker exec verify bash -lc \
+                'ros2 run threevn_control run_scenario home'
+              docker rm -f verify
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "the runtime image never reached an active control stack"
+          docker logs verify | tail -30
+          docker rm -f verify
+          exit 1
+
+      - name: Report what was published
+        if: github.event_name != 'pull_request'
+        run: |
+          {
+            echo "### Runtime image published"
+            echo ""
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+            echo ""
+            echo "Roll a robot back with the immutable \`sha-\` tag - a pull, never a rebuild."
+          } >> "$GITHUB_STEP_SUMMARY"

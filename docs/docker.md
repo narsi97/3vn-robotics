@@ -1,20 +1,54 @@
 # Docker
 
-One image, three stages.
+One Dockerfile, six stages, two shipping images.
 
 ```
-base   ROS 2 Jazzy + Gazebo Harmonic. No GUI. Nothing optional.
-  ↓
-ci     + pytest, ament linters, Mesa software GL. What CI runs.
-  ↓
-dev    + RViz, Xvfb, x11vnc, noVNC, supervisor. What you run.
+base      ROS 2 Jazzy + ros2_control. No simulator, no GUI, no build tools.
+  ├── simdeps   + Gazebo Harmonic
+  │     ├── ci    + pytest, linters, Mesa       what CI runs
+  │     │     └── dev   + RViz, Xvfb, noVNC     what you run       4.96 GB
+  │     └── builder + a built workspace, robot packages only
+  └── runtime   base + that build               what ships         1.67 GB
 ```
 
-Splitting this way means CI tests the same base layers you develop on,
-without paying for a GUI stack it never uses. It also keeps the future
-robot runtime image clean: build from `ci` or lower and it contains no
-`x11vnc` (GPL-2.0) or `websockify` (LGPL-3.0) — see
+## The robot image carries no simulator
+
+`runtime` inherits from `base`, which never installs Gazebo. That is only
+possible because `threevn_bringup` and `threevn_hardware` genuinely do
+not depend on it — the architectural rule
+`test_package_dependencies.py` has enforced since Phase 1.
+
+The `builder` stage makes it concrete:
+
+```
+colcon build --merge-install \
+  --packages-up-to threevn_bringup threevn_hardware threevn_dashboard
+```
+
+`threevn_sim` is simply not built. **4.96 GB → 1.67 GB**, a third of the
+size, and `make runtime-verify` asserts the simulator is absent rather
+than trusting it.
+
+It also settles a licence question. `x11vnc` (GPL-2.0) and `websockify`
+(LGPL-3.0) exist **only** in `dev`. Nothing distributed to a robot
+contains them — asserted in the same check. See
 [`../THIRD_PARTY.md`](../THIRD_PARTY.md).
+
+### One honest caveat
+
+`hardware_interface` depends on `sdformat_urdf`, which pulls about 8 MB
+of Gazebo *vendor libraries* and the generic `gz` CLI. So `gz` exists in
+the runtime image — but `gz sim` does not, and neither does
+`gz_ros2_control` or any bridge. "No simulator" is accurate; "no Gazebo
+code at all" would not be.
+
+## The runtime user needs a writable home
+
+Unlike the other 3VN app images, this one creates one. `ros2 launch`
+builds a log directory under `$HOME/.ros` before it will start; with
+`--no-create-home` it dies inside `launch.logging.get_logger()` with a
+traceback that never mentions permissions. `ROS_LOG_DIR` is set
+explicitly so the location is predictable.
 
 ## Where Gazebo comes from, and the trap
 

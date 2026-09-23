@@ -1,18 +1,28 @@
 # syntax=docker/dockerfile:1.7
 #
-# 3VN Robotics development image.
+# 3VN Robotics images.
 #
 # Multi-arch by construction. ros:jazzy-ros-base publishes a native
-# linux/arm64 manifest, so this builds natively on an Apple Silicon Mac
-# AND natively on x86 CI runners. Do NOT add --platform here: pinning one
-# architecture forces QEMU emulation on the other, which turns a 3-minute
-# colcon build into a 30-minute one.
+# linux/arm64 manifest, so this builds natively on an Apple Silicon Mac,
+# natively on x86 CI, and natively on an arm64 SBC next to the robot. Do
+# NOT add --platform: pinning one architecture forces QEMU on the others.
 #
-# Stages:
-#   base -> ROS 2 Jazzy + Gazebo Harmonic. No GUI. Nothing optional.
-#   ci   -> base + test tooling + software GL. What CI runs.
-#   dev  -> ci + RViz + a virtual display served over noVNC. What you run.
+#   base     ROS 2 + ros2_control. No simulator, no GUI, no build tools.
+#   simdeps  base + Gazebo Harmonic. Only things that simulate need this.
+#   ci       simdeps + test tooling + software GL. What CI runs.
+#   dev      ci + RViz + a virtual display over noVNC. What you run.
+#   builder  simdeps + a built workspace, robot packages only.
+#   runtime  base + that build. What ships to the robot.
 #
+# The split is not cosmetic. `runtime` inherits from `base`, which has no
+# Gazebo -- and that is only possible because threevn_bringup and
+# threevn_hardware genuinely do not depend on it. The architecture rule
+# enforced since Phase 1 by test_package_dependencies.py is what lets the
+# robot image drop the simulator entirely.
+#
+# It also settles a licence question: x11vnc (GPL-2.0) and websockify
+# (LGPL-3.0) exist ONLY in `dev`. Nothing distributed to a robot contains
+# them. See THIRD_PARTY.md.
 ARG ROS_DISTRO=jazzy
 
 # ---------------------------------------------------------------- base --
@@ -22,18 +32,8 @@ ENV ROS_DISTRO=${ROS_DISTRO} \
     DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8
 
-# Gazebo Harmonic arrives through the ROS *vendor* packages on
-# packages.ros.org (gz_sim_vendor, gz_tools_vendor, ...), which are the
-# officially paired Harmonic build for Jazzy.
-#
-# We deliberately do NOT add packages.osrfoundation.org. Mixing the two
-# repositories is the standard way to end up with two incompatible sets of
-# libgz-*.so; apt resolves it happily and the failure surfaces much later
-# as a `gz sim` segfault or a gz_ros2_control symbol-not-found. CI asserts
-# that nothing gz-* resolves from osrfoundation. See docs/docker.md.
+# Everything the ROBOT needs, and nothing else.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      ros-${ROS_DISTRO}-ros-gz \
-      ros-${ROS_DISTRO}-gz-ros2-control \
       ros-${ROS_DISTRO}-ros2-control \
       ros-${ROS_DISTRO}-ros2-controllers \
       ros-${ROS_DISTRO}-xacro \
@@ -46,31 +46,46 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/*
 
 # `docker compose exec` bypasses ENTRYPOINT, so every `bash -lc` the
-# Makefile runs has to find ROS on its own. A profile.d script is the only
-# thing that covers interactive shells and non-interactive login shells
-# alike. Without this, `make build` works and `make shell` mysteriously
-# does not (or vice versa).
+# Makefile runs has to find ROS on its own. A profile.d script covers
+# both interactive and non-interactive login shells; without it,
+# `make build` works and `make shell` mysteriously does not.
 RUN printf '%s\n' \
   "source /opt/ros/${ROS_DISTRO}/setup.bash" \
   '[ -f /ws/install/setup.bash ] && source /ws/install/setup.bash' \
   'true' \
   > /etc/profile.d/10-ros.sh
 
+# ------------------------------------------------------------- simdeps --
+FROM base AS simdeps
+ARG ROS_DISTRO
+
+# Gazebo Harmonic arrives through the ROS *vendor* packages on
+# packages.ros.org, which are the officially paired Harmonic build for
+# Jazzy. We deliberately do NOT add packages.osrfoundation.org: mixing
+# the two repositories yields two incompatible sets of libgz-*.so, which
+# apt resolves happily and which surfaces much later as a `gz sim`
+# segfault rather than an apt error. CI asserts this.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ros-${ROS_DISTRO}-ros-gz \
+      ros-${ROS_DISTRO}-gz-ros2-control \
+ && rm -rf /var/lib/apt/lists/*
+
 # ------------------------------------------------------------------ ci --
-FROM base AS ci
+FROM simdeps AS ci
 ARG ROS_DISTRO
 RUN apt-get update && apt-get install -y --no-install-recommends \
       python3-pytest python3-pytest-cov python3-numpy python3-yaml \
       ros-${ROS_DISTRO}-ament-lint-auto \
       ros-${ROS_DISTRO}-ament-lint-common \
       ros-${ROS_DISTRO}-ament-cmake-pytest \
+      ros-${ROS_DISTRO}-ament-cmake-gmock \
       ros-${ROS_DISTRO}-launch-testing \
       ros-${ROS_DISTRO}-launch-testing-ros \
       libgl1-mesa-dri \
  && rm -rf /var/lib/apt/lists/*
 
-# Mesa software rendering. Required for `gz sim --headless-rendering` to
-# find an OpenGL implementation when there is no GPU and no X server.
+# Mesa software rendering, so `gz sim --headless-rendering` finds an
+# OpenGL implementation with no GPU and no X server.
 ENV LIBGL_ALWAYS_SOFTWARE=1 \
     GALLIUM_DRIVER=llvmpipe
 
@@ -86,7 +101,7 @@ ARG ROS_DISTRO
 ARG UID=10001
 
 # RViz2 needs a real X server with OpenGL 3.3+. Xvfb + Mesa llvmpipe
-# provides GL 4.5, which is why this works where XQuartz (indirect GLX,
+# gives GL 4.5, which is why this works where XQuartz (indirect GLX,
 # capped near 1.4) does not -- see ros2/rviz#929 and ADR-0002.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-${ROS_DISTRO}-rviz2 \
@@ -96,19 +111,110 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/* \
  && ln -sf vnc.html /usr/share/novnc/index.html
 
-# House style is a non-root numeric UID. Adapted for a dev container:
+# Non-root numeric UID, per house style. Adapted for a dev container:
 # unlike the app images this one needs a WRITABLE HOME, because colcon,
 # rviz and the gz fuel cache all write there -- so `-H` would be wrong.
-# UID is a build arg so a Linux host can match the checkout's owner and
-# avoid root-owned files appearing in the bind-mounted source tree.
 RUN groupadd -g ${UID} dev \
  && useradd -m -u ${UID} -g ${UID} -s /bin/bash dev \
  && mkdir -p /ws/src /ws/build /ws/install /ws/log \
  && chown -R ${UID}:${UID} /ws
 
 COPY docker/supervisord.conf /etc/supervisor/supervisord.conf
-
 USER ${UID}
 WORKDIR /ws
 ENV HOME=/home/dev \
     DISPLAY=:1
+
+# ------------------------------------------------------------- builder --
+FROM simdeps AS builder
+ARG ROS_DISTRO
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3-colcon-common-extensions python3-numpy python3-yaml \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /ws
+COPY src /ws/src
+
+# ONLY the packages the robot runs.
+#
+# threevn_sim is excluded deliberately, and excluding it is what lets the
+# runtime image drop Gazebo. It works because threevn_bringup and
+# threevn_hardware have no simulator dependency -- the property
+# test_package_dependencies.py has been asserting since Phase 1.
+#
+# --merge-install produces one flat prefix rather than one per package,
+# which is smaller and simpler to copy into the runtime stage.
+RUN . /opt/ros/${ROS_DISTRO}/setup.sh && \
+    colcon build \
+      --merge-install \
+      --packages-up-to threevn_bringup threevn_hardware threevn_dashboard \
+      --cmake-args -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+
+# ------------------------------------------------------------- runtime --
+FROM base AS runtime
+ARG ROS_DISTRO
+ARG UID=10001
+
+# Version identity, injected at build time. The dashboard reports these
+# at /api/version, which is what ties an observed behaviour back to a
+# commit. Defaults are honest rather than plausible: a robot that cannot
+# say what it is running should say so.
+ARG THREEVN_GIT_COMMIT=unknown
+ARG THREEVN_GIT_BRANCH=unknown
+ARG THREEVN_BUILD_TIME=unknown
+ENV THREEVN_GIT_COMMIT=${THREEVN_GIT_COMMIT} \
+    THREEVN_GIT_BRANCH=${THREEVN_GIT_BRANCH} \
+    THREEVN_DEPLOYED_AT=${THREEVN_BUILD_TIME} \
+    THREEVN_ROBOT_MODEL=threevn_arm_v1 \
+    THREEVN_PROFILE=threevn_arm_v1
+
+# OCI labels so `docker inspect` answers the same question as
+# /api/version, without starting anything.
+LABEL org.opencontainers.image.source="https://github.com/narsi97/3vn-robotics" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.revision="${THREEVN_GIT_COMMIT}" \
+      org.opencontainers.image.created="${THREEVN_BUILD_TIME}" \
+      org.opencontainers.image.title="3VN Robotics runtime" \
+      org.opencontainers.image.description="ROS 2 control stack for the 3VN arm. No simulator."
+
+# curl for the healthcheck only. No build tools, no test tooling, no GUI.
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /ws/install /opt/threevn
+
+RUN printf '%s\n' \
+  "source /opt/ros/${ROS_DISTRO}/setup.bash" \
+  'source /opt/threevn/setup.bash' \
+  'true' \
+  > /etc/profile.d/20-threevn.sh
+
+# Non-root, numeric UID -- house style. But UNLIKE the other 3VN app
+# images this one needs a writable HOME: ros2 launch creates a log
+# directory under $HOME/.ros before it will start, and with
+# --no-create-home it dies in launch.logging.get_logger() with a
+# traceback that never mentions permissions.
+#
+# ROS_LOG_DIR is set explicitly so the location is predictable rather
+# than dependent on how HOME happens to resolve.
+RUN adduser --disabled-password --gecos "" --uid ${UID} robot \
+ && mkdir -p /home/robot/.ros/log \
+ && chown -R ${UID}:${UID} /home/robot
+ENV HOME=/home/robot \
+    ROS_LOG_DIR=/home/robot/.ros/log
+USER ${UID}
+WORKDIR /opt/threevn
+
+# 127.0.0.1, never localhost. The dashboard binds IPv4 and a container's
+# /etc/hosts resolves localhost to ::1 first, so a localhost healthcheck
+# fails against a perfectly healthy service.
+#
+# /readyz, not /healthz: liveness only says this process answers.
+# Readiness says the ROBOT is usable, which is what an orchestrator
+# should restart or route on.
+HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=5 \
+  CMD curl -fsS http://127.0.0.1:8107/readyz || exit 1
+
+COPY docker/runtime-entrypoint.sh /usr/local/bin/entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+CMD ["ros2", "launch", "threevn_bringup", "robot.launch.py", "target:=esp32"]

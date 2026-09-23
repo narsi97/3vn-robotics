@@ -47,6 +47,9 @@ help:
 	@echo "  make acceptance  Full end-to-end run + report"
 	@echo "  make stop      Stop any running robot/sim stack"
 	@echo ""
+	@echo "  make runtime         Build the robot image (no simulator)"
+	@echo "  make runtime-verify  Prove it is clean and that it runs"
+	@echo ""
 	@echo "  make clean     Remove build/install/log"
 	@echo "  make nuke      clean + drop the image and volumes"
 	@echo ""
@@ -174,6 +177,26 @@ acceptance: build
 acceptance-report:
 	@docker compose -f docker/compose.yml cp $(SVC):/ws/log/acceptance.md ./acceptance.md 2>/dev/null \
 	  && echo "  -> ./acceptance.md" || echo "  no report yet; run 'make acceptance' first"
+
+
+# The image that ships to a robot. Built from `base`, which has no
+# Gazebo -- possible only because threevn_bringup and threevn_hardware
+# genuinely do not depend on it.
+runtime:
+	docker build -f docker/Dockerfile --target runtime \
+	  --build-arg THREEVN_GIT_COMMIT=$(shell git rev-parse HEAD 2>/dev/null || echo unknown) \
+	  --build-arg THREEVN_GIT_BRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown) \
+	  --build-arg THREEVN_BUILD_TIME=$(shell date -u +%Y-%m-%dT%H:%M:%SZ) \
+	  -t threevn-robotics-runtime:local .
+	@echo ""
+	@docker images threevn-robotics-runtime:local --format '  built: {{.Repository}}:{{.Tag}}  {{.Size}}'
+	@echo ""
+
+# Asserts the robot image carries no simulator and no GPL/LGPL tooling,
+# then proves it can actually start the control stack. Small and clean
+# but unable to run would be worse than large and working.
+runtime-verify: runtime
+	@bash scripts/verify_runtime.sh
 
 
 stop: up
