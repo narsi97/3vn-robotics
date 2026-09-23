@@ -170,7 +170,7 @@ jobs:
         if: matrix.arch == 'amd64'
         run: |
           mkdir -p artifacts
-          docker run --rm -v "$PWD/src:/ws/src" -v "$PWD/firmware:/ws/firmware:ro" -v "$PWD/VERSION:/ws/VERSION:ro" -v "$PWD/artifacts:/out" -w /ws \
+          docker run --rm -v "$PWD/src:/ws/src" -v "$PWD/firmware:/ws/firmware:ro" -v "$PWD/VERSION:/ws/VERSION:ro" -v "$PWD/scripts:/ws/scripts:ro" -v "$PWD/artifacts:/out" -w /ws \
             threevn-robotics-ci:local \
             bash -lc '
               colcon build --symlink-install > /dev/null
@@ -178,7 +178,8 @@ jobs:
               S=/ws/install/threevn_robot_description/share/threevn_robot_description
               for p in "$S"/config/threevn_*.yaml; do
                 n=$(basename "$p" .yaml)
-                ros2 run xacro xacro "$S/urdf/threevn_arm.urdf.xacro" \
+                # Each profile through its own robot family entry point.
+                ros2 run xacro xacro "$S/urdf/$(python3 /ws/scripts/profile_entry.py "$p")" \
                   params_file:="$p" target:=mock > "/out/${n}.urdf"
               done
             '
