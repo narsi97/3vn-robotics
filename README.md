@@ -162,7 +162,7 @@ Full audit: [`THIRD_PARTY.md`](THIRD_PARTY.md) ·
 
 ## Status
 
-**Phases 0–13 complete** (Phase 5 in software; no arm has been built yet).
+**Phases 0–14 complete** (Phase 5 in software; no arm has been built yet).
 
 - The robot description expands for all three hardware targets.
 - The arm spawns in Gazebo Harmonic, with all three controllers active
@@ -265,8 +265,16 @@ make perception
 make dataset && make dataset-describe
 ```
 
-Phase 14 is machine learning. Nav2 is still outstanding from Phase 11 —
-see [docs/roadmap.md](docs/roadmap.md).
+- A fitted model that beats the closed-form geometry tenfold, for a
+  reason measured before the model was written — and a test set the
+  docs admit is optimistic.
+
+```bash
+make train
+```
+
+Phase 15 is MLOps. Nav2 is still outstanding from Phase 11 — see
+[docs/roadmap.md](docs/roadmap.md).
 
 See [`docs/roadmap.md`](docs/roadmap.md) for the 15-phase plan and
 [`docs/risks.md`](docs/risks.md) for what is known to be fragile.

@@ -212,6 +212,10 @@ dataset-describe: build
 	$(RUN) "ros2 run threevn_data describe"
 
 
+train: build
+	$(RUN) "$(GITENV) ros2 run threevn_ml train"
+
+
 robot: build stop
 	@$(RUN) "test -e $(ESP32_PORT)" 2>/dev/null || { \
 	  echo ""; \

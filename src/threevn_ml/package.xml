@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>threevn_ml</name>
+  <version>0.12.0</version>
+  <description>
+    Learning the target's position, and checking whether it was worth it.
+
+    The task already has a closed-form solution: Phase 12 deprojects a
+    colour blob and lands within 30 mm, measured. This package exists to
+    answer whether a model fitted to data does better, and to make the
+    answer falsifiable - same test set, same metric, baseline reported
+    alongside every model rather than left implied.
+
+    ARCHITECTURAL RULE: never depends on Gazebo. It reads a dataset
+    directory, which a simulated robot and a real one both produce.
+  </description>
+  <maintainer email="61094479+narsi97@users.noreply.github.com">3VN Systems</maintainer>
+  <license>Apache-2.0</license>
+
+  <exec_depend>threevn_data</exec_depend>
+  <exec_depend>threevn_perception</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
