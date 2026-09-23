@@ -1,0 +1,185 @@
+# Deploy a published image to a physical robot.
+#
+# MANUAL ONLY, and gated on approval. Spec section 13 is explicit: do not
+# deploy to hardware automatically. A robot that moves on every merged
+# pull request is a hazard, not a pipeline - the thing being updated has
+# motors, and nobody may be standing next to it.
+#
+# The gate is a GitHub Environment named `robot`, configured with a
+# required reviewer. Approval is a human looking at a specific image
+# digest and a specific robot and saying yes.
+#
+# HONEST STATUS: no physical arm exists. This workflow is the mechanism,
+# not a thing that has ever run against hardware. It will fail at the SSH
+# step because there is no host to reach, and that is the correct
+# behaviour - a deploy pipeline that pretends to succeed against nothing
+# is worse than one that admits it.
+name: Hardware deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to deploy (e.g. sha-b708737 or v0.7.0)'
+        required: true
+        type: string
+      robot_id:
+        description: 'Which robot'
+        required: true
+        default: robot-001
+        type: string
+      confirm:
+        description: 'Type DEPLOY to confirm the arm may move'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  preflight:
+    name: preflight
+    runs-on: ubuntu-24.04
+    outputs:
+      digest: ${{ steps.resolve.outputs.digest }}
+    steps:
+      - name: The confirmation must be typed
+        if: inputs.confirm != 'DEPLOY'
+        run: |
+          echo "::error::confirmation not given."
+          echo "Type DEPLOY to acknowledge that a physical arm may move."
+          exit 1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve the tag to an immutable digest
+        id: resolve
+        run: |
+          set -euo pipefail
+          ref="ghcr.io/${{ github.repository }}:${{ inputs.image_tag }}"
+          if ! docker manifest inspect "$ref" > /tmp/m.json 2>/dev/null; then
+            echo "::error::$ref is not in the registry"
+            exit 1
+          fi
+          # Deploy by digest, never by tag. A tag can move between the
+          # approval and the deploy; a digest cannot. What the reviewer
+          # approved is what lands.
+          digest=$(docker manifest inspect -v "$ref" \
+                   | jq -r 'if type=="array" then .[0].Descriptor.digest
+                            else .Descriptor.digest end')
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Ready to deploy"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| robot | \`${{ inputs.robot_id }}\` |"
+            echo "| tag | \`${{ inputs.image_tag }}\` |"
+            echo "| digest | \`$digest\` |"
+            echo ""
+            echo "Awaiting approval. The arm may move when this proceeds."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Architectures available
+        run: |
+          jq -r '.manifests[]
+                 | select(.platform.architecture != "unknown")
+                 | "  \(.platform.os)/\(.platform.architecture)"' /tmp/m.json
+
+  deploy:
+    name: deploy to ${{ inputs.robot_id }}
+    runs-on: ubuntu-24.04
+    needs: preflight
+    # THE GATE. This environment requires a reviewer; the job waits here
+    # until a human approves it. Configure required reviewers under
+    # Settings > Environments > robot.
+    environment:
+      name: robot
+      url: https://github.com/${{ github.repository }}
+    steps:
+      - name: Deploy
+        env:
+          DIGEST: ${{ needs.preflight.outputs.digest }}
+          ROBOT_HOST: ${{ secrets.ROBOT_HOST }}
+          ROBOT_USER: ${{ secrets.ROBOT_USER }}
+          SSH_KEY: ${{ secrets.ROBOT_SSH_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${ROBOT_HOST:-}" ]; then
+            echo "::error::ROBOT_HOST is not set."
+            echo ""
+            echo "No physical robot exists yet. This workflow is the"
+            echo "mechanism, gated and ready, but it has never run against"
+            echo "hardware. Failing here is correct: a deploy pipeline that"
+            echo "reports success against nothing is worse than one that"
+            echo "says it cannot proceed."
+            echo ""
+            echo "When an arm exists, set these repository secrets:"
+            echo "  ROBOT_HOST     hostname or IP on the robot's network"
+            echo "  ROBOT_USER     ssh user"
+            echo "  ROBOT_SSH_KEY  private key for that user"
+            exit 1
+          fi
+
+          install -m 600 /dev/null /tmp/deploy_key
+          printf '%s' "$SSH_KEY" > /tmp/deploy_key
+
+          # Pull FIRST, restart second. Pulling into a stopped robot means
+          # a slow or failed download leaves it down; this way the running
+          # container is only replaced once its successor is on disk.
+          ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new \
+              "$ROBOT_USER@$ROBOT_HOST" bash -s <<SSH
+            set -euo pipefail
+            IMAGE="ghcr.io/${{ github.repository }}@${DIGEST}"
+
+            echo "pulling \$IMAGE"
+            docker pull "\$IMAGE"
+
+            docker rm -f threevn-runtime 2>/dev/null || true
+            docker run -d --name threevn-runtime \\
+              --restart unless-stopped \\
+              --device /dev/ttyUSB0 \\
+              -p 127.0.0.1:8107:8107 \\
+              -e THREEVN_ROBOT_ID='${{ inputs.robot_id }}' \\
+              -e THREEVN_TARGET=esp32 \\
+              "\$IMAGE"
+
+            # Readiness, not liveness. /healthz only says the process
+            # answers; /readyz says the ROBOT is usable, which is the
+            # question a deploy needs answered.
+            for i in \$(seq 1 30); do
+              if curl -fsS http://127.0.0.1:8107/readyz >/dev/null 2>&1; then
+                echo "robot is ready"
+                curl -s http://127.0.0.1:8107/api/version
+                exit 0
+              fi
+              sleep 2
+            done
+
+            echo "robot did not become ready; rolling back is a pull of the"
+            echo "previous sha- digest -- see docs/deployment.md"
+            docker logs threevn-runtime 2>&1 | tail -30
+            exit 1
+          SSH
+
+      - name: Record the deployment
+        if: always()
+        run: |
+          {
+            echo "### Deployment"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| robot | \`${{ inputs.robot_id }}\` |"
+            echo "| digest | \`${{ needs.preflight.outputs.digest }}\` |"
+            echo "| approved by | @${{ github.actor }} |"
+            echo "| result | ${{ job.status }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

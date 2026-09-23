@@ -162,7 +162,7 @@ Full audit: [`THIRD_PARTY.md`](THIRD_PARTY.md) ·
 
 ## Status
 
-**Phases 0–6 complete** (Phase 5 in software; no arm has been built yet).
+**Phases 0–7 complete** (Phase 5 in software; no arm has been built yet).
 
 - The robot description expands for all three hardware targets.
 - The arm spawns in Gazebo Harmonic, with all three controllers active
@@ -217,7 +217,11 @@ attached — the honest state until an arm exists. See
 make runtime-verify   # asserts it is clean AND that it runs
 ```
 
-Phase 7 is the rest of the CI/CD pipeline.
+- Five CI workflows: lint/test on two architectures, Gazebo integration,
+  multi-arch image publishing, releases, and a **gated** hardware deploy.
+- One source of version truth, enforced by a test.
+
+Phase 8 is VPS deployment.
 
 See [`docs/roadmap.md`](docs/roadmap.md) for the 15-phase plan and
 [`docs/risks.md`](docs/risks.md) for what is known to be fragile.

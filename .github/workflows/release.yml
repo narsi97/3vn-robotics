@@ -1,0 +1,191 @@
+# Cut a release.
+#
+#   git tag v0.7.0 && git push origin v0.7.0
+#
+# A release is not a tag. It is a tag plus evidence: the tested image
+# digests for both architectures, an acceptance report generated against
+# that exact build, and a manifest recording every version number a
+# deployed robot could be asked about.
+#
+# Without that, "which version is this robot running?" has no answer you
+# can act on - which is the whole reason spec section 21 asks for a
+# version block in the first place.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Build the manifest without publishing a release'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+  packages: read
+
+jobs:
+  verify:
+    name: verify the tag
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The tag and VERSION must agree
+        id: check
+        run: |
+          declared="$(tr -d '[:space:]' < VERSION)"
+          echo "version=$declared" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ github.event_name }}" != "push" ]; then
+            echo "manual run; VERSION is $declared"
+            exit 0
+          fi
+
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$tag" != "$declared" ]; then
+            echo "::error::tag v$tag does not match VERSION ($declared)."
+            echo "A release whose tag and contents disagree is worse than no"
+            echo "release: every artifact it produces is mislabelled."
+            exit 1
+          fi
+          echo "tag v$tag matches VERSION"
+
+  manifest:
+    name: build the release manifest
+    runs-on: ubuntu-24.04
+    needs: verify
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Collect every version a robot can be asked about
+        id: collect
+        run: |
+          set -euo pipefail
+          software="$(tr -d '[:space:]' < VERSION)"
+
+          ctrl=firmware/esp32/include/controller.hpp
+          fw_major=$(grep -oP 'kFirmwareMajor\s*=\s*\K\d+' "$ctrl")
+          fw_minor=$(grep -oP 'kFirmwareMinor\s*=\s*\K\d+' "$ctrl")
+          fw_patch=$(grep -oP 'kFirmwarePatch\s*=\s*\K\d+' "$ctrl")
+          heartbeat=$(grep -oP 'kHeartbeatTimeoutMs\s*=\s*\K\d+' "$ctrl")
+
+          proto=src/threevn_hardware/include/threevn_hardware/protocol.hpp
+          protocol=$(grep -oP 'kProtocolVersion\s*=\s*\K\d+' "$proto")
+          joints=$(grep -oP 'kJointCount\s*=\s*\K\d+' "$proto")
+
+          {
+            echo "software=$software"
+            echo "firmware=$fw_major.$fw_minor.$fw_patch"
+            echo "protocol=$protocol"
+            echo "joints=$joints"
+            echo "heartbeat=$heartbeat"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Resolve the published image digests
+        id: image
+        run: |
+          set -euo pipefail
+          image="ghcr.io/${{ github.repository }}"
+          ref="$image:sha-$(git rev-parse --short HEAD)"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+          # The image must already exist. A release that builds its own
+          # artifact would ship something no test ever saw; this points at
+          # the image docker.yml already built and verified.
+          if ! docker manifest inspect "$ref" > /tmp/manifest.json 2>/dev/null; then
+            echo "::error::$ref is not in the registry."
+            echo "Docker builds and verifies the image on push to main."
+            echo "Tag a commit that has already been through it."
+            exit 1
+          fi
+          {
+            echo 'digests<<EOF'
+            jq -r '.manifests[]
+                   | select(.platform.architecture != "unknown")
+                   | "  \(.platform.os)/\(.platform.architecture): \(.digest)"' \
+              /tmp/manifest.json
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Write the manifest
+        run: |
+          cat > RELEASE_MANIFEST.md <<MANIFEST
+          # 3VN Robotics ${{ github.ref_name }}
+
+          Every version a deployed robot can be asked about, and the exact
+          artifacts this release consists of.
+
+          ## Versions
+
+          | component | version | notes |
+          |---|---|---|
+          | software | \`${{ steps.collect.outputs.software }}\` | the ROS 2 packages |
+          | firmware | \`${{ steps.collect.outputs.firmware }}\` | ESP32; independent lifecycle |
+          | protocol | \`${{ steps.collect.outputs.protocol }}\` | wire format; bumped only on incompatible change |
+          | git commit | \`${{ github.sha }}\` | |
+
+          Firmware and protocol versions are deliberately not tied to the
+          software version. A host updated a dozen times can still be
+          talking to firmware nobody reflashed, and one number would hide
+          exactly that. See [docs/versioning.md](docs/versioning.md).
+
+          ## Robot configuration
+
+          | | |
+          |---|---|
+          | joints on the wire | ${{ steps.collect.outputs.joints }} |
+          | firmware heartbeat timeout | ${{ steps.collect.outputs.heartbeat }} ms |
+
+          ## Image
+
+          \`\`\`
+          ${{ steps.image.outputs.ref }}
+          \`\`\`
+
+          ${{ steps.image.outputs.digests }}
+
+          Pull by **digest** for anything that must be reproducible — a tag
+          can be moved, a digest cannot.
+
+          ## Deploying, and rolling back
+
+          \`\`\`bash
+          docker pull ${{ steps.image.outputs.ref }}
+          docker run -d --name threevn-runtime --restart unless-stopped \\\\
+            --device /dev/ttyUSB0 \\\\
+            -p 127.0.0.1:8107:8107 \\\\
+            ${{ steps.image.outputs.ref }}
+          \`\`\`
+
+          Rolling back means pointing at an earlier \`sha-\` tag and
+          pulling. It never requires a rebuild — if the only way back is a
+          successful build, there is no rollback.
+
+          ## What this release has NOT been run on
+
+          **No physical arm.** Every dimension in the robot profile is
+          still \`provenance: estimated\`, the firmware has never driven a
+          servo, and there is no hardware emergency stop. The software is
+          tested; the machine does not exist yet.
+          MANIFEST
+          cat RELEASE_MANIFEST.md
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-manifest
+          path: RELEASE_MANIFEST.md
+
+      - name: Publish the release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "3VN Robotics ${{ github.ref_name }}" \
+            --notes-file RELEASE_MANIFEST.md \
+            --verify-tag

@@ -39,21 +39,57 @@ Plus the C++ `check_urdf` cross-check over every profile × target, and the
 expanded URDFs uploaded as an artifact so a reviewer can diff the actual
 robot a PR produces.
 
-## What is deliberately not here yet
+## The five workflows
 
-**Gazebo integration tests.** They arrive in Phase 2 as
-`simulation-tests.yml`, where simulation is the deliverable. Starting a
-simulator takes tens of seconds; keeping it out of the main workflow keeps
-PR feedback fast.
+| Workflow | Trigger | What it does |
+|---|---|---|
+| `ci.yml` | push, PR | lint, build, 300+ tests, on amd64 **and** arm64 |
+| `simulation-tests.yml` | push, PR touching sim | Gazebo integration + acceptance report |
+| `docker.yml` | push, tag | builds the runtime image natively per arch, verifies it, publishes to GHCR |
+| `release.yml` | tag `v*` | version manifest + GitHub release |
+| `hardware-deploy.yml` | **manual only** | deploys to a robot, behind an approval gate |
 
-**Deployment.** Phases 6–8. When it comes:
+## Releases are a tag plus evidence
 
-```
-git push → CI → test → image → registry → VPS → robot
-```
+`release.yml` refuses to run if the tag and `VERSION` disagree — a
+release whose tag and contents differ is worse than no release, because
+every artifact it produces is mislabelled.
 
-with an **approval gate before anything reaches physical hardware**. A
-robot that moves on every merged PR is a hazard, not a pipeline.
+It does **not** build its own image. It resolves the one `docker.yml`
+already built and verified from that commit, so a release can only ship
+something that was actually tested. If the image is not in the registry,
+the release fails and says to tag a commit that has been through CI.
+
+The manifest records every version a deployed robot can be asked about —
+software, firmware, protocol, commit, joint count, heartbeat timeout —
+and the per-architecture digests. Pull by digest for anything that must
+be reproducible: a tag can be moved, a digest cannot.
+
+## Hardware deployment is gated, and honest
+
+`hardware-deploy.yml` is `workflow_dispatch` only. Spec §13 is explicit:
+do not deploy to hardware automatically. **A robot that moves on every
+merged PR is a hazard, not a pipeline** — the thing being updated has
+motors, and someone may be standing next to it.
+
+Three gates, deliberately:
+
+1. You must type `DEPLOY` to confirm the arm may move.
+2. A GitHub Environment named `robot` requires a **human reviewer**.
+3. The tag is resolved to an immutable **digest before** approval, so a
+   tag moving between approval and deploy cannot change what lands. What
+   was approved is what ships.
+
+The deploy pulls before stopping the running container, so a slow or
+failed download never leaves a robot down, and waits on `/readyz` rather
+than `/healthz` — liveness only says the process answers.
+
+**It has never run against hardware, because no arm exists.** It fails at
+the SSH step with an explanation, which is correct: a deploy pipeline
+that reports success against nothing is worse than one that admits it
+cannot proceed.
+
+## One CI system, not two
 
 ## One CI system, not two
 

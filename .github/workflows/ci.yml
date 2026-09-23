@@ -69,13 +69,13 @@ jobs:
 
       - name: Build the workspace
         run: |
-          docker run --rm -v "$PWD/src:/ws/src" -v "$PWD/firmware:/ws/firmware:ro" -w /ws \
+          docker run --rm -v "$PWD/src:/ws/src" -v "$PWD/firmware:/ws/firmware:ro" -v "$PWD/VERSION:/ws/VERSION:ro" -w /ws \
             threevn-robotics-ci:local \
             bash -lc 'colcon build --symlink-install --event-handlers console_direct+'
 
       - name: Test (lint + unit, no simulator)
         run: |
-          docker run --rm -v "$PWD/src:/ws/src" -v "$PWD/firmware:/ws/firmware:ro" -w /ws \
+          docker run --rm -v "$PWD/src:/ws/src" -v "$PWD/firmware:/ws/firmware:ro" -v "$PWD/VERSION:/ws/VERSION:ro" -w /ws \
             threevn-robotics-ci:local \
             bash -lc '
               colcon build --symlink-install > /dev/null &&
@@ -88,7 +88,7 @@ jobs:
         # artifact rather than only as a unit test: a description destined
         # for real hardware must contain no simulator reference at all.
         run: |
-          docker run --rm -v "$PWD/src:/ws/src" -v "$PWD/firmware:/ws/firmware:ro" -w /ws \
+          docker run --rm -v "$PWD/src:/ws/src" -v "$PWD/firmware:/ws/firmware:ro" -v "$PWD/VERSION:/ws/VERSION:ro" -w /ws \
             threevn-robotics-ci:local \
             bash -lc '
               colcon build --symlink-install > /dev/null
@@ -108,7 +108,7 @@ jobs:
 
       - name: Cross-check every profile with the C++ URDF parser
         run: |
-          docker run --rm -v "$PWD/src:/ws/src" -v "$PWD/firmware:/ws/firmware:ro" -v "$PWD/scripts:/ws/scripts:ro" -w /ws \
+          docker run --rm -v "$PWD/src:/ws/src" -v "$PWD/firmware:/ws/firmware:ro" -v "$PWD/VERSION:/ws/VERSION:ro" -v "$PWD/scripts:/ws/scripts:ro" -w /ws \
             threevn-robotics-ci:local \
             bash -lc 'colcon build --symlink-install > /dev/null && source install/setup.bash && bash scripts/check_description.sh'
 
@@ -116,7 +116,7 @@ jobs:
         if: matrix.arch == 'amd64'
         run: |
           mkdir -p artifacts
-          docker run --rm -v "$PWD/src:/ws/src" -v "$PWD/firmware:/ws/firmware:ro" -v "$PWD/artifacts:/out" -w /ws \
+          docker run --rm -v "$PWD/src:/ws/src" -v "$PWD/firmware:/ws/firmware:ro" -v "$PWD/VERSION:/ws/VERSION:ro" -v "$PWD/artifacts:/out" -w /ws \
             threevn-robotics-ci:local \
             bash -lc '
               colcon build --symlink-install > /dev/null

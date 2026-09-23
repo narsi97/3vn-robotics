@@ -43,6 +43,11 @@ services:
       # alternative is testing an e-stop by flashing it onto a powered
       # arm. Read-only: nothing in the workspace should write to it.
       - ../firmware:/ws/firmware:ro
+      # The single source of the software version. Mounted so
+      # test_version_consistency.py can compare the manifests against it
+      # -- without this the test silently SKIPS, which is the one
+      # outcome a drift check must never have.
+      - ../VERSION:/ws/VERSION:ro
       # build/install/log are NAMED VOLUMES, not bind mounts. colcon
       # writes tens of thousands of small files; through VirtioFS on
       # macOS that cost dominates every build. It also keeps generated

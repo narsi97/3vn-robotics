@@ -13,8 +13,8 @@ One system that evolves. Not twelve disconnected tutorials.
 | 4 | Full automated test layers | **done** |
 | 5 | ESP32 firmware + `Esp32SystemInterface` | **done** (software) |
 | 6 | Docker runtime images | **done** |
-| 7 | CI/CD pipelines | next |
-| 8 | VPS deployment | |
+| 7 | CI/CD pipelines | **done** |
+| 8 | VPS deployment | next |
 | 9 | Monitoring (OpenTelemetry → self-hosted stack) | |
 | 10 | Mobile base | |
 | 11 | Mobile manipulator | |
@@ -81,6 +81,19 @@ What remains needs physical parts:
   firmware running correctly. A switch in the servo power line does not.
 - **No position feedback.** Hobby servos report nothing, so the device
   reports its target as `measured` and a stalled servo looks healthy.
+
+## Version drift, closed
+
+A running robot reported `software_version: 0.3.0` while all six package
+manifests said `0.1.0`. Nothing broke, which is the problem — the version
+block exists to be trusted, and nobody would have noticed it was lying
+until they tried to reproduce a fault from it.
+
+`VERSION` is now the single source, and `test_version_consistency.py`
+fails the build on disagreement. Firmware and protocol versions stay
+deliberately independent: a host updated a dozen times can still face
+firmware nobody reflashed, and one number would hide that. See
+[versioning.md](versioning.md).
 
 ## Tracked debt
 
