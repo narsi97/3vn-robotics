@@ -20,6 +20,9 @@ if(BUILD_TESTING)
   # `make test-ros` runs them directly.
   ament_add_pytest_test(bringup_tests test/test_package_dependencies.py
     TIMEOUT 60)
+  # Also fast: pure config arithmetic, no robot, no simulator.
+  ament_add_pytest_test(bringup_velocity_ceilings
+    test/test_velocity_ceilings.py TIMEOUT 60)
 endif()
 
 ament_package()

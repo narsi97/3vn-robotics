@@ -15,26 +15,12 @@
 """Structural invariants of the kinematic tree."""
 import xml.etree.ElementTree as ET
 
-from conftest import PROFILES
+from conftest import ALL_PROFILES, ARM_PROFILES, profile_kind, REQUIRED_FRAMES
 import pytest
 from urdf_parser_py.urdf import URDF
 
-#: Frames later phases depend on. Listed explicitly so that deleting one
-#: fails here rather than in Phase 8 or 11.
-REQUIRED_FRAMES = {
-    'base_footprint',
-    'base_link',
-    'tool0',
-    'grasp_frame',
-    'camera_mount_link',
-    'camera_link',
-    'camera_optical_frame',
-    'imu_link',
-    'mount_plate_link',
-}
 
-
-@pytest.mark.parametrize('profile', PROFILES, ids=lambda p: p.stem)
+@pytest.mark.parametrize('profile', ALL_PROFILES, ids=lambda p: p.stem)
 def test_no_duplicate_link_names(expanded, profile):
     """
     Checked on RAW XML, deliberately.
@@ -49,7 +35,7 @@ def test_no_duplicate_link_names(expanded, profile):
     assert not dupes, f'duplicate link names: {dupes}'
 
 
-@pytest.mark.parametrize('profile', PROFILES, ids=lambda p: p.stem)
+@pytest.mark.parametrize('profile', ALL_PROFILES, ids=lambda p: p.stem)
 def test_exactly_one_root(expanded, profile):
     robot = URDF.from_xml_string(expanded(profile=profile))
     children = {j.child for j in robot.joints}
@@ -57,7 +43,7 @@ def test_exactly_one_root(expanded, profile):
     assert roots == ['base_footprint'], f'expected one root, got {roots}'
 
 
-@pytest.mark.parametrize('profile', PROFILES, ids=lambda p: p.stem)
+@pytest.mark.parametrize('profile', ALL_PROFILES, ids=lambda p: p.stem)
 def test_no_orphan_links(expanded, profile):
     """
     Every link is reachable from the root.
@@ -82,14 +68,22 @@ def test_no_orphan_links(expanded, profile):
     assert seen == all_links, f'unreachable links: {sorted(all_links - seen)}'
 
 
-@pytest.mark.parametrize('profile', PROFILES, ids=lambda p: p.stem)
+@pytest.mark.parametrize('profile', ALL_PROFILES, ids=lambda p: p.stem)
 def test_required_frames_exist(expanded, profile):
+    """
+    The frames downstream code names by hand are present.
+
+    Each family has its own set: the arm's TCP and optical frames, the
+    base's `arm_mount_link`. These are the names Phase 11 composes
+    against, so losing one breaks mounting rather than parsing.
+    """
+    required = REQUIRED_FRAMES[profile_kind(profile)]
     robot = URDF.from_xml_string(expanded(profile=profile))
     present = {link.name for link in robot.links}
-    assert REQUIRED_FRAMES <= present, f'missing: {sorted(REQUIRED_FRAMES - present)}'
+    assert required <= present, f'missing: {sorted(required - present)}'
 
 
-@pytest.mark.parametrize('profile', PROFILES, ids=lambda p: p.stem)
+@pytest.mark.parametrize('profile', ALL_PROFILES, ids=lambda p: p.stem)
 def test_moving_links_have_visual_and_collision(expanded, profile):
     """
     Links with mass have both visual and collision geometry.
@@ -105,7 +99,7 @@ def test_moving_links_have_visual_and_collision(expanded, profile):
         assert link.collisions, f'{link.name} has mass but no <collision>'
 
 
-@pytest.mark.parametrize('profile', PROFILES, ids=lambda p: p.stem)
+@pytest.mark.parametrize('profile', ARM_PROFILES, ids=lambda p: p.stem)
 def test_dof_count_matches_declared(expanded, profile):
     """
     The URDF has exactly as many revolute joints as the config declares.

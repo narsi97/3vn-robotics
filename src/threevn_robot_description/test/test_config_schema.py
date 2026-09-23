@@ -20,7 +20,8 @@ Cheap discipline that directly implements the spec's requirement to
 must say so, and units must be visible in the key name rather than
 remembered.
 """
-from conftest import PROFILES
+from conftest import (ALL_PROFILES, ENTRY_POINTS, MASS_BAND,
+                      REQUIRED_FRAMES)
 import pytest
 import yaml
 
@@ -31,7 +32,7 @@ def _cfg(profile):
     return yaml.safe_load(profile.read_text())
 
 
-@pytest.mark.parametrize('profile', PROFILES, ids=lambda p: p.stem)
+@pytest.mark.parametrize('profile', ALL_PROFILES, ids=lambda p: p.stem)
 def test_every_mass_declares_provenance(profile):
     """
     Right now every value in this file is an engineer's guess. That.
@@ -47,7 +48,7 @@ def test_every_mass_declares_provenance(profile):
         )
 
 
-@pytest.mark.parametrize('profile', PROFILES, ids=lambda p: p.stem)
+@pytest.mark.parametrize('profile', ALL_PROFILES, ids=lambda p: p.stem)
 def test_revolute_joints_use_degree_keys(profile):
     """
     Revolute limits declare their units in the key name.
@@ -63,7 +64,7 @@ def test_revolute_joints_use_degree_keys(profile):
         assert 'initial_position_deg' in spec, f'{name}: use initial_position_deg'
 
 
-@pytest.mark.parametrize('profile', PROFILES, ids=lambda p: p.stem)
+@pytest.mark.parametrize('profile', ALL_PROFILES, ids=lambda p: p.stem)
 def test_prismatic_joints_use_metre_keys(profile):
     for name, spec in _cfg(profile)['joints'].items():
         if spec['type'] != 'prismatic':
@@ -73,7 +74,7 @@ def test_prismatic_joints_use_metre_keys(profile):
         assert 'lower_deg' not in spec['limit'], f'{name}: prismatic limit in degrees?'
 
 
-@pytest.mark.parametrize('profile', PROFILES, ids=lambda p: p.stem)
+@pytest.mark.parametrize('profile', ALL_PROFILES, ids=lambda p: p.stem)
 def test_no_dimension_is_zero_or_negative(profile):
     for name, spec in _cfg(profile)['links'].items():
         for key, value in spec['geometry'].items():
@@ -82,7 +83,7 @@ def test_no_dimension_is_zero_or_negative(profile):
             assert value > 0, f'{name}.geometry.{key} = {value} must be positive'
 
 
-@pytest.mark.parametrize('profile', PROFILES, ids=lambda p: p.stem)
+@pytest.mark.parametrize('profile', ALL_PROFILES, ids=lambda p: p.stem)
 def test_every_joint_references_declared_links(profile):
     """
     Every joint references a link that is actually declared.
@@ -91,13 +92,20 @@ def test_every_joint_references_declared_links(profile):
     parse error much later.
     """
     cfg = _cfg(profile)
-    known = set(cfg['links']) | set(cfg['frames'])
+    # A base has no `frames` block -- its links ARE its frames.
+    known = set(cfg['links']) | set(cfg.get('frames', {}))
     for name, spec in cfg['joints'].items():
+        # A base declares wheel POSITIONS and lets the macro own the
+        # topology -- four wheels on a chassis is fixed, so writing
+        # parent/child per wheel would be noise. Only joints that
+        # declare a parent are checked against declared links.
+        if 'parent' not in spec:
+            continue
         assert spec['parent'] in known, f'{name}: unknown parent {spec["parent"]!r}'
         assert spec['child'] in known, f'{name}: unknown child {spec["child"]!r}'
 
 
-@pytest.mark.parametrize('profile', PROFILES, ids=lambda p: p.stem)
+@pytest.mark.parametrize('profile', ALL_PROFILES, ids=lambda p: p.stem)
 def test_model_name_is_ros_legal(profile):
     """
     REP-144: an identifier that may become a node, topic or namespace.
@@ -115,7 +123,7 @@ def test_model_name_is_ros_legal(profile):
     )
 
 
-@pytest.mark.parametrize('profile', PROFILES, ids=lambda p: p.stem)
+@pytest.mark.parametrize('profile', ALL_PROFILES, ids=lambda p: p.stem)
 def test_mimic_targets_an_existing_joint(profile):
     cfg = _cfg(profile)
     for name, spec in cfg['joints'].items():
@@ -124,3 +132,26 @@ def test_mimic_targets_an_existing_joint(profile):
         target = spec['mimic']['joint']
         assert target in cfg['joints'], f'{name}: mimics unknown joint {target!r}'
         assert target != name, f'{name}: mimics itself'
+
+
+@pytest.mark.parametrize('profile', ALL_PROFILES, ids=lambda p: p.stem)
+def test_every_profile_declares_a_known_family(profile):
+    """
+    Every profile names a robot family the harness knows how to expand.
+
+    This is the guard on the other side of `meta.kind`. Scoping the suite
+    by family stops an arm profile being validated against base rules --
+    but it introduces the opposite failure, where a profile with an
+    unrecognised kind is quietly expanded by nothing and tested by
+    nothing. A new family must be a deliberate act: add it to
+    ENTRY_POINTS, MASS_BAND and REQUIRED_FRAMES, or this fails.
+    """
+    import yaml
+
+    kind = yaml.safe_load(profile.read_text())['meta']['kind']
+    assert kind in ENTRY_POINTS, (
+        f'{profile.name} declares kind={kind!r}, which has no xacro entry '
+        f'point. Known: {sorted(ENTRY_POINTS)}'
+    )
+    assert kind in MASS_BAND, f'kind={kind!r} has no mass band'
+    assert kind in REQUIRED_FRAMES, f'kind={kind!r} has no required frames'

@@ -25,6 +25,11 @@ meta:
   # See docs/decisions/0001-package-naming.md -- "3vn_arm_v1" would be a
   # latent runtime failure the first time it reached DDS.
   model: threevn_arm_v1
+  # Which robot family this profile describes. The shared test suite uses
+  # it to pick the xacro entry point and the expectations that apply --
+  # an arm profile validated against base rules (or the reverse) would
+  # fail for reasons that have nothing to do with the robot.
+  kind: arm
   display_name: "3VN Arm v1"
   dof: 4
   revision: 1

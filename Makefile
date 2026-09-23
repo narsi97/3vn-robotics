@@ -12,6 +12,7 @@ RUN     := $(COMPOSE) exec -T $(SVC) bash -lc
 RUN_TTY := $(COMPOSE) exec    $(SVC) bash -lc
 SHARE   := /ws/install/threevn_robot_description/share/threevn_robot_description
 PROFILE ?= threevn_arm_v1
+BASE_PROFILE ?= threevn_base_v1
 TARGET  ?= mock
 GUI     ?= 0
 NOVNC   := http://localhost:8106/vnc.html
@@ -40,6 +41,7 @@ help:
 	@echo "  make view      RViz + joint sliders            -> $(NOVNC)"
 	@echo "  make mock      Run the stack: no simulator, no hardware"
 	@echo "  make sim       Run the stack in Gazebo (GUI=1 for pixels)"
+	@echo "  make base-sim  Run the MOBILE BASE in Gazebo (GUI=1 for pixels)"
 	@echo "  make robot     Run against real hardware        (Phase 5)"
 	@echo ""
 	@echo "  make dash      Live dashboard             -> $(DASH)"
@@ -81,8 +83,12 @@ build: up
 
 # -m 'not slow' excludes the Gazebo tests. The 60s budget is a design
 # constraint, not an aspiration: it is what makes people actually run it.
+# The rm is not housekeeping. `colcon test-result` reports every XML
+# under build/, including results from runs that are no longer relevant,
+# so a fixed failure kept being reported and the test count drifted
+# upward. Clearing first makes the summary describe THIS run.
 test: build
-	$(RUN) "colcon test --event-handlers console_direct+ --pytest-args -m 'not slow' && colcon test-result --verbose"
+	$(RUN) "rm -rf /ws/build/*/test_results /ws/build/*/pytest.xml /ws/build/*/Testing ; colcon test --event-handlers console_direct+ --pytest-args -m 'not slow' && colcon test-result --verbose"
 
 # ROS integration tier: a real ROS graph and real controllers, no
 # physics. Sits between the fast suite (no ROS at all) and the Gazebo
@@ -97,12 +103,32 @@ test-ros: build stop
 test-sim: build stop
 	$(RUN) "cd /ws/src/threevn_sim && python3 -m pytest test -m slow -v"
 
+# `colcon test-result` reports every XML under build/, not just the tests
+# this invocation ran -- so a failure from an earlier `make test` was
+# still being reported here long after the code was fixed, and a green
+# lint run looked red. Clear the results first so the report describes
+# THIS run.
 lint: build
-	$(RUN) "colcon test --ctest-args -R 'lint|copyright|flake8|xmllint' ; colcon test-result --verbose"
+	$(RUN) "rm -rf /ws/build/*/test_results /ws/build/*/pytest.xml /ws/build/*/Testing ; colcon test --ctest-args -R 'lint|copyright|flake8|xmllint' ; colcon test-result --verbose"
 	$(RUN) "bash /ws/scripts/check_description.sh"
 
+# ROBOT selects which description to expand: arm (default) or base.
+# Before Phase 10 this target hardcoded the arm, so `ROBOT=base` was
+# accepted and silently printed the arm -- the same class of quiet
+# wrong-robot bug the description tests now guard against.
+ROBOT   ?= arm
+ifeq ($(ROBOT),base)
+URDF_ENTRY   := threevn_base.urdf.xacro
+URDF_PROFILE := $(BASE_PROFILE)
+else ifeq ($(ROBOT),arm)
+URDF_ENTRY   := threevn_arm.urdf.xacro
+URDF_PROFILE := $(PROFILE)
+else
+$(error ROBOT must be 'arm' or 'base', not '$(ROBOT)')
+endif
+
 urdf: build
-	$(RUN) "ros2 run xacro xacro $(SHARE)/urdf/threevn_arm.urdf.xacro params_file:=$(SHARE)/config/$(PROFILE).yaml target:=$(TARGET)"
+	$(RUN) "ros2 run xacro xacro $(SHARE)/urdf/$(URDF_ENTRY) params_file:=$(SHARE)/config/$(URDF_PROFILE).yaml target:=$(TARGET)"
 
 view: build
 	@echo ""
@@ -127,6 +153,17 @@ sim: build stop
 # with an uncaught runtime_error and exit code -6, which reads as a crash
 # rather than "nothing is plugged in".
 ESP32_PORT ?= /dev/ttyUSB0
+# The mobile base, standalone. Phase 11 composes it with the arm; until
+# then they are separate robots with separate controllers.
+base-sim: build stop
+	@echo "  Gazebo server headless. GUI=1 shows it at $(NOVNC) (slow: llvmpipe)."
+	$(RUN_TTY) "ros2 launch threevn_sim base_sim.launch.py profile:=$(BASE_PROFILE) gui:=$(if $(filter 1,$(GUI)),true,false)"
+
+
+base-drive: build
+	@echo '  measuring against a running: make base-sim'
+	$(RUN) "python3 /ws/scripts/verify_base_drive.py"
+
 robot: build stop
 	@$(RUN) "test -e $(ESP32_PORT)" 2>/dev/null || { \
 	  echo ""; \

@@ -41,7 +41,17 @@ import yaml
 SHARE = pathlib.Path(get_package_share_directory('threevn_robot_description'))
 CONFIG_DIR = SHARE / 'config'
 XACRO_ENTRY = SHARE / 'urdf' / 'threevn_arm.urdf.xacro'
-PROFILES = sorted(CONFIG_DIR.glob('threevn_*.yaml'))
+
+
+def _is_arm(path):
+    """Arm profiles only: this module walks the ARM chain by name."""
+    return yaml.safe_load(path.read_text())['meta']['kind'] == 'arm'
+
+
+#: Arm-family profiles. The mobile base has its own kinematics -- wheel
+#: odometry, not a serial chain -- and asserting `base_link -> tool0` on
+#: it is meaningless rather than merely failing.
+PROFILES = sorted(p for p in CONFIG_DIR.glob('threevn_*.yaml') if _is_arm(p))
 
 
 def _expand(profile):

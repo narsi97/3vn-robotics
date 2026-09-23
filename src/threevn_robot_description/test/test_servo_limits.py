@@ -24,6 +24,9 @@ catch rather than create.
 A corrected number alone would not stop it recurring. These assertions do.
 """
 
+# Arm family only: these read servo keys that a wheeled base
+# does not have. The base asserts its equivalents, against `motors`
+# and continuous joints, in test_base_description.py.
 from conftest import PROFILES
 import pytest
 from urdf_parser_py.urdf import URDF

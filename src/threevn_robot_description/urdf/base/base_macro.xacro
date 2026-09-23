@@ -1,0 +1,132 @@
+<?xml version="1.0"?>
+<!--
+  The 3VN mobile base: a four-wheel skid-steer chassis.
+
+  Every dimension, mass and limit comes from the `cfg` dictionary loaded
+  from config/threevn_base_v1.yaml. Nothing here is a literal, and the
+  four wheels are one macro instantiated four times rather than four
+  copies that can drift apart.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- One wheel, positioned from its joint spec. -->
+  <xacro:macro name="threevn_wheel" params="name prefix">
+    <xacro:property name="j" value="${cfg['joints'][name]}"/>
+    <xacro:property name="w" value="${cfg['links']['wheel_link']}"/>
+    <xacro:property name="link_name" value="${name.replace('_joint', '_link')}"/>
+
+    <link name="${prefix}${link_name}">
+      <visual>
+        <!-- A cylinder's axis is +Z, but a wheel turns about Y, so the
+             geometry is rolled 90 degrees. Forgetting this produces a
+             robot with four discs lying flat like plates. -->
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+        <geometry>
+          <cylinder radius="${w['geometry']['radius']}"
+                    length="${w['geometry']['length']}"/>
+        </geometry>
+        <material name="threevn_dark"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+        <geometry>
+          <cylinder radius="${w['geometry']['radius']}"
+                    length="${w['geometry']['length']}"/>
+        </geometry>
+      </collision>
+      <!-- Inertia about the ROLLING axis, so the roll is applied here
+           too. A wheel with its inertia tensor oriented wrongly spins up
+           at the wrong rate and the odometry quietly disagrees with the
+           physics. -->
+      <xacro:cylinder_inertial mass="${w['mass']}"
+                               radius="${w['geometry']['radius']}"
+                               length="${w['geometry']['length']}">
+        <origin xyz="0 0 0" rpy="${pi/2} 0 0"/>
+      </xacro:cylinder_inertial>
+    </link>
+
+    <joint name="${prefix}${name}" type="continuous">
+      <parent link="${prefix}base_link"/>
+      <child link="${prefix}${link_name}"/>
+      <origin xyz="${j['position'][0]} ${j['position'][1]}
+                   ${cfg['geometry']['wheel_z_offset']}"
+              rpy="0 0 0"/>
+      <axis xyz="${j['axis'][0]} ${j['axis'][1]} ${j['axis'][2]}"/>
+      <limit effort="${j['limit']['effort']}"
+             velocity="${j['limit']['velocity']}"/>
+      <dynamics damping="${cfg['defaults']['wheel_damping']}"
+                friction="${cfg['defaults']['wheel_friction']}"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:macro name="threevn_base" params="parent prefix">
+    <xacro:property name="chassis" value="${cfg['links']['base_link']}"/>
+
+    <joint name="${prefix}chassis_joint" type="fixed">
+      <parent link="${parent}"/>
+      <child link="${prefix}base_link"/>
+      <!-- Lift the chassis so the wheels touch the ground plane.
+           Axle height must equal the wheel radius:
+
+               axle = chassis_z + wheel_z_offset = radius
+               chassis_z = radius - wheel_z_offset
+
+           This originally also subtracted chassis.z/2, which put the
+           axles at 0.013 m against a 0.033 m radius - the robot sat
+           20 mm INTO the floor. Gazebo hid it because the spawn used
+           z=0.05, which lifted it clear; only the description test
+           caught it. -->
+      <origin xyz="0 0 ${cfg['links']['wheel_link']['geometry']['radius']
+                         - cfg['geometry']['wheel_z_offset']}"
+              rpy="0 0 0"/>
+    </joint>
+
+    <link name="${prefix}base_link">
+      <visual>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="${chassis['geometry']['x']} ${chassis['geometry']['y']}
+                     ${chassis['geometry']['z']}"/>
+        </geometry>
+        <material name="threevn_slate"/>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+        <geometry>
+          <box size="${chassis['geometry']['x'] + 2*cfg['defaults']['collision_margin']}
+                     ${chassis['geometry']['y'] + 2*cfg['defaults']['collision_margin']}
+                     ${chassis['geometry']['z'] + 2*cfg['defaults']['collision_margin']}"/>
+        </geometry>
+      </collision>
+      <xacro:box_inertial mass="${chassis['mass']}"
+                          x="${chassis['geometry']['x']}"
+                          y="${chassis['geometry']['y']}"
+                          z="${chassis['geometry']['z']}">
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+      </xacro:box_inertial>
+    </link>
+
+    <xacro:threevn_wheel name="front_left_wheel_joint"  prefix="${prefix}"/>
+    <xacro:threevn_wheel name="front_right_wheel_joint" prefix="${prefix}"/>
+    <xacro:threevn_wheel name="rear_left_wheel_joint"   prefix="${prefix}"/>
+    <xacro:threevn_wheel name="rear_right_wheel_joint"  prefix="${prefix}"/>
+
+    <!-- Where the arm bolts on in Phase 11. Declared now, unused today:
+         it costs one fixed joint and turns "mount the arm" into a
+         one-joint change rather than a description rewrite. -->
+    <link name="${prefix}arm_mount_link"/>
+    <joint name="${prefix}arm_mount_joint" type="fixed">
+      <parent link="${prefix}base_link"/>
+      <child link="${prefix}arm_mount_link"/>
+      <origin xyz="0 0 ${chassis['geometry']['z'] / 2.0}" rpy="0 0 0"/>
+    </joint>
+
+    <link name="${prefix}imu_link"/>
+    <joint name="${prefix}imu_joint" type="fixed">
+      <parent link="${prefix}base_link"/>
+      <child link="${prefix}imu_link"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </joint>
+  </xacro:macro>
+
+</robot>

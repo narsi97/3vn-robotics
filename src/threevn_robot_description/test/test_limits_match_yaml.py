@@ -22,6 +22,9 @@ independent conversion sites, and they are exactly where a bug lives.
 """
 import math
 
+# Arm family only: these read degree-keyed revolute keys that a wheeled base
+# does not have. The base asserts its equivalents, against `motors`
+# and continuous joints, in test_base_description.py.
 from conftest import PROFILES
 import pytest
 from urdf_parser_py.urdf import URDF

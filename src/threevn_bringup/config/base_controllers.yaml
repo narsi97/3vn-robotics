@@ -1,0 +1,118 @@
+# Controllers for the 3VN mobile base.
+#
+# Identical across mock, gz and esp32 — same property as the arm, so the
+# same `cmd_vel` drives a simulated base and a real one.
+#
+#   topic  /joint_states                   continuous state
+#   topic  /base_controller/cmd_vel        velocity command
+#   topic  /base_controller/odom           wheel odometry
+#   TF     odom -> base_footprint
+
+controller_manager:
+  ros__parameters:
+    update_rate: 50
+    enforce_command_limits: true
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    base_controller:
+      type: diff_drive_controller/DiffDriveController
+
+base_controller:
+  ros__parameters:
+    # Skid steer: both wheels on a side are driven together, so each side
+    # is given as a list. diff_drive_controller handles that natively —
+    # writing a custom four-wheel controller would be reimplementing it.
+    left_wheel_names:  ["front_left_wheel_joint",  "rear_left_wheel_joint"]
+    right_wheel_names: ["front_right_wheel_joint", "rear_right_wheel_joint"]
+
+    wheel_separation: 0.170
+    wheel_radius: 0.033
+
+    # Skid-steer scrub correction, MEASURED not guessed.
+    #
+    # Turning requires all four wheels to scrub sideways, which the
+    # differential model does not represent. Odometry cannot see the
+    # slip, because the command and the odometry both come from the same
+    # wheel encoders: the wheels track their setpoint exactly and report
+    # a turn that did not happen.
+    #
+    # Measured with `make base-drive` against a fresh `make base-sim`,
+    # commanding a 114.6-degree turn and reading Gazebo ground truth:
+    #
+    #   multiplier   actually turned   odometry error
+    #   1.00 (ideal)      70.4 deg          +62.7 %
+    #   1.63              84.5 deg          +34.3 %
+    #   2.40              89.0 deg          +26.2 %
+    #
+    # Note the saturation. The multiplier scales BOTH the command and the
+    # odometry, so raising it turns the robot harder AND reports less per
+    # unit of wheel travel -- but the curve flattens, and no value of this
+    # constant drives the error to zero. The residual is real scrub that a
+    # single linear track-width correction cannot represent.
+    #
+    # That is the honest limit of wheel odometry on this chassis, and the
+    # reason the base carries an imu_link: heading has to come from a
+    # sensor that measures rotation directly, fused in a later phase.
+    # Until then, treat heading as the least trustworthy state the robot
+    # publishes -- which is what the covariances below say.
+    #
+    # Calibrated against the SIMULATOR, whose friction coefficients are
+    # themselves estimates (see threevn_base_v1.yaml). Re-measure on a
+    # real floor in Phase 11; carpet and lino will not give this number.
+    wheel_separation_multiplier: 2.40
+    left_wheel_radius_multiplier: 1.0
+    right_wheel_radius_multiplier: 1.0
+
+    publish_rate: 50.0
+    odom_frame_id: odom
+    base_frame_id: base_footprint
+
+    # Wheel odometry on this chassis is approximate. The covariances say
+    # so, which is what lets a localisation filter weight it correctly
+    # instead of believing it.
+    pose_covariance_diagonal:  [0.01, 0.01, 0.0, 0.0, 0.0, 0.05]
+    twist_covariance_diagonal: [0.01, 0.01, 0.0, 0.0, 0.0, 0.05]
+
+    # True until something better corrects heading. An IMU or a laser
+    # scan match takes this over in Phase 11; two things publishing
+    # odom -> base_footprint at once is a fight nobody wins.
+    enable_odom_tf: true
+
+    # Stop if no command arrives. A base that keeps driving after its
+    # commander dies is the mobile equivalent of a runaway arm.
+    cmd_vel_timeout: 0.5
+
+    # NOTE: there is deliberately no `use_stamped_vel` here.
+    #
+    # It was set to false originally, and diff_drive_controller in Jazzy
+    # does not have that parameter at all - it was silently ignored, and
+    # /base_controller/cmd_vel is TwistStamped regardless. The symptom
+    # was a base that would not move, with no error in any log: a plain
+    # Twist publisher simply never matched the subscriber.
+    #
+    # Publish TwistStamped. `ros2 topic info /base_controller/cmd_vel`
+    # is the fastest way to confirm what a controller actually expects.
+
+    # Derived from the TT gearmotor: 21 rad/s no-load at a 0.033 m
+    # radius is ~0.69 m/s, derated to 0.95 and rounded down. Acceleration
+    # limits keep a commanded step from stalling the motors.
+    linear:
+      x:
+        has_velocity_limits: true
+        # 0.62, not 0.65. The wheels are limited to 19.0 rad/s (the TT
+        # gearmotor's no-load speed, derated), and 0.65 m/s needs
+        # 0.65 / 0.033 = 19.70 rad/s -- a ceiling the motors cannot
+        # deliver. test_velocity_ceilings_are_achievable now checks it.
+        max_velocity: 0.62
+        min_velocity: -0.62
+        has_acceleration_limits: true
+        max_acceleration: 1.0
+    angular:
+      z:
+        has_velocity_limits: true
+        max_velocity: 3.0
+        min_velocity: -3.0
+        has_acceleration_limits: true
+        max_acceleration: 3.0

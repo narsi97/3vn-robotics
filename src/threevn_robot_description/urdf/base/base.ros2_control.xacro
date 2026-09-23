@@ -1,0 +1,95 @@
+<?xml version="1.0"?>
+<!--
+  The base's hardware seam.
+
+  The SAME three-target pattern as the arm, for the same reason: mock,
+  gz and esp32 selected by one argument, with everything above unchanged.
+
+  Note the interfaces differ from the arm's. Wheels are commanded by
+  VELOCITY, not position - you do not tell a wheel where to be. That is
+  why diff_drive_controller exists rather than a trajectory controller.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:macro name="threevn_wheel_ifaces" params="name prefix">
+    <xacro:property name="j" value="${cfg['joints'][name]}"/>
+    <xacro:property name="motor" value="${cfg['motors']['tt_gearmotor']}"/>
+    <joint name="${prefix}${name}">
+      <command_interface name="velocity">
+        <param name="min">${-j['limit']['velocity']}</param>
+        <param name="max">${j['limit']['velocity']}</param>
+      </command_interface>
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+    </joint>
+  </xacro:macro>
+
+  <xacro:macro name="threevn_base_ros2_control" params="prefix">
+    <ros2_control name="${prefix}threevn_base" type="system">
+      <hardware>
+        <!-- Same quoting as the arm: ${'$(arg target)' == 'mock'}. The
+             bare ${target == 'mock'} substitutes a token and raises
+             NameError. -->
+        <xacro:if value="${'$(arg target)' == 'mock'}">
+          <plugin>mock_components/GenericSystem</plugin>
+          <param name="calculate_dynamics">true</param>
+        </xacro:if>
+
+        <xacro:if value="${'$(arg target)' == 'gz'}">
+          <plugin>gz_ros2_control/GazeboSimSystem</plugin>
+        </xacro:if>
+
+        <xacro:if value="${'$(arg target)' == 'esp32'}">
+          <!-- A SECOND ESP32, on its own port. The arm and base must be
+               independently controllable; one microcontroller driving
+               both couples their failure modes, and a base firmware
+               fault should not take the arm down. -->
+          <plugin>threevn_hardware/Esp32SystemInterface</plugin>
+          <param name="transport">${cfg['hardware']['esp32']['transport']}</param>
+          <param name="endpoint">${cfg['hardware']['esp32']['endpoint']}</param>
+          <param name="baud">${cfg['hardware']['esp32']['baud']}</param>
+          <param name="control_rate_hz">${cfg['hardware']['esp32']['control_rate_hz']}</param>
+        </xacro:if>
+      </hardware>
+
+      <xacro:threevn_wheel_ifaces name="front_left_wheel_joint"  prefix="${prefix}"/>
+      <xacro:threevn_wheel_ifaces name="front_right_wheel_joint" prefix="${prefix}"/>
+      <xacro:threevn_wheel_ifaces name="rear_left_wheel_joint"   prefix="${prefix}"/>
+      <xacro:threevn_wheel_ifaces name="rear_right_wheel_joint"  prefix="${prefix}"/>
+    </ros2_control>
+
+    <xacro:if value="${'$(arg target)' == 'gz'}">
+      <gazebo>
+        <plugin filename="gz_ros2_control-system"
+                name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+          <xacro:if value="${'$(arg controllers_file)' != ''}">
+            <parameters>$(arg controllers_file)</parameters>
+          </xacro:if>
+          <controller_manager_name>controller_manager</controller_manager_name>
+        </plugin>
+      </gazebo>
+
+      <!-- Skid steer scrubs. Without tuned friction Gazebo either grips
+           so hard the chassis will not rotate, or slides like ice. These
+           values let it turn while still driving straight. -->
+      <xacro:threevn_wheel_friction link="${prefix}front_left_wheel_link"/>
+      <xacro:threevn_wheel_friction link="${prefix}front_right_wheel_link"/>
+      <xacro:threevn_wheel_friction link="${prefix}rear_left_wheel_link"/>
+      <xacro:threevn_wheel_friction link="${prefix}rear_right_wheel_link"/>
+    </xacro:if>
+  </xacro:macro>
+
+  <xacro:macro name="threevn_wheel_friction" params="link">
+    <gazebo reference="${link}">
+      <!-- mu is along the rolling direction, mu2 across it. A skid-steer
+           chassis turns BY sliding sideways, so mu2 is deliberately much
+           lower than mu. Setting them equal is the usual mistake and
+           produces a robot that drives but refuses to rotate. -->
+      <mu1>1.0</mu1>
+      <mu2>0.3</mu2>
+      <kp>200000.0</kp>
+      <kd>10.0</kd>
+    </gazebo>
+  </xacro:macro>
+
+</robot>

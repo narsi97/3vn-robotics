@@ -21,7 +21,7 @@ produces NaN the first time a contact force is applied, which surfaces as
 look like simulator bugs and cost hours. Catching it here, with no
 simulator running, is the cheapest possible place.
 """
-from conftest import PROFILES
+from conftest import ALL_PROFILES, MASS_BAND, profile_kind
 import numpy as np
 import pytest
 from urdf_parser_py.urdf import URDF
@@ -35,7 +35,7 @@ def _tensor(inertia):
     ])
 
 
-@pytest.mark.parametrize('profile', PROFILES, ids=lambda p: p.stem)
+@pytest.mark.parametrize('profile', ALL_PROFILES, ids=lambda p: p.stem)
 def test_masses_are_positive(expanded, profile):
     for link in URDF.from_xml_string(expanded(profile=profile)).links:
         if link.inertial is None:
@@ -43,7 +43,7 @@ def test_masses_are_positive(expanded, profile):
         assert link.inertial.mass > 0, f'{link.name}: mass {link.inertial.mass} <= 0'
 
 
-@pytest.mark.parametrize('profile', PROFILES, ids=lambda p: p.stem)
+@pytest.mark.parametrize('profile', ALL_PROFILES, ids=lambda p: p.stem)
 def test_inertia_is_symmetric_and_positive_definite(expanded, profile):
     for link in URDF.from_xml_string(expanded(profile=profile)).links:
         if link.inertial is None:
@@ -56,7 +56,7 @@ def test_inertia_is_symmetric_and_positive_definite(expanded, profile):
             f'{link.name}: not positive definite, eigenvalues {eigenvalues}'
 
 
-@pytest.mark.parametrize('profile', PROFILES, ids=lambda p: p.stem)
+@pytest.mark.parametrize('profile', ALL_PROFILES, ids=lambda p: p.stem)
 def test_principal_moments_satisfy_triangle_inequality(expanded, profile):
     """
     For any real rigid body the principal moments obey.
@@ -75,12 +75,14 @@ def test_principal_moments_satisfy_triangle_inequality(expanded, profile):
         )
 
 
-@pytest.mark.parametrize('profile', PROFILES, ids=lambda p: p.stem)
+@pytest.mark.parametrize('profile', ALL_PROFILES, ids=lambda p: p.stem)
 def test_total_mass_is_plausible(expanded, profile):
     """
-    A desktop arm of hobby servos, PLA and M3 hardware.
+    Total mass is the right order of magnitude for the family.
 
-    Outside this band something is wrong by an order of magnitude, which
+    A desktop arm of servos and PLA weighs well under 3 kg; a base
+    with four gearmotors and a battery weighs more. Outside the
+    band something is wrong by an order of magnitude, which
     is the single most common URDF error and the one most likely to make
     a simulation behave bizarrely rather than fail.
     """
@@ -89,10 +91,14 @@ def test_total_mass_is_plausible(expanded, profile):
         for link in URDF.from_xml_string(expanded(profile=profile)).links
         if link.inertial
     )
-    assert 0.2 < total < 3.0, f'total mass {total:.3f} kg is not a desktop arm'
+    low, high = MASS_BAND[profile_kind(profile)]
+    assert low < total < high, (
+        f'total mass {total:.3f} kg is outside the '
+        f'{profile_kind(profile)} band {low}-{high} kg'
+    )
 
 
-@pytest.mark.parametrize('profile', PROFILES, ids=lambda p: p.stem)
+@pytest.mark.parametrize('profile', ALL_PROFILES, ids=lambda p: p.stem)
 def test_inertia_respects_the_configured_floor(expanded, profile):
     """
     The configured inertia floor is actually applied.

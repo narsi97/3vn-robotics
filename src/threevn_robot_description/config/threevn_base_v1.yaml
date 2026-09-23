@@ -1,0 +1,132 @@
+# 3VN Mobile Base v1 -- the single source of physical truth.
+#
+# Same rules as the arm profile: nothing under urdf/ hardcodes a number,
+# every mass carries a provenance, and units live in the key name.
+#
+# Four wheels, SKID STEER (differential drive with two wheels per side).
+# That is what cheap chassis kits are: four TT gearmotors, or two driving
+# through a belt. It is the honest choice at this budget, and it has a
+# real cost documented under `odometry` below.
+
+meta:
+  model: threevn_base_v1
+  # Which robot family this profile describes. The shared test suite uses
+  # it to pick the xacro entry point and the expectations that apply --
+  # an arm profile validated against base rules (or the reverse) would
+  # fail for reasons that have nothing to do with the robot.
+  kind: base
+  display_name: "3VN Mobile Base v1"
+  drive: skid_steer
+  wheels: 4
+  revision: 1
+
+defaults:
+  min_inertia: 1.0e-7
+  collision_margin: 0.002
+  wheel_damping: 0.05
+  wheel_friction: 0.01
+
+links:
+  # The chassis plate. The arm bolts to the top of this in Phase 11.
+  #
+  # Named `base_link`, not `chassis_link`: REP-105 makes base_link the
+  # required frame rigidly attached to the robot base, and nav2 defaults
+  # `robot_base_frame` to it. It was called chassis_link until the shared
+  # description test started checking required frames per robot family and
+  # found the base had no base_link at all -- which would have surfaced in
+  # Phase 11 as navigation failing for reasons that looked unrelated.
+  # In a composed mobile manipulator THIS is base_link; the arm's own
+  # base_link takes the `arm_` prefix.
+  base_link:
+    geometry: {type: box, x: 0.200, y: 0.150, z: 0.040}
+    mass: 0.600
+    provenance: estimated
+
+  # All four wheels are identical, so one spec drives all of them.
+  wheel_link:
+    geometry: {type: cylinder, radius: 0.033, length: 0.026}
+    mass: 0.045
+    provenance: estimated
+
+geometry:
+  # Wheel centres, measured from the chassis centre.
+  #
+  # wheel_separation is what diff_drive_controller uses to convert a
+  # twist into per-wheel speeds. On a SKID STEER chassis the effective
+  # value is larger than the physical track, because the wheels scrub
+  # sideways through a turn. See `odometry`.
+  wheel_separation: 0.170
+  wheel_base: 0.140
+  # Chassis underside to wheel axle. Sets ride height.
+  wheel_z_offset: -0.010
+
+joints:
+  # One entry per wheel. Continuous: a wheel has no travel limit, and
+  # declaring one would make the controller fight it after a few metres.
+  front_left_wheel_joint:
+    type: continuous
+    axis: [0, 1, 0]
+    position: [ 0.070,  0.085]      # x, y from the chassis centre
+    limit: {effort: 0.5, velocity: 19.0}
+  front_right_wheel_joint:
+    type: continuous
+    axis: [0, 1, 0]
+    position: [ 0.070, -0.085]
+    limit: {effort: 0.5, velocity: 19.0}
+  rear_left_wheel_joint:
+    type: continuous
+    axis: [0, 1, 0]
+    position: [-0.070,  0.085]
+    limit: {effort: 0.5, velocity: 19.0}
+  rear_right_wheel_joint:
+    type: continuous
+    axis: [0, 1, 0]
+    position: [-0.070, -0.085]
+    limit: {effort: 0.5, velocity: 19.0}
+
+# Motors. Same pattern as the arm's `servos:` block: joint limits are
+# DERIVED from these, and a test fails the build if a joint is
+# configured beyond what its motor can deliver.
+motors:
+  tt_gearmotor:
+    # The yellow plastic-geared motor in every cheap chassis kit.
+    voltage: 6.0
+    stall_torque_nm: 0.784        # ~8 kg.cm at 6 V
+    no_load_speed_rads: 21.0      # ~200 rpm
+    mass_kg: 0.030
+    provenance: datasheet
+
+limit_derate:
+  effort: 0.6      # never command a gearmotor near stall; it cooks
+  velocity: 0.95
+
+odometry:
+  # Wheel odometry on a skid-steer chassis is APPROXIMATE, and saying so
+  # here is more useful than discovering it during navigation.
+  #
+  # Turning requires the wheels to scrub sideways, which the differential
+  # model does not represent. Heading drifts fastest, and it drifts in
+  # proportion to how much turning has happened rather than distance
+  # travelled.
+  #
+  # wheel_separation_multiplier compensates empirically: raise it until a
+  # commanded 360-degree turn produces a reported 360 degrees. 1.0 is the
+  # ideal-differential value and is deliberately WRONG for this chassis -
+  # it is here as the starting point to calibrate from, on a real floor,
+  # in Phase 11.
+  wheel_separation_multiplier: 1.0
+  wheel_radius_multiplier: 1.0
+  # Published odom -> base_footprint. An IMU or a laser scan match should
+  # correct heading before anything depends on it.
+  publish_tf: true
+
+hardware:
+  # A SECOND ESP32, separate from the arm's. The arm and base must be
+  # independently controllable, and one microcontroller driving both
+  # couples their failure modes: a base firmware fault should not take
+  # the arm down.
+  esp32:
+    transport: serial
+    endpoint: /dev/ttyUSB1
+    baud: 921600
+    control_rate_hz: 50

@@ -19,11 +19,11 @@ This is the widest, cheapest net in the suite: it catches YAML key typos,
 xacro syntax errors and macro-arity mistakes across the full matrix before
 any more specific test gets a chance to fail confusingly.
 """
-from conftest import PROFILES, TARGETS
+from conftest import ALL_PROFILES, TARGETS
 import pytest
 
 
-@pytest.mark.parametrize('profile', PROFILES, ids=lambda p: p.stem)
+@pytest.mark.parametrize('profile', ALL_PROFILES, ids=lambda p: p.stem)
 @pytest.mark.parametrize('target', TARGETS)
 def test_expands_without_error(expanded, profile, target):
     xml = expanded(profile=profile, target=target)

@@ -22,7 +22,7 @@ machine-checkable: if any of them fail, the decoupling has been broken.
 """
 import xml.etree.ElementTree as ET
 
-from conftest import EXPECTED_PLUGIN, PROFILES, TARGETS
+from conftest import ALL_PROFILES, EXPECTED_PLUGIN, TARGETS
 import pytest
 
 
@@ -80,7 +80,7 @@ def test_gz_target_emits_the_controller_manager_plugin(expanded):
     assert 'GazeboSimROS2ControlPlugin' in xml
 
 
-@pytest.mark.parametrize('profile', PROFILES, ids=lambda p: p.stem)
+@pytest.mark.parametrize('profile', ALL_PROFILES, ids=lambda p: p.stem)
 @pytest.mark.parametrize('target', TARGETS)
 def test_seam_holds_for_every_profile(expanded, profile, target):
     """The seam must not depend on which robot profile is loaded."""

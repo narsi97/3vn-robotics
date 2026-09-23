@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<!--
+  3VN Mobile Base, standalone.
+
+  Phase 10 builds and proves the base on its own. Phase 11 composes it
+  with the arm - which is why both this and the arm description expose a
+  mount point and neither knows about the other.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="threevn_base">
+
+  <xacro:arg name="params_file"
+             default="$(find threevn_robot_description)/config/threevn_base_v1.yaml"/>
+  <xacro:arg name="target" default="mock"/>
+  <xacro:arg name="prefix" default=""/>
+  <xacro:arg name="controllers_file" default=""/>
+
+  <xacro:property name="cfg" value="${xacro.load_yaml('$(arg params_file)')}"/>
+  <xacro:property name="prefix" value="$(arg prefix)"/>
+  <xacro:property name="min_inertia" value="${cfg['defaults']['min_inertia']}"/>
+
+  <xacro:include filename="$(find threevn_robot_description)/urdf/common/inertials.xacro"/>
+  <xacro:include filename="$(find threevn_robot_description)/urdf/common/materials.xacro"/>
+  <xacro:include filename="$(find threevn_robot_description)/urdf/base/base_macro.xacro"/>
+  <xacro:include filename="$(find threevn_robot_description)/urdf/base/base.ros2_control.xacro"/>
+
+  <!-- Same root name as the arm. It is the robot's projection onto the
+       floor either way, which is what lets Phase 11 join them without
+       renaming anything. -->
+  <link name="${prefix}base_footprint"/>
+
+  <xacro:threevn_base parent="${prefix}base_footprint" prefix="${prefix}"/>
+  <xacro:threevn_base_ros2_control prefix="${prefix}"/>
+
+</robot>

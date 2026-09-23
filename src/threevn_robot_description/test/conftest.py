@@ -25,15 +25,66 @@ import pathlib
 from ament_index_python.packages import get_package_share_directory
 import pytest
 import xacro
+import yaml
 
 PKG = pathlib.Path(get_package_share_directory('threevn_robot_description'))
-XACRO_ENTRY = PKG / 'urdf' / 'threevn_arm.urdf.xacro'
 CONFIG_DIR = PKG / 'config'
-DEFAULT_PROFILE = CONFIG_DIR / 'threevn_arm_v1.yaml'
 
-#: Every robot profile shipped in the package. Tests parametrize over all
-#: of them so adding a profile automatically widens the test matrix.
-PROFILES = sorted(CONFIG_DIR.glob('threevn_*.yaml'))
+#: Entry point per robot family. A profile is expanded through the xacro
+#: belonging to its `meta.kind` -- which is the whole reason that key
+#: exists. Before it did, the suite globbed every YAML in config/ and fed
+#: it to the ARM xacro, so adding the mobile base produced 25 failures
+#: that said nothing about the base and everything about the harness.
+ENTRY_POINTS = {
+    'arm': PKG / 'urdf' / 'threevn_arm.urdf.xacro',
+    'base': PKG / 'urdf' / 'threevn_base.urdf.xacro',
+}
+
+#: Plausible total mass per family, kg. An order-of-magnitude mass error
+#: is the most common URDF bug and the one that makes a simulation behave
+#: bizarrely rather than fail outright.
+MASS_BAND = {
+    'arm': (0.2, 3.0),
+    'base': (0.5, 6.0),
+}
+
+#: Frames each family must expose. For the base these are the two that
+#: Phase 11 composes against; losing either silently breaks mounting.
+REQUIRED_FRAMES = {
+    'arm': {
+        'base_footprint', 'base_link', 'tool0', 'grasp_frame',
+        'camera_mount_link', 'camera_link', 'camera_optical_frame',
+        'imu_link',
+    },
+    'base': {'base_footprint', 'base_link', 'arm_mount_link'},
+}
+
+
+def profile_kind(profile):
+    """Return the robot family a profile declares."""
+    return yaml.safe_load(pathlib.Path(profile).read_text())['meta']['kind']
+
+
+#: Every profile shipped in the package, regardless of family. Tests whose
+#: assertions are genuinely generic -- inertia algebra, structural sanity,
+#: the hardware seam -- parametrize over THIS, so a new robot inherits them
+#: for free.
+ALL_PROFILES = sorted(CONFIG_DIR.glob('threevn_*.yaml'))
+
+PROFILES_BY_KIND = {}
+for _p in ALL_PROFILES:
+    PROFILES_BY_KIND.setdefault(profile_kind(_p), []).append(_p)
+
+ARM_PROFILES = PROFILES_BY_KIND.get('arm', [])
+BASE_PROFILES = PROFILES_BY_KIND.get('base', [])
+
+#: Arm-family profiles. Tests that read arm-only keys (`servos`, `frames`,
+#: `initial_position_deg`) use this. The base's equivalents are asserted in
+#: test_base_description.py, against `motors` and continuous wheel joints.
+PROFILES = ARM_PROFILES
+
+DEFAULT_PROFILE = CONFIG_DIR / 'threevn_arm_v1.yaml'
+XACRO_ENTRY = ENTRY_POINTS['arm']
 
 #: The three hardware targets. `esp32` has no implementation until Phase 5,
 #: but the DESCRIPTION must already expand for it -- that is what makes the
@@ -52,7 +103,11 @@ EXPECTED_PLUGIN = {
 @pytest.fixture(scope='session')
 def expanded():
     """
-    Expand the xacro, memoised per (profile, target).
+    Expand the xacro for a profile, memoised per (profile, target).
+
+    The entry point follows the profile's family, so a test parametrized
+    over ALL_PROFILES expands each one through its own xacro without
+    knowing which robot it is looking at.
 
     Expansion is the slow part of these tests; caching keeps the whole
     suite inside its 60-second budget.
@@ -64,7 +119,7 @@ def expanded():
         key = (str(profile), target, prefix, controllers_file)
         if key not in cache:
             doc = xacro.process_file(
-                str(XACRO_ENTRY),
+                str(ENTRY_POINTS[profile_kind(profile)]),
                 mappings={
                     'params_file': str(profile),
                     'target': target,

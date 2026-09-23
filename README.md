@@ -162,7 +162,7 @@ Full audit: [`THIRD_PARTY.md`](THIRD_PARTY.md) ·
 
 ## Status
 
-**Phases 0–9 complete** (Phase 5 in software; no arm has been built yet).
+**Phases 0–10 complete** (Phase 5 in software; no arm has been built yet).
 
 - The robot description expands for all three hardware targets.
 - The arm spawns in Gazebo Harmonic, with all three controllers active
@@ -233,7 +233,15 @@ cd monitoring && docker compose up -d
 ssh -L 3000:127.0.0.1:3000 root@<host>     # Grafana, localhost only
 ```
 
-Phase 10 is the mobile base.
+- A four-wheel skid-steer mobile base, driving in Gazebo, kept
+  deliberately separate from the arm so Phase 11 can compose them.
+
+```bash
+make base-sim GUI=1        # watch it drive
+```
+
+Phase 11 is the mobile manipulator — where `mount_plate_link` and
+`arm_mount_link` finally meet.
 
 See [`docs/roadmap.md`](docs/roadmap.md) for the 15-phase plan and
 [`docs/risks.md`](docs/risks.md) for what is known to be fragile.
