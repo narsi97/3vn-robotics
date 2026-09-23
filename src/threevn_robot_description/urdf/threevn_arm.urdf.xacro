@@ -48,6 +48,7 @@
   <xacro:include filename="$(find threevn_robot_description)/urdf/arm/sensor_mounts.xacro"/>
   <xacro:include filename="$(find threevn_robot_description)/urdf/ros2_control/arm.ros2_control.xacro"/>
   <xacro:include filename="$(find threevn_robot_description)/urdf/gazebo/materials.gazebo.xacro"/>
+  <xacro:include filename="$(find threevn_robot_description)/urdf/gazebo/camera.gazebo.xacro"/>
   <xacro:include filename="$(find threevn_robot_description)/urdf/ros2_control/gz_control_plugin.xacro"/>
 
   <!-- The kinematic root. Zero inertia, pure reference frame: it is the
@@ -66,6 +67,9 @@
        asserts, and a "harmless" exception is how such properties rot. -->
   <xacro:if value="${'$(arg target)' == 'gz'}">
     <xacro:threevn_gazebo_materials prefix="${prefix}"/>
+    <xacro:if value="${cfg['sensors']['camera']['enabled']}">
+      <xacro:threevn_camera_sensor prefix="${prefix}"/>
+    </xacro:if>
   </xacro:if>
 
   <!-- Exactly one controller_manager, however many ros2_control blocks

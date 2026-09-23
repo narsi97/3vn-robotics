@@ -1,0 +1,79 @@
+<?xml version="1.0"?>
+<!--
+  The simulated camera.
+
+  Phase 1 created camera_link and camera_optical_frame and emitted no
+  sensor, on the grounds that every headless test would otherwise pay for
+  CPU-rendered images it never reads. Phase 12 adds the sensor, and the
+  frame convention those two links encode finally does something.
+
+  WHICH FRAME THE IMAGE IS IN
+
+  Gazebo points a camera along +X of the link carrying it. ROS optical
+  convention (REP-103) is +Z forward, +X right, +Y down. They are both
+  right and they are not the same, which is why camera_link and
+  camera_optical_frame are separate links with a fixed joint carrying
+  exactly that rotation.
+
+  The sensor hangs off camera_link, so Gazebo's own convention applies
+  and the rendering is correct. `gz_frame_id` is the OPTICAL frame,
+  because that is the frame the published Image and CameraInfo describe
+  and the one anything deprojecting a pixel must work in. Naming
+  camera_link here instead produces a pipeline that runs, publishes,
+  looks plausible and puts every detection 90 degrees from the truth.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:macro name="threevn_camera_sensor" params="prefix">
+    <xacro:property name="cam" value="${cfg['sensors']['camera']}"/>
+
+    <gazebo reference="${prefix}camera_link">
+      <sensor name="${prefix}camera" type="camera">
+        <camera>
+          <horizontal_fov>${cam['hfov_deg'] * pi / 180.0}</horizontal_fov>
+          <image>
+            <width>${cam['width']}</width>
+            <height>${cam['height']}</height>
+            <format>R8G8B8</format>
+          </image>
+          <clip>
+            <near>${cam['clip_near']}</near>
+            <far>${cam['clip_far']}</far>
+          </clip>
+          <!-- No <noise>. A noiseless camera is not realism, it is a
+               deliberate simplification: Phase 12 is about the geometry
+               and the plumbing, and adding sensor noise now would make
+               every detection test flaky for a reason unrelated to what
+               it checks. Phase 14 wants noise; it can turn it on here. -->
+        </camera>
+        <always_on>1</always_on>
+        <!-- llvmpipe is CPU rendering. This is the number the profile
+             declares, and raising it without measuring is how the whole
+             simulation starts missing its real-time budget. -->
+        <update_rate>${cam['update_rate']}</update_rate>
+        <visualize>false</visualize>
+        <topic>${cam['topic']}</topic>
+        <gz_frame_id>${prefix}camera_optical_frame</gz_frame_id>
+      </sensor>
+    </gazebo>
+
+    <!--
+      NO <plugin> for gz-sim-sensors-system here, deliberately.
+
+      Rendering is a WORLD service, not a property of this model. The
+      world file that the simulation package supplies already loads it.
+      Declaring it per camera would load it once per camera, which is the
+      same mistake the gz_ros2_control plugin made in Phase 11, and it
+      would only appear on a robot with two cameras, long after this was
+      written.
+
+      This file does not name that package, and the omission is
+      deliberate: a test asserts the description never mentions a package
+      that depends on it. Prose is not a resolution, but the check is
+      blunt on purpose and it is right that a downstream name has no
+      business here at all.
+    -->
+
+  </xacro:macro>
+
+</robot>

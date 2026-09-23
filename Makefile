@@ -14,6 +14,9 @@ SHARE   := /ws/install/threevn_robot_description/share/threevn_robot_description
 PROFILE ?= threevn_arm_v1
 BASE_PROFILE ?= threevn_base_v1
 MM_PROFILE ?= threevn_mm_v1
+# The world to spawn into. bench_with_target carries the green cube
+# the perception phase looks for.
+WORLD ?= empty_bench
 TARGET  ?= mock
 GUI     ?= 0
 NOVNC   := http://localhost:8106/vnc.html
@@ -171,12 +174,24 @@ base-drive: build
 # The composed robot: arm on base, one controller_manager hosting both.
 mm-sim: build stop
 	@echo '  Gazebo server headless. GUI=1 shows it at $(NOVNC) (slow: llvmpipe).'
-	$(RUN_TTY) "ros2 launch threevn_sim mm_sim.launch.py profile:=$(MM_PROFILE) gui:=$(if $(filter 1,$(GUI)),true,false)"
+	$(RUN_TTY) "ros2 launch threevn_sim mm_sim.launch.py profile:=$(MM_PROFILE) world:=$(WORLD) gui:=$(if $(filter 1,$(GUI)),true,false)"
 
 
 mm-verify: build
 	@echo '  measuring against a running: make mm-sim'
 	$(RUN) "python3 /ws/scripts/verify_mm.py"
+
+
+# Perception. Run against a sim started with WORLD=bench_with_target,
+# which carries the green cube; against any other world the node runs
+# and finds nothing, which is the correct behaviour and a boring demo.
+perception: build
+	@echo '  needs a running: make mm-sim WORLD=bench_with_target'
+	$(RUN_TTY) "ros2 run threevn_perception find_target"
+
+perception-verify: build
+	@echo '  needs a running sim AND a running: make perception'
+	$(RUN) "python3 /ws/scripts/verify_perception.py"
 
 
 robot: build stop

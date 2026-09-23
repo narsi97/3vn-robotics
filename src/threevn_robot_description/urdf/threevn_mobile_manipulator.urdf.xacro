@@ -50,6 +50,7 @@
   <xacro:include filename="$(find threevn_robot_description)/urdf/arm/sensor_mounts.xacro"/>
   <xacro:include filename="$(find threevn_robot_description)/urdf/ros2_control/arm.ros2_control.xacro"/>
   <xacro:include filename="$(find threevn_robot_description)/urdf/gazebo/materials.gazebo.xacro"/>
+  <xacro:include filename="$(find threevn_robot_description)/urdf/gazebo/camera.gazebo.xacro"/>
   <xacro:include filename="$(find threevn_robot_description)/urdf/ros2_control/gz_control_plugin.xacro"/>
 
   <!--
@@ -96,6 +97,9 @@
     <xacro:threevn_arm_ros2_control                                prefix="${prefix}"/>
     <xacro:if value="${'$(arg target)' == 'gz'}">
       <xacro:threevn_gazebo_materials prefix="${prefix}"/>
+      <xacro:if value="${cfg['sensors']['camera']['enabled']}">
+        <xacro:threevn_camera_sensor prefix="${prefix}"/>
+      </xacro:if>
     </xacro:if>
   </xacro:macro>
 

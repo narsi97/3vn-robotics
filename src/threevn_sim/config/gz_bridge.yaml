@@ -13,3 +13,22 @@
   ros_type_name: "rosgraph_msgs/msg/Clock"
   gz_type_name: "gz.msgs.Clock"
   direction: GZ_TO_ROS
+
+# Camera. The image is the big one: 640x480 RGB at 15 Hz is ~14 MB/s
+# through the bridge, which is why nothing else subscribes to it by
+# default and why the update rate lives in the robot profile.
+- ros_topic_name: "/camera/image_raw"
+  gz_topic_name: "/camera"
+  ros_type_name: "sensor_msgs/msg/Image"
+  gz_type_name: "gz.msgs.Image"
+  direction: GZ_TO_ROS
+
+# CameraInfo carries the intrinsics. It is NOT optional decoration:
+# deprojecting a pixel to a ray needs fx, fy, cx, cy, and hardcoding
+# them in the perception node would silently stop matching the moment
+# the camera resolution or field of view changed in the robot profile.
+- ros_topic_name: "/camera/camera_info"
+  gz_topic_name: "/camera_info"
+  ros_type_name: "sensor_msgs/msg/CameraInfo"
+  gz_type_name: "gz.msgs.CameraInfo"
+  direction: GZ_TO_ROS

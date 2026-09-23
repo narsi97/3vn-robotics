@@ -229,6 +229,14 @@ sensors:
     # llvmpipe is CPU rendering. 30 Hz will not hold; do not raise this
     # without measuring.
     update_rate: 15.0
+    # Gazebo topic the sensor renders to. The bridge maps it into ROS;
+    # see threevn_sim/config/gz_bridge.yaml.
+    topic: camera
+    # Anything nearer than this is invisible, anything further is not
+    # drawn. near must clear the gripper or the robot photographs the
+    # inside of its own hand.
+    clip_near: 0.02
+    clip_far: 8.0
 
 hardware:
   # Phase 5. Declared now so the seam has a concrete shape and the

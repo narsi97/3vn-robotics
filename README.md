@@ -162,7 +162,7 @@ Full audit: [`THIRD_PARTY.md`](THIRD_PARTY.md) ·
 
 ## Status
 
-**Phases 0–11 complete** (Phase 5 in software; no arm has been built yet).
+**Phases 0–12 complete** (Phase 5 in software; no arm has been built yet).
 
 - The robot description expands for all three hardware targets.
 - The arm spawns in Gazebo Harmonic, with all three controllers active
@@ -249,8 +249,16 @@ make mm-sim GUI=1          # watch it
 make mm-verify             # drive and manipulate concurrently
 ```
 
-Phase 12 is the camera and perception. Nav2 is still outstanding from
-Phase 11 — see [docs/roadmap.md](docs/roadmap.md).
+- A camera that finds a coloured target and reports where it is, with
+  the range error measured against known truth rather than asserted.
+
+```bash
+make mm-sim WORLD=bench_with_target
+make perception
+```
+
+Phase 13 is the data pipeline. Nav2 is still outstanding from Phase 11 —
+see [docs/roadmap.md](docs/roadmap.md).
 
 See [`docs/roadmap.md`](docs/roadmap.md) for the 15-phase plan and
 [`docs/risks.md`](docs/risks.md) for what is known to be fragile.
