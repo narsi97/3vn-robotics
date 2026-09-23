@@ -62,9 +62,14 @@ def recorded(tmp_path):
         base = 0.30 + episode * EPISODE_SPACING
         for index in range(PER_EPISODE):
             name = f'ep{episode:03d}_{index:04d}.png'
-            # Distinct bytes per frame: a dataset of identical images is
+            # Real PNGs with distinct pixels: the image-based leakage
+            # metric opens these, and a dataset of identical images is
             # its own bug, tested separately below.
-            (images / name).write_bytes(f'{episode}:{index}'.encode())
+            from PIL import Image
+            import numpy as np
+            shade = (episode * 30 + index * 2) % 256
+            Image.fromarray(
+                np.full((24, 32, 3), shade, dtype=np.uint8)).save(images / name)
             rows.append({
                 'image': f'images/{name}',
                 'episode': episode,
@@ -232,3 +237,61 @@ def test_summarise_reports_coverage(recorded):
     assert summary['frames'] == EPISODES * PER_EPISODE
     assert summary['episodes'] == EPISODES
     assert summary['label_min'][0] < summary['label_max'][0]
+
+
+def test_image_leakage_sees_what_label_distance_misses(tmp_path):
+    """
+    THE PROXY BROKE, AND THIS IS WHAT REPLACED IT.
+
+    Two frames from different episodes are given the SAME label but
+    deliberately different pixels. Label distance calls them a leak;
+    image distance does not, because they are not the same picture.
+
+    That is exactly what happened on the real recording: 40 episodes
+    covering the workspace made label space dense, distinct situations
+    started sharing labels, and the label metric stopped telling the two
+    splits apart.
+    """
+    from PIL import Image
+    import numpy as np
+
+    images = tmp_path / 'images'
+    images.mkdir()
+    rows = []
+    for episode in range(4):
+        for index in range(6):
+            name = f'ep{episode}_{index}.png'
+            # Same label everywhere; pixels differ per episode.
+            array = np.full((24, 32, 3), episode * 60, dtype=np.uint8)
+            Image.fromarray(array).save(images / name)
+            rows.append({'image': f'images/{name}', 'episode': episode,
+                         'index': index, 'label': [0.4, 0.0, 0.35],
+                         'stamp': float(index)})
+    (tmp_path / 'labels.jsonl').write_text(
+        '\n'.join(json.dumps(r) for r in rows) + '\n')
+
+    frames = ds.load(tmp_path)
+    split = ds.split_by_episode(frames)
+
+    by_label = ds.leakage_report(split)
+    by_image = ds.image_leakage_report(split)
+
+    assert by_label['min_mm'] == pytest.approx(0.0, abs=1e-9), (
+        'identical labels should look like total leakage to the proxy'
+    )
+    assert by_image['min'] > 0.0, (
+        'the images are different, so the image metric must not call '
+        'them duplicates'
+    )
+    assert by_image['exact_duplicates'] == 0
+
+
+def test_identical_images_across_splits_are_reported(recorded):
+    """An identical picture in train and test is unambiguous leakage."""
+    for path in (recorded / 'images').glob('*.png'):
+        path.write_bytes((recorded / 'images' / 'ep000_0000.png').read_bytes())
+
+    split = ds.split_by_episode(ds.load(recorded))
+    report = ds.image_leakage_report(split)
+    assert report['exact_duplicates'] == report['test_frames']
+    assert report['min'] == 0.0

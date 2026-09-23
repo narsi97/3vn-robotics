@@ -234,3 +234,72 @@ def duplicate_report(frames):
         'largest_group': max(counts.values()) if counts else 0,
         'unique_per_episode': {k: len(v) for k, v in sorted(per_episode.items())},
     }
+
+
+def _thumbnails(frames, size=(32, 24)):
+    """
+    Return a (n, h*w) array of small grayscale thumbnails.
+
+    Small on purpose. Full-resolution comparison is both slow and
+    over-sensitive: the question is whether two frames show the same
+    SITUATION, not whether they agree pixel for pixel.
+    """
+    from PIL import Image
+
+    rows = []
+    for frame in frames:
+        with Image.open(frame.image) as handle:
+            # RGB, not grayscale. The target is defined by its
+            # colour, and converting to grey turns a green cube on
+            # grey ground into grey on grey.
+            small = handle.convert('RGB').resize(size, Image.BILINEAR)
+            rows.append(np.asarray(small, dtype=np.float32).ravel() / 255.0)
+    return np.stack(rows)
+
+
+def image_leakage_report(split, size=(32, 24)):
+    """
+    Measure how similar each test IMAGE is to its nearest training image.
+
+    THIS REPLACED A METRIC THAT QUIETLY STOPPED WORKING, AND THEN TOLD AN
+    UNCOMFORTABLE TRUTH.
+
+    `leakage_report` compares LABELS. That was a good proxy while the
+    dataset was small and its episodes were far apart in label space, so
+    a close label meant a near-duplicate frame. Recording 40 episodes
+    across the workspace made label space dense, and two frames from
+    DIFFERENT episodes could then share a label while showing different
+    scenes. Under that metric the correct split and the leaking one
+    scored the same, which reads as "episode splitting does not help"
+    and really means "this proxy no longer measures the thing".
+
+    Comparing images measures it directly. On the 480-frame recording it
+    reports that the frame-wise split contains EXACT duplicates across
+    train and test, which is unambiguous leakage - and that the
+    episode-wise split is not far behind, because the scene is a flat
+    grey floor and one small cube, so pictures from different episodes
+    genuinely do look alike.
+
+    No threshold is applied beyond exact equality. Any other cutoff on
+    this scene would be a number chosen to make a point rather than
+    measured, and the percentiles say more than a count would.
+
+    Distances are RMS difference in colour levels, 0 to 1.
+    """
+    train = _thumbnails(split['train'], size)
+    test = _thumbnails(split['test'], size)
+    if not len(train) or not len(test):
+        raise ValueError('both train and test must be non-empty')
+
+    nearest = np.empty(len(test))
+    for index, row in enumerate(test):
+        deltas = train - row
+        nearest[index] = np.sqrt((deltas * deltas).mean(axis=1)).min()
+
+    return {
+        'test_frames': int(len(test)),
+        'min': float(nearest.min()),
+        'p10': float(np.percentile(nearest, 10)),
+        'median': float(np.median(nearest)),
+        'exact_duplicates': int((nearest == 0.0).sum()),
+    }

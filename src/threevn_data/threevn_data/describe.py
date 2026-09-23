@@ -83,16 +83,30 @@ def main(argv=None):
         print()
 
     print()
-    print('    how the split is made            nearest train neighbour')
-    print('                                     min     median   <10mm')
+    print('    how the split is made       nearest training IMAGE')
+    print('                                min     p10     median  identical')
+    for name, splitter in (('by episode (correct)', ds.split_by_episode),
+                           ('by frame (leaks)', ds.split_by_frame)):
+        try:
+            report = ds.image_leakage_report(splitter(frames))
+        except ValueError as exc:
+            print(f'    {name:27s} {exc}')
+            continue
+        print('    %-27s %.4f  %.4f  %.4f  %4d/%d' % (
+            name, report['min'], report['p10'], report['median'],
+            report['exact_duplicates'], report['test_frames']))
+
+    print()
+    print('    same two splits, by LABEL distance (a proxy that stops')
+    print('    discriminating once label space is densely covered):')
     for name, splitter in (('by episode (correct)', ds.split_by_episode),
                            ('by frame (leaks)', ds.split_by_frame)):
         try:
             report = ds.leakage_report(splitter(frames))
         except ValueError as exc:
-            print(f'    {name:32s} {exc}')
+            print(f'    {name:27s} {exc}')
             continue
-        print('    %-32s %5.1f mm %6.1f mm %4d/%d' % (
+        print('    %-27s %5.1f mm %6.1f mm %4d/%d' % (
             name, report['min_mm'], report['median_mm'],
             report['within_10mm'], report['test_frames']))
 

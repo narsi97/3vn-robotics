@@ -51,6 +51,7 @@ import collections
 import json
 import math
 import pathlib
+import random
 import subprocess
 import sys
 import time
@@ -67,23 +68,19 @@ import tf2_ros
 
 from threevn_data import manifest as manifest_mod
 
-#: The target, as the world file places it. Read together with
-#: threevn_sim/worlds/bench_with_target.sdf: changing it there changes
-#: every label recorded here.
-CUBE_IN_WORLD = (0.40, 0.0, 0.025)
-GT_TOPIC_TEMPLATE = '/world/{world}/dynamic_pose/info'
-GT_MODEL = 'threevn_mm'
+#: Robot poses arrive on dynamic_pose/info; a STATIC model like the
+#: target cube does not, because it is not part of the dynamic set. It
+#: appears on pose/info instead. Reading the wrong one returns nothing
+#: and looks exactly like a simulator that is not running.
+DYNAMIC_TOPIC = '/world/{world}/dynamic_pose/info'
+STATIC_TOPIC = '/world/{world}/pose/info'
+SET_POSE = '/world/{world}/set_pose'
+ROBOT_MODEL = 'threevn_mm'
+TARGET_MODEL = 'target_cube'
 
 
-def ground_truth_pose(world, model=GT_MODEL, timeout=15):
-    """
-    Return the simulator's true (x, y, yaw) for a model, or None.
-
-    Odometry would be the obvious source and it is the wrong one: it
-    drifts, and a label that drifts is a label that is quietly wrong in a
-    way no amount of training will fix.
-    """
-    topic = GT_TOPIC_TEMPLATE.format(world=world)
+def _read_pose(topic, model, timeout=15):
+    """Return (x, y, z, yaw) for a model from a gz pose topic, or None."""
     try:
         out = subprocess.run(['gz', 'topic', '-t', topic, '-e', '-n', '1'],
                              capture_output=True, text=True,
@@ -121,7 +118,46 @@ def ground_truth_pose(world, model=GT_MODEL, timeout=15):
     qz = field('orientation', 'z')
     qw = field('orientation', 'w') or 1.0
     return (field('position', 'x'), field('position', 'y'),
+            field('position', 'z'),
             math.atan2(2.0 * qw * qz, 1.0 - 2.0 * qz * qz))
+
+
+def robot_pose(world, timeout=15):
+    """Return the robot's true (x, y, z, yaw), or None."""
+    return _read_pose(DYNAMIC_TOPIC.format(world=world), ROBOT_MODEL, timeout)
+
+
+def target_pose(world, timeout=15):
+    """
+    Return the target's true (x, y, z, yaw), or None.
+
+    Read rather than assumed. The first version of this carried the
+    cube's pose as a module constant copied from the world file, which
+    was correct exactly until the recorder started MOVING the cube to
+    vary the labels - at which point every label after the first would
+    have been silently wrong while the images changed as expected.
+    """
+    return _read_pose(STATIC_TOPIC.format(world=world), TARGET_MODEL, timeout)
+
+
+def place_target(world, x, y, z=0.025, timeout=10):
+    """
+    Move the target. Returns True if the simulator accepted it.
+
+    Gazebo will move a <static> model on request even though physics
+    will not; that is what makes it usable as a repositionable prop.
+    """
+    request = (f'name: "{TARGET_MODEL}", '
+               f'position: {{x: {x}, y: {y}, z: {z}}}')
+    try:
+        out = subprocess.run(
+            ['gz', 'service', '-s', SET_POSE.format(world=world),
+             '--reqtype', 'gz.msgs.Pose', '--reptype', 'gz.msgs.Boolean',
+             '--timeout', '3000', '--req', request],
+            capture_output=True, text=True, timeout=timeout).stdout
+    except (subprocess.SubprocessError, OSError):
+        return False
+    return 'true' in out.lower()
 
 
 class Collector(Node):
@@ -228,25 +264,30 @@ class Collector(Node):
         """
         Return the target's position in the camera's optical frame.
 
-        World truth goes to base_footprint by the robot's true pose, then
-        TF carries it to the optical frame. TF is used for the part that
-        is rigid and known exactly from the description, and ground truth
-        for the part that odometry would get wrong.
-        """
-        pose = ground_truth_pose(self.world)
-        if pose is None:
-            return None
-        rx, ry, ryaw = pose
+        BOTH poses come from ground truth. The robot's world pose carries
+        the target into base_footprint, and TF - which is exact, since
+        the rest of the chain is rigid and comes from the description -
+        carries it to the optical frame.
 
-        dx = CUBE_IN_WORLD[0] - rx
-        dy = CUBE_IN_WORLD[1] - ry
+        Odometry would be the obvious source for the robot pose and is
+        the wrong one: it drifts, and a label that drifts is quietly
+        wrong in a way no amount of training will fix.
+        """
+        robot = robot_pose(self.world)
+        target = target_pose(self.world)
+        if robot is None or target is None:
+            return None
+        rx, ry, _, ryaw = robot
+        tx, ty, tz, _ = target
+
+        dx, dy = tx - rx, ty - ry
         cos, sin = math.cos(-ryaw), math.sin(-ryaw)
 
         point = PoseStamped()
         point.header.frame_id = 'base_footprint'
         point.pose.position.x = dx * cos - dy * sin
         point.pose.position.y = dx * sin + dy * cos
-        point.pose.position.z = CUBE_IN_WORLD[2]
+        point.pose.position.z = tz
         point.pose.orientation.w = 1.0
 
         try:
@@ -256,6 +297,29 @@ class Collector(Node):
         except tf2_ros.TransformException:
             return None
         return (out.pose.position.x, out.pose.position.y, out.pose.position.z)
+
+    def place_target_ahead(self, forward, lateral):
+        """
+        Put the target a given offset AHEAD OF THE ROBOT, wherever it is.
+
+        Placing it at fixed world coordinates would work for one episode
+        and then drift out of frame as the robot drove, which is how an
+        earlier run dropped all 96 frames as "target behind the camera".
+        Offsetting from the robot's current pose keeps every episode
+        usable and, because the robot has moved, still puts the target
+        somewhere new in the world.
+        """
+        robot = robot_pose(self.world)
+        if robot is None:
+            return False
+        rx, ry, _, ryaw = robot
+        x = rx + forward * math.cos(ryaw) - lateral * math.sin(ryaw)
+        y = ry + forward * math.sin(ryaw) + lateral * math.cos(ryaw)
+        if not place_target(self.world, x, y):
+            return False
+        # The pose takes a moment to reach the render and the pose topic.
+        self.spin_for(0.6)
+        return True
 
     def capture(self, episode, index):
         """Write one frame and its label. Returns True if it was kept."""
@@ -293,16 +357,43 @@ class Collector(Node):
         return True
 
 
+def target_offsets(count, seed=0):
+    """
+    Return (forward, lateral) target placements spanning the workspace.
+
+    A deterministic low-discrepancy sweep rather than uniform random
+    sampling: with a few dozen episodes, random placement leaves visible
+    gaps and clusters, and two runs of the same command are not
+    comparable. The jitter keeps the placements off an exact lattice,
+    which would otherwise make every label an exact multiple of the grid
+    step and let a model memorise the grid instead of the geometry.
+
+    Bounds are what the camera can actually see: nearer than 0.28 m the
+    target leaves the bottom of the frame, further than 0.62 m it is a
+    handful of pixels wide and the apparent-size range is meaningless.
+    """
+    rng = random.Random(seed)
+    out = []
+    for index in range(count):
+        # Golden-ratio sequence in both axes, then jittered.
+        forward = 0.28 + 0.34 * ((index * 0.6180339887) % 1.0)
+        lateral = -0.13 + 0.26 * ((index * 0.3819660113) % 1.0)
+        out.append((round(forward + rng.uniform(-0.01, 0.01), 4),
+                    round(lateral + rng.uniform(-0.01, 0.01), 4)))
+    return out
+
+
 def main(argv=None):
     """Record a dataset."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--out', default='/ws/datasets/target',
                         help='where to write the dataset')
-    parser.add_argument('--episodes', type=int, default=6)
+    parser.add_argument('--episodes', type=int, default=40)
     parser.add_argument('--frames', type=int, default=12,
                         help='frames per episode')
     parser.add_argument('--world', default='bench_with_target')
     parser.add_argument('--repo', default='/ws')
+    parser.add_argument('--seed', type=int, default=0)
     args = parser.parse_args(argv if argv is not None else sys.argv[1:])
 
     rclpy.init()
@@ -315,28 +406,36 @@ def main(argv=None):
         rclpy.shutdown()
         return 1
 
-    # A deliberate, repeatable tour rather than random motion: the point
-    # is coverage of viewpoints, and randomness makes it luck whether two
-    # runs of the same command produce comparable datasets.
-    # Every entry MOVES. A stationary episode records the same picture
-    # repeatedly, which is what the first version of this did.
     # Per-STEP velocities, applied for about a third of a second each.
     # Gentle on purpose: a 62 degree field of view at 0.4 m loses the
     # target after roughly 30 degrees of yaw, and an episode that drives
-    # past it records nothing.
+    # past it records nothing. Every entry MOVES - a stationary episode
+    # records the same picture repeatedly, which is what the first
+    # version of this did.
     moves = [
         (0.05, 0.06), (-0.05, 0.06), (0.04, -0.07), (-0.04, -0.07),
         (0.06, 0.02), (-0.06, 0.02), (0.03, 0.09), (-0.03, -0.09),
     ]
+    offsets = target_offsets(args.episodes, seed=args.seed)
 
     kept = 0
     for episode in range(args.episodes):
-        linear, angular = moves[episode % len(moves)]
-        # Reposition between episodes, then record along the way.
-        if episode:
-            node.drive(-0.10 if episode % 2 else 0.10, 0.30, 1.0)
-        kept += node.record_episode(episode, linear, angular, args.frames)
-        print(f'  episode {episode}: {kept} frames so far')
+        # A NEW TARGET POSITION PER EPISODE. Without this the label
+        # barely varies: every episode looks at the same cube from a
+        # slightly different angle, and a model has almost nothing to
+        # learn a mapping from. It also makes the episode-wise split
+        # hold out unseen target PLACEMENTS, not just unseen viewpoints.
+        forward, lateral = offsets[episode]
+        if not node.place_target_ahead(forward, lateral):
+            print(f'  episode {episode}: could not place the target, skipped')
+            continue
+
+        before = kept
+        kept += node.record_episode(episode, *moves[episode % len(moves)],
+                                    args.frames)
+        print(f'  episode {episode:3d}  target {forward:.2f} m ahead, '
+              f'{lateral:+.2f} m across  ->  {kept - before} frames '
+              f'({kept} total)')
 
     out = pathlib.Path(args.out)
     with (out / 'labels.jsonl').open('w') as handle:
@@ -354,19 +453,26 @@ def main(argv=None):
             'source': 'simulator',
             'quantity': 'target position in the camera optical frame',
             'units': 'metres',
-            'target_world_pose': list(CUBE_IN_WORLD),
+            # The target MOVES between episodes, so there is no single
+            # pose to record. Its position per frame is what the label
+            # is, and it is read from ground truth each time rather
+            # than assumed.
+            'target_repositioned_per_episode': True,
         },
-        episodes=args.episodes,
+        episodes=len({row['episode'] for row in node.rows}),
         frames=kept,
         repo=args.repo,
+        extra={'seed': args.seed},
     )
     manifest_mod.write(out, doc)
 
-    print(f'\n  wrote {kept} frames across {args.episodes} episodes to {out}')
+    print(f'\n  wrote {kept} frames across '
+          f'{len({row["episode"] for row in node.rows})} episodes to {out}')
     if node.rejected:
         print('  dropped:')
         for reason, count in node.rejected.most_common():
             print(f'    {count:4d}  {reason}')
+
     problems = manifest_mod.validate(doc)
     if problems:
         print('  manifest problems:')
