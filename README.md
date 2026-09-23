@@ -162,7 +162,7 @@ Full audit: [`THIRD_PARTY.md`](THIRD_PARTY.md) ·
 
 ## Status
 
-**Phases 0–3 complete.**
+**Phases 0–4 complete.**
 
 - The robot description expands for all three hardware targets.
 - The arm spawns in Gazebo Harmonic, with all three controllers active
@@ -188,7 +188,19 @@ make scenario NAME=pick_and_place
 make test-sim                     # the full Gazebo suite
 ```
 
-Phase 4 is the remaining automated test layers.
+- Four test tiers, and an end-to-end acceptance run that emits a report
+  naming the commit that produced it.
+- Joint limits now enforced **below** the hardware seam, not just
+  validated above it.
+
+```bash
+make test        # ~11s,  no ROS
+make test-ros    # ~135s, real ROS graph
+make test-sim    # ~100s, Gazebo physics
+make acceptance  # the full sequence + report
+```
+
+Phase 5 is the ESP32 firmware and the `Esp32SystemInterface`.
 
 See [`docs/roadmap.md`](docs/roadmap.md) for the 15-phase plan and
 [`docs/risks.md`](docs/risks.md) for what is known to be fragile.

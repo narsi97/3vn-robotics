@@ -9,6 +9,11 @@ __pycache__/
 .pytest_cache/
 .coverage
 
+# Acceptance reports are run artifacts. CI uploads them; git does not
+# keep them.
+acceptance.json
+acceptance.md
+
 # Expanded URDFs are build artifacts, never sources. The YAML plus the
 # xacro is the single source of truth; a committed URDF would drift.
 *.urdf

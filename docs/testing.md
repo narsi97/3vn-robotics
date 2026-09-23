@@ -1,18 +1,30 @@
 # Testing
 
 ```bash
-make test       # lint + unit, no simulator.  Budget: under 60s
-make test-sim   # Gazebo integration.         Slow, opt-in
-make lint       # linters + check_urdf on every profile
+make test        # lint + unit, no ROS at all        ~11s
+make test-ros    # real ROS graph, mock target       ~135s
+make test-sim    # Gazebo physics                    ~100s
+make acceptance  # end-to-end sequence + report      ~70s
+make lint        # linters + check_urdf, every profile
 ```
+
+Four tiers, each earning its place by what it can catch that the tier
+below cannot:
+
+| Tier | Needs | Catches |
+|---|---|---|
+| `make test` | nothing | config, structure, kinematics, inertia, readiness logic, the hardware seam |
+| `make test-ros` | a ROS graph | node startup, interface contracts, **limit enforcement**, TF, FK-vs-KDL |
+| `make test-sim` | Gazebo | spawn, controller activation under physics, real-time factor |
+| `make acceptance` | Gazebo + dashboard | the whole sequence, with a report naming the build |
 
 **The 60-second budget is a design constraint, not an aspiration.** A
 suite that takes minutes is a suite people stop running before they
 commit. Everything that needs a simulator is marked `slow` and excluded
 from `make test`.
 
-Current: **166 fast tests in ~7 s**, plus **12 Gazebo integration
-tests in ~106 s** under `make test-sim`.
+Current: **~215 fast tests in ~11 s**, **15 ROS integration tests**,
+**12 Gazebo integration tests**, and a passing end-to-end acceptance run.
 
 ## Layers
 
@@ -24,6 +36,11 @@ tests in ~106 s** under `make test-sim`.
 | **Architecture** | nothing | `test_ros2_control_targets.py`, `test_package_dependencies.py` |
 | Independent parser | nothing | `scripts/check_description.sh` |
 | Scenario framework | nothing | `threevn_control/test/` |
+| Forward kinematics | nothing | `threevn_control/test/test_kinematics.py` |
+| Readiness logic | nothing | `threevn_dashboard/test/test_robot_state.py` |
+| HTTP contracts | nothing | `threevn_dashboard/test/test_http_api.py` |
+| ROS interfaces, limits | ROS graph | `threevn_bringup/test/test_ros_integration.py` |
+| TF, FK vs KDL | ROS graph | `threevn_bringup/test/test_tf_matches_kinematics.py` |
 | Simulation assets | nothing | `threevn_sim/test/test_world.py` |
 | Gazebo integration | simulator | `threevn_sim/test/test_gz_spawn.py` |
 
@@ -69,6 +86,19 @@ perfectly healthy. The duplicate is only visible before parsing.
 Tests parametrize over `PROFILES` — every `config/threevn_*.yaml` — and
 over all three hardware targets. Adding a profile automatically widens the
 matrix; nothing needs updating.
+
+## Two implementations that must agree
+
+`threevn_control/kinematics.py` computes forward kinematics with its own
+matrix arithmetic. `robot_state_publisher` computes the same transforms
+through KDL. `test_tf_matches_kinematics.py` asserts the two agree to a
+millimetre, at whatever pose the robot happens to be in.
+
+That is worth more than either alone. A kinematics module tested only
+against its own arithmetic proves the arithmetic is self-consistent —
+including when it is consistently wrong. It also earned its keep
+immediately: it found that the camera mount was tilted **up at the
+ceiling** rather than down at the workspace, before any camera existed.
 
 ## Why `make test` does not run the Gazebo tests
 

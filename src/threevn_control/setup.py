@@ -25,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'run_scenario = threevn_control.run_scenario:main',
+            'acceptance = threevn_control.acceptance:main',
         ],
     },
 )

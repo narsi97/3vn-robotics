@@ -1,0 +1,22 @@
+digraph G {
+"upper_arm_link" -> "forearm_link"[label=" Broadcaster: default_authority\nAverage rate: 16.8\nBuffer length: 5.0\nMost recent transform: 1790136365.628862\nOldest transform: 1790136360.628907\n"];
+"shoulder_link" -> "upper_arm_link"[label=" Broadcaster: default_authority\nAverage rate: 16.8\nBuffer length: 5.0\nMost recent transform: 1790136365.628862\nOldest transform: 1790136360.628907\n"];
+"gripper_base_link" -> "gripper_left_finger_link"[label=" Broadcaster: default_authority\nAverage rate: 16.8\nBuffer length: 5.0\nMost recent transform: 1790136365.628862\nOldest transform: 1790136360.628907\n"];
+"gripper_base_mount" -> "gripper_base_link"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"gripper_base_link" -> "gripper_right_finger_link"[label=" Broadcaster: default_authority\nAverage rate: 16.8\nBuffer length: 5.0\nMost recent transform: 1790136365.628862\nOldest transform: 1790136360.628907\n"];
+"base_link" -> "shoulder_link"[label=" Broadcaster: default_authority\nAverage rate: 16.8\nBuffer length: 5.0\nMost recent transform: 1790136365.628862\nOldest transform: 1790136360.628907\n"];
+"base_footprint" -> "base_link"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"forearm_link" -> "wrist_link"[label=" Broadcaster: default_authority\nAverage rate: 16.8\nBuffer length: 5.0\nMost recent transform: 1790136365.628862\nOldest transform: 1790136360.628907\n"];
+"camera_mount_link" -> "camera_link"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"base_link" -> "camera_mount_link"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"camera_link" -> "camera_optical_frame"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"gripper_base_link" -> "grasp_frame"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"wrist_link" -> "gripper_base_mount"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"base_link" -> "imu_link"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"base_link" -> "mount_plate_link"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+"wrist_link" -> "tool0"[label=" Broadcaster: default_authority\nAverage rate: 10000.0\nBuffer length: 0.0\nMost recent transform: 0.0\nOldest transform: 0.0\n"];
+edge [style=invis];
+ subgraph cluster_legend { style=bold; color=black; label ="view_frames Result";
+"Recorded at time: 1790136365.65508"[ shape=plaintext ] ;
+}->"base_footprint";
+}

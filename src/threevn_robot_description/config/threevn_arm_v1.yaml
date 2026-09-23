@@ -191,7 +191,14 @@ frames:
   camera_mount_link:
     parent: base_link
     xyz: [0.045, 0.0, 0.030]
-    rpy: [0.0, -0.35, 0.0]
+    # POSITIVE pitch tilts the camera DOWN, toward the workspace.
+    #
+    # This was -0.35 and aimed the camera at the ceiling. Caught by
+    # test_kinematics, before any camera existed: the REP-103 optical
+    # rotation maps optical +Z onto camera_link +X, and a NEGATIVE pitch
+    # about Y then rotates that forward axis upward. Exactly the sign
+    # error that costs a day in Phase 12.
+    rpy: [0.0, 0.35, 0.0]
   imu_link:
     parent: base_link
     xyz: [0.0, 0.0, 0.015]

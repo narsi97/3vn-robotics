@@ -20,6 +20,16 @@ controller_manager:
     # tuning done in sim meaningless on the real arm.
     update_rate: 50
 
+    # Clamp every command to the joint limits declared in the URDF,
+    # inside ResourceManager - i.e. BELOW the hardware seam, so it holds
+    # for mock, Gazebo and the ESP32 alike.
+    #
+    # Phase 2 measured that without this, nothing enforced the limits we
+    # declare: commanding shoulder_pan_joint to 180 degrees against a 90
+    # degree limit drove it to 180 under mock_components. Gazebo only
+    # appeared safe because its physics joint has a hard stop.
+    enforce_command_limits: true
+
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
 

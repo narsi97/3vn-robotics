@@ -54,11 +54,12 @@ at the package share directory. A directory outside any package would need
 a hand-maintained absolute path in every launch file and would break the
 moment the workspace moved.
 
-## Planned scenarios (Phase 2)
+## Scenarios
 
 `scenario_home`, `scenario_move_joint`, `scenario_move_to_position`,
 `scenario_gripper`, `scenario_pick_and_place`, `scenario_safety_limit`.
 
-Each becomes a `launch_testing` test: start the simulator, spawn, command,
-assert observed state, shut down cleanly. The template is
-`threevn_robot_description/test/test_rsp_publishes_tf.py`.
+Each is a scenario in `threevn_control/scenarios/arm.py`, run as a test
+by `threevn_sim/test/test_gz_spawn.py` and as a sequence by
+`make acceptance`. The template for a ROS integration test is
+`threevn_bringup/test/test_tf_matches_kinematics.py`.

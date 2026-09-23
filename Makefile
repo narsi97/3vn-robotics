@@ -19,7 +19,7 @@ DASH    := http://localhost:8107/
 
 .DEFAULT_GOAL := help
 .PHONY: help doctor setup up down shell build test test-sim lint urdf \
-        view mock sim robot stop scenario dash clean nuke
+        view mock sim robot stop scenario dash acceptance clean nuke test-ros
 
 help:
 	@echo ""
@@ -32,6 +32,7 @@ help:
 	@echo ""
 	@echo "  make build     colcon build --symlink-install"
 	@echo "  make test      Fast tests, no simulator           (budget: <60s)"
+	@echo "  make test-ros  ROS integration tests, mock target  (~60s)"
 	@echo "  make test-sim  Gazebo integration tests           (slow)"
 	@echo "  make lint      ament linters + check_urdf on every profile"
 	@echo ""
@@ -43,6 +44,7 @@ help:
 	@echo ""
 	@echo "  make dash      Live dashboard             -> $(DASH)"
 	@echo "  make scenario  Run a scenario (NAME=home, or NAME=all)"
+	@echo "  make acceptance  Full end-to-end run + report"
 	@echo "  make stop      Stop any running robot/sim stack"
 	@echo ""
 	@echo "  make clean     Remove build/install/log"
@@ -78,6 +80,13 @@ build: up
 # constraint, not an aspiration: it is what makes people actually run it.
 test: build
 	$(RUN) "colcon test --event-handlers console_direct+ --pytest-args -m 'not slow' && colcon test-result --verbose"
+
+# ROS integration tier: a real ROS graph and real controllers, no
+# physics. Sits between the fast suite (no ROS at all) and the Gazebo
+# suite (two minutes), and covers every interface contract in about a
+# minute.
+test-ros: build stop
+	$(RUN) "cd /ws/src/threevn_bringup && python3 -m pytest test -m ros -v"
 
 # Runs pytest DIRECTLY rather than through colcon: the slow marker is
 # excluded at the CMake level (see threevn_sim/CMakeLists.txt), so colcon
@@ -138,6 +147,21 @@ dash: build
 	            THREEVN_TARGET=$(TARGET) \
 	            THREEVN_PROFILE=$(PROFILE) \
 	            ros2 launch threevn_dashboard dashboard.launch.py"
+
+# The full end-to-end acceptance run (spec section 50). Needs a robot
+# already up -- `make sim &` or `make mock &` -- and reads telemetry from
+# the dashboard if that is running too, so the report can name the build
+# that produced it.
+acceptance: build
+	$(RUN_TTY) "ros2 run threevn_control acceptance --report /ws/log/acceptance"
+	@echo ""
+	@echo "  report written inside the container at /ws/log/acceptance.{json,md}"
+	@echo "  copy it out with:  make acceptance-report"
+
+acceptance-report:
+	@docker compose -f docker/compose.yml cp $(SVC):/ws/log/acceptance.md ./acceptance.md 2>/dev/null \
+	  && echo "  -> ./acceptance.md" || echo "  no report yet; run 'make acceptance' first"
+
 
 stop: up
 	-@$(RUN) "pkill -9 -f 'ros2 laun[c]h' ; pkill -9 -f '[g]z sim' ; \

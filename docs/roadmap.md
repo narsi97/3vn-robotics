@@ -10,8 +10,8 @@ One system that evolves. Not twelve disconnected tutorials.
 | 1 | Robot description (URDF/Xacro, YAML-driven) | **done** |
 | 2 | Gazebo simulation + scenarios | **done** |
 | 3 | ROS 2 control runtime, dashboard | **done** |
-| 4 | Full automated test layers | next |
-| 5 | ESP32 firmware + `Esp32SystemInterface` | |
+| 4 | Full automated test layers | **done** |
+| 5 | ESP32 firmware + `Esp32SystemInterface` | next |
 | 6 | Docker runtime images | |
 | 7 | CI/CD pipelines | |
 | 8 | VPS deployment | |
@@ -88,16 +88,18 @@ twice in Phase 3 — controllers and then hardware both reported `active`
 for a control stack that had been killed. Mitigated by ageing the data
 out; worth remembering anywhere else a service is polled.
 
-**`ros2_control` does not enforce the joint limits it declares.**
+**~~`ros2_control` does not enforce the joint limits it declares.~~**
+Closed in Phase 4 with `enforce_command_limits: true`. Kept here for the
+record:
 Measured in Phase 2: commanding `shoulder_pan_joint` to 180° against a 90°
 limit drives it to 180° under `mock_components`, despite both the URDF
 `<limit>` and the `command_interface` min/max saying otherwise. Gazebo only
 clamps because its physics joint has a hard stop.
 
-Mitigated above the seam — `RobotClient` rejects out-of-limit goals — but
-that only guards commands sent through the client. Proper enforcement
-belongs in a `ros2_control` joint limiter (Phase 3/4) and, non-negotiably,
-in the ESP32 firmware (Phase 5). See [safety.md](safety.md).
+Now enforced in `ResourceManager`, below the hardware seam, and asserted
+by `test_ros_integration.py`. Firmware enforcement in Phase 5 remains
+non-negotiable regardless — it is the only layer that survives a host
+crash. See [safety.md](safety.md).
 
 **CSP will block the Phase 3 dashboard.** The shared 3VN Caddy sets
 `connect-src 'self'` for every product on the domain, so a dashboard

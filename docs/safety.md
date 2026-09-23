@@ -29,10 +29,23 @@ Two conclusions follow, and both shaped the design:
 2. **Validation has to live above the hardware seam**, where it applies
    to mock, Gazebo and the ESP32 alike.
 
-So `RobotClient` now parses joint limits from the `/robot_description`
-the robot is *actually running* and raises `LimitViolation` before any
-goal is sent. `safety_limit` asserts the rejection, and passes on both
-targets for the same reason.
+Two things were done about it, and both matter.
+
+**Phase 3 — validation above the seam.** `RobotClient` parses joint
+limits from the `/robot_description` the robot is *actually running* and
+raises `LimitViolation` before any goal is sent.
+
+**Phase 4 — enforcement below the seam.** Setting
+`enforce_command_limits: true` on `controller_manager` makes
+`ResourceManager` clamp every command against the URDF limits. Measured:
+commanding `shoulder_pan_joint` to 180° now stops it at exactly
+1.57080 rad under `mock_components`, where before it went to 3.14159.
+
+They are not redundant. The client **tells you** — it rejects loudly, so
+a programmer error surfaces at the point the intent was expressed. The
+enforcement **prevents it** — silently, for any caller, including one
+that bypasses the client entirely. Note that a clamped goal still reports
+`SUCCEEDED`, which is exactly why the loud layer is still wanted.
 
 ## What that is, and what it is not
 
@@ -58,7 +71,7 @@ It is **not a safety system**:
 | Servo travel | inherent | An MG996R cannot exceed ~180° of its own range. |
 | Firmware clamp | **Phase 5** | The ESP32 must clamp every commanded angle independently of ROS. Non-negotiable: it is the last line that survives a host crash. |
 | `RobotClient` validation | **done** | Rejects out-of-limit goals before sending. |
-| `ros2_control` limits | **open** | Declared and not enforced. See roadmap. |
+| `ros2_control` limits | **done** | `enforce_command_limits: true` on controller_manager. `ResourceManager` clamps every command below the hardware seam, so it holds for mock, Gazebo and the ESP32 alike. Asserted by `test_ros_integration.py`. |
 | Physics (simulation only) | inherent | Useful in Gazebo, meaningless on hardware. |
 
 ## Practical rules

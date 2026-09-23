@@ -65,6 +65,45 @@ jobs:
               python3 -m pytest test -m slow -v --junit-xml=/ws/sim-results.xml
             '
 
+      - name: End-to-end acceptance run with report
+        # The full sequence from spec section 50, with the dashboard
+        # running so the report can name the build that produced it.
+        run: |
+          mkdir -p artifacts
+          docker run --rm \
+            --shm-size=1gb \
+            -e LIBGL_ALWAYS_SOFTWARE=1 \
+            -e GALLIUM_DRIVER=llvmpipe \
+            -e ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST \
+            -e THREEVN_GIT_COMMIT=${{ github.sha }} \
+            -e THREEVN_GIT_BRANCH=${{ github.ref_name }} \
+            -e THREEVN_TARGET=gz \
+            -v "$PWD/src:/ws/src" \
+            -v "$PWD/artifacts:/out" \
+            -w /ws \
+            threevn-robotics-ci:local \
+            bash -lc '
+              colcon build --symlink-install > /dev/null &&
+              source install/setup.bash &&
+              ros2 launch threevn_sim sim.launch.py > /tmp/sim.log 2>&1 &
+              ros2 launch threevn_dashboard dashboard.launch.py > /tmp/dash.log 2>&1 &
+              sleep 50
+              ros2 run threevn_control acceptance --report /out/acceptance
+            '
+
+      - name: Attach the acceptance report to the job summary
+        if: always()
+        run: |
+          if [ -f artifacts/acceptance.md ]; then
+            cat artifacts/acceptance.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: acceptance-report
+          path: artifacts/acceptance.*
+
       - name: Scenarios must also pass with no simulator
         # The same scenarios, against mock_components. If a scenario passes
         # under Gazebo but not here, the robot abstraction has become
