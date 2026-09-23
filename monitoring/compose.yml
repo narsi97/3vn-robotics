@@ -1,0 +1,91 @@
+# The 3VN observability stack.
+#
+# Runs on its own small box (2 vCPU / 4 GB), NOT on the shared product
+# VPS. Two reasons, and the second is the one that matters:
+#
+#   1. The shared VPS is 1 vCPU / 2 GB already carrying ~10 containers
+#      plus Umami. This stack needs ~650 MB and would not fit.
+#   2. Monitoring that dies with the host it monitors tells you nothing
+#      at the moment you most need it.
+#
+# Nothing here is published to the internet except the collector's OTLP
+# port, which is the one thing robots must reach. Grafana binds to
+# localhost and is reached over an SSH tunnel — the same access model as
+# Umami: no public login page, nothing to brute force.
+#
+#   ssh -L 3000:127.0.0.1:3000 root@<monitoring-host>
+#   open http://localhost:3000
+
+services:
+  # Metrics storage. VictoriaMetrics rather than Prometheus: roughly a
+  # tenth the memory for the same PromQL surface, which is what makes
+  # the whole stack fit on a 4 GB box.
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.106.1
+    restart: unless-stopped
+    command:
+      - "--storageDataPath=/storage"
+      - "--httpListenAddr=:8428"
+      # 90 days. Long enough to compare a robot's behaviour against
+      # itself a season ago; short enough to stay small on one disk.
+      - "--retentionPeriod=90d"
+      - "--memory.allowedPercent=40"
+    volumes:
+      - vmdata:/storage
+    # Not published. Only the collector and Grafana reach it, over the
+    # compose network.
+    expose:
+      - "8428"
+    healthcheck:
+      # 127.0.0.1, never localhost — house rule.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8428/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  collector:
+    image: otel/opentelemetry-collector-contrib:0.115.1
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./collector/config.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      # The ONLY thing exposed to robots. Put it behind TLS in front of
+      # this (Caddy or a tunnel) before pointing a robot on the open
+      # internet at it.
+      - "4318:4318"
+    depends_on:
+      victoriametrics:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:13133/"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    restart: unless-stopped
+    ports:
+      # LOCALHOST ONLY. Reached by SSH tunnel, following the Umami
+      # precedent: no public login page, nothing to brute force, and no
+      # window where default credentials are exposed.
+      - "127.0.0.1:3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+      # Never reachable from outside, so a fixed root URL is honest.
+      GF_SERVER_ROOT_URL: "http://localhost:3000"
+    volumes:
+      - grafana:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      victoriametrics:
+        condition: service_healthy
+
+volumes:
+  vmdata:
+  grafana:

@@ -1,0 +1,71 @@
+# OpenTelemetry Collector — the single ingest point for the estate.
+#
+# THIS is why OTLP was chosen. Every robot, and eventually every 3VN
+# product, speaks OTLP to this one process. Changing where the data
+# lands means editing the exporters below, not re-instrumenting
+# anything.
+#
+# It runs on a small dedicated box (2 vCPU / 4 GB). Memory is the binding
+# constraint, so the limiter below is not decoration.
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        # Robots push here. They are behind home NAT and cannot be
+        # scraped, and more importantly must never wait on this.
+        endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  # FIRST in the pipeline, deliberately. Under load the collector will
+  # start refusing data rather than growing until the kernel kills it —
+  # on a 4 GB box shared with a metrics database and Grafana, an OOM
+  # here takes the whole observability stack down at exactly the moment
+  # someone needs it.
+  memory_limiter:
+    check_interval: 2s
+    limit_mib: 384
+    spike_limit_mib: 96
+
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+
+  # Every series gets these, so a metric from a fleet is attributable.
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: production
+        action: upsert
+
+exporters:
+  # VictoriaMetrics speaks the Prometheus remote-write protocol.
+  prometheusremotewrite:
+    endpoint: http://victoriametrics:8428/api/v1/write
+    # Resource attributes (robot.id, git.commit, ...) become labels.
+    # Without this they are dropped and every robot looks identical.
+    resource_to_telemetry_conversion:
+      enabled: true
+    tls:
+      insecure: true
+
+  # Uncomment to see what is arriving. Verbose; leave off in production.
+  # debug:
+  #   verbosity: detailed
+
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+service:
+  extensions: [health_check]
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [prometheusremotewrite]
+  telemetry:
+    logs:
+      level: warn

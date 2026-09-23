@@ -1,0 +1,19 @@
+# VictoriaMetrics speaks the Prometheus query API, so Grafana treats it
+# as a Prometheus datasource. Provisioned rather than clicked, so a
+# rebuilt box comes back identical.
+apiVersion: 1
+datasources:
+  - name: VictoriaMetrics
+    # Explicit uid. Dashboards reference a datasource BY UID, and
+    # without this Grafana generates a random one per install - so a
+    # provisioned dashboard points at a datasource that does not exist
+    # and every panel fails to load with no useful message.
+    uid: victoriametrics
+    type: prometheus
+    access: proxy
+    url: http://victoriametrics:8428
+    isDefault: true
+    jsonData:
+      # Matches the robot's 15s export interval. Setting this lower makes
+      # graphs show gaps that are not real.
+      timeInterval: 15s

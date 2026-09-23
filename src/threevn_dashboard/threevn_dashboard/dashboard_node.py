@@ -35,6 +35,7 @@ from sensor_msgs.msg import JointState
 
 from threevn_dashboard.fleet_reporter import FleetReporter
 from threevn_dashboard.http_server import make_server, serve_in_background
+from threevn_dashboard.otlp_metrics import OtlpMetricsExporter
 from threevn_dashboard.robot_state import RobotState
 from threevn_dashboard.version import missing_fields, version_info
 
@@ -99,6 +100,18 @@ class DashboardNode(Node):
         )
         if self._reporter is not None:
             self._reporter.start()
+
+        # Metrics go to a collector, separately from the fleet view.
+        # Two channels on purpose: the fleet view answers "is that robot
+        # alright right now", metrics answer "what has it been doing".
+        # Coupling them would mean losing history to fix a dashboard.
+        self._metrics = OtlpMetricsExporter.from_env(
+            state_fn=self._fleet_state,
+            version_fn=version_info,
+            logger=self.get_logger(),
+        )
+        if self._metrics is not None:
+            self._metrics.start()
 
         absent = missing_fields()
         if absent:
@@ -165,6 +178,8 @@ class DashboardNode(Node):
         """Stop the fleet reporter and the HTTP server."""
         if self._reporter is not None:
             self._reporter.stop()
+        if self._metrics is not None:
+            self._metrics.stop()
         self._server.shutdown()
         self._server.server_close()
 

@@ -1,0 +1,144 @@
+{
+  "uid": "threevn-robot-health",
+  "title": "Robot health",
+  "tags": ["3vn", "robotics"],
+  "timezone": "utc",
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "robot",
+        "label": "Robot",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+        "query": "label_values(threevn_robot_ready_ratio, robot_id)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true
+      }
+    ]
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Ready",
+      "description": "1 when the robot is usable: joint state arriving AND the controllers that move it active. This is the signal to alert on, not liveness.",
+      "gridPos": { "h": 5, "w": 6, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "threevn_robot_ready_ratio{robot_id=~\"$robot\"}", "legendFormat": "{{robot_id}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "NOT READY", "color": "red", "index": 0 } } },
+            { "type": "value", "options": { "1": { "text": "READY", "color": "green", "index": 1 } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null }, { "color": "green", "value": 1 }
+          ]}
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Joint state age",
+      "description": "Seconds since the last joint state. Beyond 1s the robot is considered stale - that is roughly 50 missed messages at the 50 Hz control rate, which is past 'a slow moment'.",
+      "gridPos": { "h": 5, "w": 6, "x": 6, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "threevn_joint_states_age_seconds{robot_id=~\"$robot\"}", "legendFormat": "{{robot_id}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "decimals": 2,
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "orange", "value": 0.5 },
+            { "color": "red", "value": 1 }
+          ]}
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Controllers active",
+      "description": "Expected: 3 - joint_state_broadcaster, arm_controller, gripper_controller.",
+      "gridPos": { "h": 5, "w": 6, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "threevn_controllers_active{robot_id=~\"$robot\"}", "legendFormat": "{{robot_id}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null }, { "color": "green", "value": 3 }
+          ]}
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Uptime",
+      "description": "A value that keeps resetting is a robot that keeps restarting.",
+      "gridPos": { "h": 5, "w": 6, "x": 18, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "threevn_robot_uptime_seconds{robot_id=~\"$robot\"}", "legendFormat": "{{robot_id}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Joint state rate",
+      "description": "Messages per second, differentiated from the cumulative counter. Should sit at the controller_manager update rate of 50 Hz; a sustained shortfall means the control loop is not keeping up, which silently invalidates any timing taken from it.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "rate(threevn_joint_states_received_total{robot_id=~\"$robot\"}[2m])", "legendFormat": "{{robot_id}}" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "hertz",
+          "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 8 },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null }, { "color": "green", "value": 40 }
+          ]}
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Readiness over time",
+      "description": "Every dip is an interval where the robot could not be commanded. Short dips on restart are expected; repeated ones are not.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "threevn_robot_ready_ratio{robot_id=~\"$robot\"}", "legendFormat": "{{robot_id}} ready" },
+        { "expr": "threevn_joint_states_fresh_ratio{robot_id=~\"$robot\"}", "legendFormat": "{{robot_id}} joints fresh" },
+        { "expr": "threevn_controllers_fresh_ratio{robot_id=~\"$robot\"}", "legendFormat": "{{robot_id}} controllers fresh" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "min": 0, "max": 1,
+          "custom": { "drawStyle": "line", "lineInterpolation": "stepAfter", "lineWidth": 2, "fillOpacity": 10 }
+        }
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Telemetry pipeline failures",
+      "description": "Failed metric exports. A robot reporting this is still HEALTHY - the pipeline is not. Kept visible so a gap in the other panels can be attributed to the robot or to the monitoring, which is otherwise guesswork.",
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 13 },
+      "datasource": { "type": "prometheus", "uid": "victoriametrics" },
+      "targets": [
+        { "expr": "rate(threevn_otlp_export_failures_total{robot_id=~\"$robot\"}[5m])", "legendFormat": "{{robot_id}}" }
+      ],
+      "fieldConfig": {
+        "defaults": { "custom": { "drawStyle": "bars", "fillOpacity": 60 } }
+      }
+    }
+  ]
+}

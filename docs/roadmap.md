@@ -15,8 +15,8 @@ One system that evolves. Not twelve disconnected tutorials.
 | 6 | Docker runtime images | **done** |
 | 7 | CI/CD pipelines | **done** |
 | 8 | VPS deployment | **done** |
-| 9 | Monitoring (OpenTelemetry → self-hosted stack) | next |
-| 10 | Mobile base | |
+| 9 | Monitoring (OpenTelemetry → self-hosted stack) | **done** |
+| 10 | Mobile base | next |
 | 11 | Mobile manipulator | |
 | 12 | Camera + perception | |
 | 13 | Data pipeline | |
