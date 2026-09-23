@@ -38,14 +38,38 @@ started by the `gz_ros2_control-system` plugin. Two consequences:
 Everything below that difference — the controllers, the topics, the
 actions — is identical to the `mock` and `esp32` targets.
 
-## Spawning from the topic, not a file
+## Spawning from the substitution, not the topic
 
-```
-ros_gz_sim create -topic robot_description
+`sim.launch.py` passes the description to `ros_gz_sim create` with
+`-string`, using the **same launch substitution** that feeds
+`robot_state_publisher`.
+
+Spawning with `-topic robot_description` looks tidier and is a trap. A
+stale `robot_state_publisher` left over from `make mock` also publishes
+`/robot_description`, and the spawner will happily take that one. The
+symptom is a pluginlib error half a minute later complaining that
+`mock_components/GenericSystem` is not a Gazebo plugin — which says
+nothing about the actual cause.
+
+Passing the content directly makes simulator and TF byte-identical by
+construction rather than by coincidence. `make sim` also runs `make stop`
+first, which removes the stale-node problem at its source.
+
+## Mimic joints are in TF, not in /joint_states
+
+`gripper_right_finger_joint` follows the left finger through a URDF
+`<mimic>` tag and has no `ros2_control` interface by design — only one
+finger is commanded. It therefore **never appears in `/joint_states`**.
+
+`robot_state_publisher` still resolves it and publishes the transform, so
+read it from TF:
+
+```bash
+ros2 run tf2_ros tf2_echo gripper_base_link gripper_right_finger_link
 ```
 
-The simulator receives byte-for-byte the same description that RViz, TF
-and the tests use. Spawning from a file would allow them to diverge.
+Looking in `/joint_states` reports a perfectly working gripper as broken,
+which is exactly what the gripper scenario did on first writing.
 
 ## `<gazebo>` tags
 

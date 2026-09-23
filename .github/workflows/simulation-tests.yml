@@ -1,0 +1,85 @@
+# Gazebo integration tests.
+#
+# Separate from ci.yml on purpose. Starting a simulator takes about two
+# minutes, and putting that in the main workflow would slow down every
+# pull request for a check that only a subset of changes can break.
+#
+# This runs on pushes to main, on PRs that touch simulation or the robot
+# description, and on demand.
+name: Simulation tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'src/threevn_sim/**'
+      - 'src/threevn_robot_description/**'
+      - 'src/threevn_control/**'
+      - 'src/threevn_bringup/**'
+      - 'docker/**'
+      - '.github/workflows/simulation-tests.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: sim-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gazebo:
+    name: Gazebo integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the CI image
+        run: |
+          docker build \
+            --file docker/Dockerfile \
+            --target ci \
+            --tag threevn-robotics-ci:local \
+            .
+
+      - name: Run the Gazebo integration suite
+        # Gazebo runs headless with software rendering (OGRE2 + EGL over
+        # llvmpipe), which is why this needs no GPU and no X server.
+        #
+        # --shm-size matters: the default 64MB is not enough for Gazebo's
+        # transport layer, and the symptom is a crash partway through with
+        # no useful message.
+        run: |
+          docker run --rm \
+            --shm-size=1gb \
+            -e LIBGL_ALWAYS_SOFTWARE=1 \
+            -e GALLIUM_DRIVER=llvmpipe \
+            -e ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST \
+            -v "$PWD/src:/ws/src" \
+            -w /ws \
+            threevn-robotics-ci:local \
+            bash -lc '
+              colcon build --symlink-install > /dev/null &&
+              source install/setup.bash &&
+              cd src/threevn_sim &&
+              python3 -m pytest test -m slow -v --junit-xml=/ws/sim-results.xml
+            '
+
+      - name: Scenarios must also pass with no simulator
+        # The same scenarios, against mock_components. If a scenario passes
+        # under Gazebo but not here, the robot abstraction has become
+        # simulator-specific -- which is the one thing this project's
+        # architecture exists to prevent.
+        run: |
+          docker run --rm \
+            -e ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST \
+            -v "$PWD/src:/ws/src" \
+            -w /ws \
+            threevn-robotics-ci:local \
+            bash -lc '
+              colcon build --symlink-install > /dev/null &&
+              source install/setup.bash &&
+              ros2 launch threevn_bringup robot.launch.py target:=mock > /tmp/mock.log 2>&1 &
+              sleep 25
+              ros2 run threevn_control run_scenario --all
+            '

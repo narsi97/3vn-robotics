@@ -11,7 +11,8 @@ suite that takes minutes is a suite people stop running before they
 commit. Everything that needs a simulator is marked `slow` and excluded
 from `make test`.
 
-Current: **122 tests, ~7 seconds.**
+Current: **166 fast tests in ~7 s**, plus **12 Gazebo integration
+tests in ~106 s** under `make test-sim`.
 
 ## Layers
 
@@ -22,7 +23,9 @@ Current: **122 tests, ~7 seconds.**
 | Config↔URDF consistency | nothing | `test_limits_match_yaml.py` |
 | **Architecture** | nothing | `test_ros2_control_targets.py`, `test_package_dependencies.py` |
 | Independent parser | nothing | `scripts/check_description.sh` |
-| Gazebo integration | simulator | `threevn_sim/test/` — Phase 2 |
+| Scenario framework | nothing | `threevn_control/test/` |
+| Simulation assets | nothing | `threevn_sim/test/test_world.py` |
+| Gazebo integration | simulator | `threevn_sim/test/test_gz_spawn.py` |
 
 Note how much is provable with **no simulator and no hardware**. That is
 deliberate: those tests run in a second, so they run constantly.
@@ -66,6 +69,38 @@ perfectly healthy. The duplicate is only visible before parsing.
 Tests parametrize over `PROFILES` — every `config/threevn_*.yaml` — and
 over all three hardware targets. Adding a profile automatically widens the
 matrix; nothing needs updating.
+
+## Why `make test` does not run the Gazebo tests
+
+Not by a pytest marker alone. `colcon test --pytest-args -m "not slow"`
+reaches pytest only for `ament_python` packages; in an `ament_cmake`
+package pytest is launched by CTest, which never sees the flag — so
+`make test` would quietly spend two minutes starting a simulator.
+
+`threevn_sim/CMakeLists.txt` therefore registers **only**
+`test/test_world.py` with CTest, and `make test-sim` invokes pytest
+directly with `-m slow`. Explicit beats clever here.
+
+## Scenarios are tests and demos
+
+The six scenarios in `threevn_control` are written against `RobotClient`
+alone, so they run unchanged against `mock`, against Gazebo and, from
+Phase 5, against the physical arm.
+
+```bash
+make sim &                      # or: make mock &
+make scenario NAME=pick_and_place
+make scenario NAME=all
+```
+
+`make test-sim` runs the same six against Gazebo and fails the build on
+any of them. Writing them once for both is what stops the demo drifting
+away from the thing that is actually verified.
+
+**A scenario must pass on both targets.** One that passes under Gazebo
+but not under mock means the abstraction has become simulator-specific —
+which is precisely how `safety_limit` uncovered that nothing below the
+hardware seam enforces joint limits. See [safety.md](safety.md).
 
 ## Writing a new test
 

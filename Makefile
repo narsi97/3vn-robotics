@@ -18,7 +18,7 @@ NOVNC   := http://localhost:8106/vnc.html
 
 .DEFAULT_GOAL := help
 .PHONY: help doctor setup up down shell build test test-sim lint urdf \
-        view mock sim robot clean nuke
+        view mock sim robot stop scenario clean nuke
 
 help:
 	@echo ""
@@ -39,6 +39,9 @@ help:
 	@echo "  make mock      Run the stack: no simulator, no hardware"
 	@echo "  make sim       Run the stack in Gazebo (GUI=1 for pixels)"
 	@echo "  make robot     Run against real hardware        (Phase 5)"
+	@echo ""
+	@echo "  make scenario  Run a scenario (NAME=home, or NAME=all)"
+	@echo "  make stop      Stop any running robot/sim stack"
 	@echo ""
 	@echo "  make clean     Remove build/install/log"
 	@echo "  make nuke      clean + drop the image and volumes"
@@ -74,8 +77,11 @@ build: up
 test: build
 	$(RUN) "colcon test --event-handlers console_direct+ --pytest-args -m 'not slow' && colcon test-result --verbose"
 
-test-sim: build
-	$(RUN) "colcon test --packages-select threevn_sim --event-handlers console_direct+ && colcon test-result --verbose"
+# Runs pytest DIRECTLY rather than through colcon: the slow marker is
+# excluded at the CMake level (see threevn_sim/CMakeLists.txt), so colcon
+# would skip exactly the tests this target exists to run.
+test-sim: build stop
+	$(RUN) "cd /ws/src/threevn_sim && python3 -m pytest test -m slow -v"
 
 lint: build
 	$(RUN) "colcon test --ctest-args -R 'lint|copyright|flake8|xmllint' ; colcon test-result --verbose"
@@ -96,15 +102,35 @@ view: build
 # Switching between them is a launch argument, never a code change.
 # This IS the architecture -- see docs/decisions/0003-hardware-seam.md.
 # ---------------------------------------------------------------------
-mock: build
+mock: build stop
 	$(RUN_TTY) "ros2 launch threevn_bringup robot.launch.py target:=mock profile:=$(PROFILE)"
 
-sim: build
+sim: build stop
 	@echo "  Gazebo server headless. GUI=1 adds the gz GUI at $(NOVNC) (slow: llvmpipe)."
 	$(RUN_TTY) "ros2 launch threevn_sim sim.launch.py profile:=$(PROFILE) gui:=$(if $(filter 1,$(GUI)),true,false)"
 
-robot: build
+robot: build stop
 	$(RUN_TTY) "ros2 launch threevn_bringup robot.launch.py target:=esp32 profile:=$(PROFILE)"
+
+# Stop any previously launched stack.
+#
+# Every run target depends on this. Leaving a robot_state_publisher from a
+# previous `make mock` alive means TWO publishers on /robot_description,
+# and whichever the simulator reads first wins - a genuinely confusing
+# failure. One cheap target removes the whole class of problem.
+#
+# The bracket in the pattern stops pkill matching its own command line,
+# which would otherwise kill the shell running it.
+stop: up
+	-@$(RUN) "pkill -9 -f 'ros2 laun[c]h' ; pkill -9 -f '[g]z sim' ; \
+	          pkill -9 -f 'robot_state_pub[l]isher' ; pkill -9 -f '[r]viz2' ; \
+	          pkill -9 -f 'joint_state_pub[l]isher' ; pkill -9 -f 'ros2_control_no[d]e' ; \
+	          pkill -9 -f 'parameter_brid[g]e' ; sleep 2 ; true" 2>/dev/null
+	@echo "  stopped"
+
+# Run a scenario against whatever stack is currently up.
+scenario: build
+	$(RUN_TTY) "ros2 run threevn_control run_scenario $(if $(filter all,$(NAME)),--all,$(NAME))"
 
 clean:
 	-$(RUN) "rm -rf /ws/build/* /ws/install/* /ws/log/*"

@@ -8,8 +8,8 @@ One system that evolves. Not twelve disconnected tutorials.
 |---|---|---|
 | 0 | Architecture, repository, dev environment | **done** |
 | 1 | Robot description (URDF/Xacro, YAML-driven) | **done** |
-| 2 | Gazebo simulation + scenarios | next |
-| 3 | ROS 2 control runtime, dashboard | |
+| 2 | Gazebo simulation + scenarios | **done** |
+| 3 | ROS 2 control runtime, dashboard | next |
 | 4 | Full automated test layers | |
 | 5 | ESP32 firmware + `Esp32SystemInterface` | |
 | 6 | Docker runtime images | |
@@ -32,7 +32,6 @@ phase that first needs it.
 | Package | Phase | For |
 |---|---|---|
 | `threevn_interfaces` | 2 | custom msgs/srvs/actions — none needed yet; `control_msgs` and `sensor_msgs` cover Phase 1 |
-| `threevn_control` | 2 | higher-level motion helpers |
 | `threevn_hardware` | 5 | `Esp32SystemInterface` — the plugin name is already fixed in the description |
 | `threevn_dashboard` | 3 | web UI |
 | `threevn_telemetry` | 6 | OpenTelemetry emission |
@@ -83,9 +82,16 @@ not a 20% one.
 servo can deliver. Link *masses* remain `provenance: estimated` and still
 need measuring.
 
-**Gazebo spawn verification is a skipped test.**
-`threevn_sim/test/test_gz_spawn.py` is marked `slow` and skips. It becomes
-real in Phase 2, where the simulation itself is the deliverable.
+**`ros2_control` does not enforce the joint limits it declares.**
+Measured in Phase 2: commanding `shoulder_pan_joint` to 180° against a 90°
+limit drives it to 180° under `mock_components`, despite both the URDF
+`<limit>` and the `command_interface` min/max saying otherwise. Gazebo only
+clamps because its physics joint has a hard stop.
+
+Mitigated above the seam — `RobotClient` rejects out-of-limit goals — but
+that only guards commands sent through the client. Proper enforcement
+belongs in a `ros2_control` joint limiter (Phase 3/4) and, non-negotiably,
+in the ESP32 firmware (Phase 5). See [safety.md](safety.md).
 
 **CSP will block the Phase 3 dashboard.** The shared 3VN Caddy sets
 `connect-src 'self'` for every product on the domain, so a dashboard

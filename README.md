@@ -162,9 +162,23 @@ Full audit: [`THIRD_PARTY.md`](THIRD_PARTY.md) ·
 
 ## Status
 
-**Phase 0 and Phase 1 complete.** The robot description exists, expands
-for all three hardware targets, and is covered by tests that run without
-a simulator. Gazebo simulation is Phase 2.
+**Phases 0–2 complete.**
+
+- The robot description expands for all three hardware targets.
+- The arm spawns in Gazebo Harmonic, with all three controllers active
+  and `/joint_states` at the configured 50 Hz.
+- Six scenarios — home, move_joint, move_to_position, gripper,
+  safety_limit, pick_and_place — pass against **both** Gazebo and `mock`.
+- **166 fast tests in ~7 s**, plus **12 Gazebo integration tests** in
+  ~106 s.
+
+```bash
+make sim &                        # Gazebo, headless
+make scenario NAME=pick_and_place
+make test-sim                     # the full Gazebo suite
+```
+
+Phase 3 is the control runtime and dashboard.
 
 See [`docs/roadmap.md`](docs/roadmap.md) for the 15-phase plan and
 [`docs/risks.md`](docs/risks.md) for what is known to be fragile.

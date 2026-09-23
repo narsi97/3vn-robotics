@@ -66,14 +66,15 @@ def generate_launch_description():
 
     # target:=gz selects gz_ros2_control/GazeboSimSystem and emits the
     # <gazebo> plugin block. Identical description otherwise.
-    robot_description = ParameterValue(
-        Command(
-            ['xacro ', xacro_file, ' params_file:=', params_file, ' target:=gz']
-        ),
-        # A Command substitution yields URDF XML. Without value_type=str,
-        # launch tries to parse it as YAML and fails at startup.
-        value_type=str,
+    # The raw substitution, shared by robot_state_publisher AND the
+    # spawner below so the two cannot possibly disagree.
+    robot_description_content = Command(
+        ['xacro ', xacro_file, ' params_file:=', params_file, ' target:=gz']
     )
+
+    # A Command substitution yields URDF XML. Without value_type=str,
+    # launch tries to parse it as YAML and fails at startup.
+    robot_description = ParameterValue(robot_description_content, value_type=str)
 
     # On llvmpipe the GUI runs at 5-15 FPS; that is CPU rendering, not a fault.
     # -r starts unpaused; -s is server-only (headless).
@@ -95,12 +96,23 @@ def generate_launch_description():
         launch_arguments={'gz_args': [gz_args, world_file]}.items(),
     )
 
-    # Spawn from the robot_description TOPIC, so the simulator receives
-    # byte-for-byte the same description RViz and the tests use.
+    # Spawn from the SAME substitution robot_state_publisher uses, not
+    # from the /robot_description topic.
+    #
+    # Spawning from the topic looks tidier and is a real trap: a stale
+    # robot_state_publisher left over from `make mock` also publishes
+    # /robot_description, and the spawner will happily take that one. The
+    # symptom is a pluginlib error 30 seconds later complaining that
+    # mock_components/GenericSystem is not a Gazebo plugin - which says
+    # nothing about the actual cause.
+    #
+    # Passing the content directly makes the two byte-identical by
+    # construction rather than by coincidence.
     spawn = Node(
         package='ros_gz_sim',
         executable='create',
-        arguments=['-topic', 'robot_description', '-name', 'threevn_arm', '-z', '0.0'],
+        arguments=['-string', robot_description_content,
+                   '-name', 'threevn_arm', '-z', '0.0'],
         output='screen',
     )
 
