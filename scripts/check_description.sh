@@ -8,10 +8,25 @@
 set -euo pipefail
 
 SHARE="$(ros2 pkg prefix threevn_robot_description)/share/threevn_robot_description"
-XACRO="${SHARE}/urdf/threevn_arm.urdf.xacro"
 FAIL=0
 
+# Each profile is expanded through the xacro for ITS robot family, read
+# from meta.kind. This script used to hardcode the arm entry point and
+# glob every profile in config/, so adding the mobile base made it try to
+# build an arm out of base parameters and fail on a missing shoulder.
+entry_for() {
+  python3 - "$1" <<'PYEOF'
+import pathlib, sys, yaml
+kind = yaml.safe_load(pathlib.Path(sys.argv[1]).read_text())['meta']['kind']
+entries = {'arm': 'threevn_arm.urdf.xacro', 'base': 'threevn_base.urdf.xacro'}
+if kind not in entries:
+    sys.exit(f'unknown robot family {kind!r} in {sys.argv[1]}')
+print(entries[kind])
+PYEOF
+}
+
 for profile in "${SHARE}"/config/threevn_*.yaml; do
+  XACRO="${SHARE}/urdf/$(entry_for "$profile")"
   for target in mock gz esp32; do
     name="$(basename "$profile" .yaml):${target}"
     out="/tmp/$(basename "$profile" .yaml)_${target}.urdf"
