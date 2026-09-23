@@ -56,6 +56,7 @@ jobs:
             -e GALLIUM_DRIVER=llvmpipe \
             -e ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST \
             -v "$PWD/src:/ws/src" \
+            -v "$PWD/firmware:/ws/firmware:ro" \
             -w /ws \
             threevn-robotics-ci:local \
             bash -lc '
@@ -79,6 +80,7 @@ jobs:
             -e THREEVN_GIT_BRANCH=${{ github.ref_name }} \
             -e THREEVN_TARGET=gz \
             -v "$PWD/src:/ws/src" \
+            -v "$PWD/firmware:/ws/firmware:ro" \
             -v "$PWD/artifacts:/out" \
             -w /ws \
             threevn-robotics-ci:local \
@@ -113,6 +115,7 @@ jobs:
           docker run --rm \
             -e ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST \
             -v "$PWD/src:/ws/src" \
+            -v "$PWD/firmware:/ws/firmware:ro" \
             -w /ws \
             threevn-robotics-ci:local \
             bash -lc '
