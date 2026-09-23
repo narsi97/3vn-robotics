@@ -36,6 +36,7 @@ import yaml
 ENTRY_POINTS = {
     'arm': 'threevn_arm.urdf.xacro',
     'base': 'threevn_base.urdf.xacro',
+    'mobile_manipulator': 'threevn_mobile_manipulator.urdf.xacro',
 }
 
 

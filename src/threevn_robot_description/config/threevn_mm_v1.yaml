@@ -1,0 +1,76 @@
+# 3VN Mobile Manipulator v1 -- the arm, on the base.
+#
+# This file declares almost no physical numbers, and that is the point.
+# It names the two component profiles and says where they meet. Every
+# dimension, mass and limit still lives in the component file that owns
+# it, so calibrating the base or re-measuring the arm needs no edit here
+# and the two can never drift out of sync with the composed robot.
+#
+# Composition, not merging. The arm description and the base description
+# are unchanged by this file and remain independently buildable:
+#
+#   make sim        the arm alone
+#   make base-sim   the base alone
+#   make mm-sim     both
+#
+# A test asserts each component profile still expands on its own.
+
+meta:
+  model: threevn_mm_v1
+  display_name: "3VN Mobile Manipulator v1"
+  kind: mobile_manipulator
+  revision: 1
+
+components:
+  # Resolved relative to this directory. The composition xacro loads each
+  # into its OWN scope, so `cfg` means the base's config while the base
+  # is being built and the arm's while the arm is.
+  base: threevn_base_v1.yaml
+  arm: threevn_arm_v1.yaml
+
+mount:
+  # Everything the arm gains is prefixed. The base owns the unprefixed
+  # names, because in a composed robot the BASE is the robot: its
+  # base_link is what REP-105 means and what nav2 navigates. The arm's
+  # own base_link becomes arm_base_link, and -- the reason this matters
+  # -- both descriptions declare an `imu_link`, which would otherwise be
+  # a duplicate link name that urdf_parser_py resolves silently by
+  # letting the second one win.
+  prefix: arm_
+
+  # Where the arm sits on the chassis plate, measured from the base's
+  # arm_mount_link.
+  #
+  # Mounted slightly REARWARD, which is a trade and not a free win. The
+  # arm reaches forward, so starting it behind centre buys margin against
+  # tipping over the front wheels -- and spends it at the rear, because
+  # the resting centre of mass moves back with it.
+  #
+  # Measured over a sweep of the whole arm workspace with the payload
+  # held, the binding edge is in fact the REAR for both compositions, not
+  # the front that the intuition warns about:
+  #
+  #   threevn_mm_v1             worst slack +38.8 mm, rear
+  #   threevn_mm_v1_long_reach  worst slack +30.0 mm, rear
+  #
+  # against a required 21.0 mm. test_the_robot_cannot_tip_itself_over
+  # checks all four edges for exactly this reason, so moving this number
+  # in either direction fails the build rather than the robot.
+  x: -0.030
+  y: 0.0
+  yaw: 0.0
+
+  # NO z offset is declared here, deliberately.
+  #
+  # The arm already says where its own mounting face is: mount_plate_link
+  # sits below its base_link in threevn_arm_v1.yaml. The composition
+  # derives the vertical offset from that, so the plate is always flush
+  # against the chassis whatever the arm's base plate becomes. Writing a
+  # number here would be a second source of truth that silently stops
+  # agreeing the first time the arm changes.
+
+payload:
+  # What the gripper is allowed to carry, for the tipping check. Not a
+  # servo limit -- the gripper's own force ceiling is in the arm profile.
+  max_mass: 0.050
+  provenance: estimated

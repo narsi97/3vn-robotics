@@ -102,40 +102,6 @@
       <xacro:threevn_joint_ifaces name="gripper_left_finger_joint" prefix="${prefix}"/>
     </ros2_control>
 
-    <!--
-      Gazebo needs a system plugin to host controller_manager inside the
-      simulator process. Emitted ONLY for target=gz, so a real-robot or
-      mock build never references a Gazebo library at all.
-      test_ros2_control_targets.py asserts exactly that, and that
-      assertion IS the architecture.
-    -->
-    <xacro:if value="${'$(arg target)' == 'gz'}">
-      <gazebo>
-        <plugin filename="gz_ros2_control-system"
-                name="gz_ros2_control::GazeboSimROS2ControlPlugin">
-          <!--
-            The controllers file is PASSED IN, not looked up.
-
-            It used to be $(find threevn_bringup)/config/controllers.yaml,
-            which inverted the dependency direction: threevn_bringup
-            depends on this package, so this package must not reach back
-            into it. That went unnoticed because a fully sourced
-            workspace resolves the path anyway - it only surfaced when CI
-            built and tested this package in isolation and xacro raised
-            PackageNotFoundError.
-
-            threevn_sim depends on both and supplies the path, so the
-            dependency graph stays acyclic and the description stays
-            standalone.
-          -->
-          <xacro:if value="${'$(arg controllers_file)' != ''}">
-            <parameters>$(arg controllers_file)</parameters>
-          </xacro:if>
-          <controller_manager_name>controller_manager</controller_manager_name>
-        </plugin>
-      </gazebo>
-    </xacro:if>
-
   </xacro:macro>
 
 </robot>

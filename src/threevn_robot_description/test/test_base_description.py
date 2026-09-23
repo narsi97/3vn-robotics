@@ -123,7 +123,7 @@ def test_the_chassis_sits_on_its_wheels(expanded, cfg):
     robot = URDF.from_xml_string(expanded())
     radius = cfg['links']['wheel_link']['geometry']['radius']
 
-    chassis_z = robot.joint_map['chassis_joint'].origin.position[2]
+    chassis_z = robot.joint_map['base_joint'].origin.position[2]
     wheel_z = robot.joint_map[WHEELS[0]].origin.position[2]
     axle_height = chassis_z + wheel_z
 

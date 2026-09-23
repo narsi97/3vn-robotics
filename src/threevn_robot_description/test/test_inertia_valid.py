@@ -21,7 +21,8 @@ produces NaN the first time a contact force is applied, which surfaces as
 look like simulator bugs and cost hours. Catching it here, with no
 simulator running, is the cheapest possible place.
 """
-from conftest import ALL_PROFILES, MASS_BAND, profile_kind
+from conftest import (ALL_PROFILES, MASS_BAND, min_inertia_for,
+                      profile_kind)
 import numpy as np
 import pytest
 from urdf_parser_py.urdf import URDF
@@ -106,9 +107,7 @@ def test_inertia_respects_the_configured_floor(expanded, profile):
     `min_inertia` exists to stop near-zero values producing NaN under
     contact.
     """
-    import yaml
-
-    floor = yaml.safe_load(profile.read_text())['defaults']['min_inertia']
+    floor = min_inertia_for(profile)
     for link in URDF.from_xml_string(expanded(profile=profile)).links:
         if link.inertial is None:
             continue

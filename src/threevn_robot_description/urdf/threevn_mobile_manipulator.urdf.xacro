@@ -1,0 +1,114 @@
+<?xml version="1.0"?>
+<!--
+  3VN Mobile Manipulator - the arm, on the base.
+
+  Composition, not merging. Neither arm_macro.xacro nor base_macro.xacro
+  is modified or even aware this file exists; both robots remain
+  independently buildable. That is the whole deliverable of Phase 11, and
+  it is why Phase 1 spent a fixed joint on mount_plate_link and Phase 10
+  spent one on arm_mount_link.
+
+  TWO configs in one document
+
+  Every macro under urdf/arm/ and urdf/base/ reads a property named
+  `cfg`. That works while a document describes one robot and breaks the
+  moment it describes two: whichever config was assigned last would win,
+  and the arm would be built out of base numbers - silently, because
+  every lookup that happened to exist in both would succeed.
+
+  Rebinding `cfg` between the two macro calls does work (xacro expands in
+  document order), but it is action at a distance: reordering the calls,
+  or adding a third subsystem, would quietly build the wrong robot. That
+  is the exact failure Phase 10 was spent removing from the test harness.
+
+  So each subsystem is wrapped in a macro that sets `cfg` INSIDE its own
+  body. Xacro scopes properties to the macro invocation, so the arm's
+  macros see the arm's config and the base's see the base's, with no
+  ordering dependency and no change to either component.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="threevn_mobile_manipulator">
+
+  <xacro:arg name="params_file"
+             default="$(find threevn_robot_description)/config/threevn_mm_v1.yaml"/>
+  <xacro:arg name="target" default="mock"/>
+  <xacro:arg name="prefix" default=""/>
+  <xacro:arg name="controllers_file" default=""/>
+
+  <xacro:property name="mm" value="${xacro.load_yaml('$(arg params_file)')}"/>
+  <xacro:property name="prefix" value="$(arg prefix)"/>
+  <xacro:property name="cfgdir"
+                  value="$(find threevn_robot_description)/config/"/>
+  <xacro:property name="mount" value="${mm['mount']}"/>
+  <xacro:property name="arm_prefix" value="${prefix}${mount['prefix']}"/>
+
+  <xacro:include filename="$(find threevn_robot_description)/urdf/common/inertials.xacro"/>
+  <xacro:include filename="$(find threevn_robot_description)/urdf/common/materials.xacro"/>
+  <xacro:include filename="$(find threevn_robot_description)/urdf/base/base_macro.xacro"/>
+  <xacro:include filename="$(find threevn_robot_description)/urdf/base/base.ros2_control.xacro"/>
+  <xacro:include filename="$(find threevn_robot_description)/urdf/arm/arm_macro.xacro"/>
+  <xacro:include filename="$(find threevn_robot_description)/urdf/arm/gripper_macro.xacro"/>
+  <xacro:include filename="$(find threevn_robot_description)/urdf/arm/sensor_mounts.xacro"/>
+  <xacro:include filename="$(find threevn_robot_description)/urdf/ros2_control/arm.ros2_control.xacro"/>
+  <xacro:include filename="$(find threevn_robot_description)/urdf/gazebo/materials.gazebo.xacro"/>
+  <xacro:include filename="$(find threevn_robot_description)/urdf/ros2_control/gz_control_plugin.xacro"/>
+
+  <!--
+    The base subsystem, in its own config scope.
+
+    It takes the UNPREFIXED names. In a composed robot the base is the
+    robot: its base_link is the frame REP-105 defines and the one nav2
+    navigates, and its base_footprint is the kinematic root.
+  -->
+  <xacro:macro name="threevn_mm_base" params="parent prefix">
+    <xacro:property name="cfg"
+                    value="${xacro.load_yaml(cfgdir + mm['components']['base'])}"/>
+    <xacro:property name="min_inertia" value="${cfg['defaults']['min_inertia']}"/>
+    <xacro:threevn_base parent="${parent}" prefix="${prefix}"/>
+    <xacro:threevn_base_ros2_control prefix="${prefix}"/>
+  </xacro:macro>
+
+  <!--
+    The arm subsystem, in its own config scope.
+
+    The vertical offset is DERIVED from the arm's own mount_plate_link,
+    which sits below its base_link. Placing base_link that far above the
+    chassis plate puts the plate exactly on it. The arm profile stays the
+    single source of truth for its own mounting face.
+  -->
+  <xacro:macro name="threevn_mm_arm" params="parent prefix">
+    <xacro:property name="cfg"
+                    value="${xacro.load_yaml(cfgdir + mm['components']['arm'])}"/>
+    <xacro:property name="min_inertia" value="${cfg['defaults']['min_inertia']}"/>
+    <xacro:property name="plate_z"
+                    value="${cfg['frames']['mount_plate_link']['xyz'][2]}"/>
+
+    <link name="${prefix}mount_pad_link"/>
+    <joint name="${prefix}mount_pad_joint" type="fixed">
+      <parent link="${parent}"/>
+      <child  link="${prefix}mount_pad_link"/>
+      <origin xyz="${mount['x']} ${mount['y']} ${-plate_z}"
+              rpy="0 0 ${mount['yaw']}"/>
+    </joint>
+
+    <xacro:threevn_arm            parent="${prefix}mount_pad_link" prefix="${prefix}"/>
+    <xacro:threevn_gripper        parent="${prefix}wrist_link"     prefix="${prefix}"/>
+    <xacro:threevn_sensor_mounts                                   prefix="${prefix}"/>
+    <xacro:threevn_arm_ros2_control                                prefix="${prefix}"/>
+    <xacro:if value="${'$(arg target)' == 'gz'}">
+      <xacro:threevn_gazebo_materials prefix="${prefix}"/>
+    </xacro:if>
+  </xacro:macro>
+
+  <!-- The kinematic root, owned by neither component. -->
+  <link name="${prefix}base_footprint"/>
+
+  <xacro:threevn_mm_base parent="${prefix}base_footprint" prefix="${prefix}"/>
+  <xacro:threevn_mm_arm  parent="${prefix}arm_mount_link" prefix="${arm_prefix}"/>
+
+  <!-- ONE controller_manager, hosting BOTH ros2_control blocks. See
+       gz_control_plugin.xacro for why this is not inside either. -->
+  <xacro:if value="${'$(arg target)' == 'gz'}">
+    <xacro:threevn_gz_control_plugin/>
+  </xacro:if>
+
+</robot>

@@ -13,6 +13,7 @@ RUN_TTY := $(COMPOSE) exec    $(SVC) bash -lc
 SHARE   := /ws/install/threevn_robot_description/share/threevn_robot_description
 PROFILE ?= threevn_arm_v1
 BASE_PROFILE ?= threevn_base_v1
+MM_PROFILE ?= threevn_mm_v1
 TARGET  ?= mock
 GUI     ?= 0
 NOVNC   := http://localhost:8106/vnc.html
@@ -123,8 +124,11 @@ URDF_PROFILE := $(BASE_PROFILE)
 else ifeq ($(ROBOT),arm)
 URDF_ENTRY   := threevn_arm.urdf.xacro
 URDF_PROFILE := $(PROFILE)
+else ifeq ($(ROBOT),mm)
+URDF_ENTRY   := threevn_mobile_manipulator.urdf.xacro
+URDF_PROFILE := $(MM_PROFILE)
 else
-$(error ROBOT must be 'arm' or 'base', not '$(ROBOT)')
+$(error ROBOT must be 'arm', 'base' or 'mm', not '$(ROBOT)')
 endif
 
 urdf: build
@@ -163,6 +167,17 @@ base-sim: build stop
 base-drive: build
 	@echo '  measuring against a running: make base-sim'
 	$(RUN) "python3 /ws/scripts/verify_base_drive.py"
+
+# The composed robot: arm on base, one controller_manager hosting both.
+mm-sim: build stop
+	@echo '  Gazebo server headless. GUI=1 shows it at $(NOVNC) (slow: llvmpipe).'
+	$(RUN_TTY) "ros2 launch threevn_sim mm_sim.launch.py profile:=$(MM_PROFILE) gui:=$(if $(filter 1,$(GUI)),true,false)"
+
+
+mm-verify: build
+	@echo '  measuring against a running: make mm-sim'
+	$(RUN) "python3 /ws/scripts/verify_mm.py"
+
 
 robot: build stop
 	@$(RUN) "test -e $(ESP32_PORT)" 2>/dev/null || { \

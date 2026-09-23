@@ -29,6 +29,9 @@ if(BUILD_TESTING)
   #
   # `make test-sim` runs test_gz_spawn.py directly.
   ament_add_pytest_test(sim_asset_tests test/test_world.py TIMEOUT 60)
+  # Pure dictionary work: no ROS graph, no Gazebo, milliseconds.
+  ament_add_pytest_test(sim_controller_merge test/test_controller_merge.py
+    TIMEOUT 60)
 endif()
 
 ament_package()

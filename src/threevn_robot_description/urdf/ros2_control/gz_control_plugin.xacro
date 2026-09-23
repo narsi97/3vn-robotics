@@ -1,0 +1,46 @@
+<?xml version="1.0"?>
+<!--
+  The gz_ros2_control system plugin, declared exactly ONCE per robot.
+
+  This used to live inside both arm.ros2_control.xacro and
+  base.ros2_control.xacro. That was invisible while each robot had one
+  subsystem, and wrong the moment Phase 11 put an arm on a base: the
+  composed model emitted the plugin twice, which means two
+  controller_manager instances inside one simulator process, both named
+  `controller_manager` and both loading the same controllers file.
+
+  A <ros2_control> block describes a set of interfaces and may appear
+  many times. The system plugin HOSTS the controller manager and must
+  appear once. Those are different things, so they live in different
+  files now.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:macro name="threevn_gz_control_plugin">
+    <gazebo>
+      <plugin filename="gz_ros2_control-system"
+              name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+        <!--
+          The controllers file is PASSED IN, not looked up.
+
+          It used to be $(find threevn_bringup)/config/controllers.yaml,
+          which inverted the dependency direction: threevn_bringup
+          depends on this package, so this package must not reach back
+          into it. That went unnoticed because a fully sourced workspace
+          resolves the path anyway - it only surfaced when CI built and
+          tested this package in isolation and xacro raised
+          PackageNotFoundError.
+
+          threevn_sim depends on both and supplies the path, so the
+          dependency graph stays acyclic and the description stays
+          standalone.
+        -->
+        <xacro:if value="${'$(arg controllers_file)' != ''}">
+          <parameters>$(arg controllers_file)</parameters>
+        </xacro:if>
+        <controller_manager_name>controller_manager</controller_manager_name>
+      </plugin>
+    </gazebo>
+  </xacro:macro>
+
+</robot>

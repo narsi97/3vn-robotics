@@ -38,6 +38,7 @@ CONFIG_DIR = PKG / 'config'
 ENTRY_POINTS = {
     'arm': PKG / 'urdf' / 'threevn_arm.urdf.xacro',
     'base': PKG / 'urdf' / 'threevn_base.urdf.xacro',
+    'mobile_manipulator': PKG / 'urdf' / 'threevn_mobile_manipulator.urdf.xacro',
 }
 
 #: Plausible total mass per family, kg. An order-of-magnitude mass error
@@ -46,6 +47,10 @@ ENTRY_POINTS = {
 MASS_BAND = {
     'arm': (0.2, 3.0),
     'base': (0.5, 6.0),
+    # The composed robot is the sum of the two, so its band is theirs
+    # added. A composition that lost or double-counted a subsystem's mass
+    # would land outside it.
+    'mobile_manipulator': (0.7, 9.0),
 }
 
 #: Frames each family must expose. For the base these are the two that
@@ -57,12 +62,49 @@ REQUIRED_FRAMES = {
         'imu_link',
     },
     'base': {'base_footprint', 'base_link', 'arm_mount_link'},
+    # The composed robot must expose BOTH interfaces: the base's
+    # navigation frames unprefixed, and the arm's TCP under its prefix.
+    'mobile_manipulator': {
+        'base_footprint', 'base_link', 'arm_mount_link',
+        'arm_base_link', 'arm_tool0', 'arm_grasp_frame',
+        'arm_camera_optical_frame',
+    },
 }
 
 
 def profile_kind(profile):
     """Return the robot family a profile declares."""
     return yaml.safe_load(pathlib.Path(profile).read_text())['meta']['kind']
+
+
+def component_paths(profile):
+    """
+    Return the component profiles a composition is built from.
+
+    A component profile is its own only component, which lets callers
+    treat both kinds uniformly instead of branching on the family.
+    """
+    doc = yaml.safe_load(pathlib.Path(profile).read_text())
+    parts = doc.get('components')
+    if not parts:
+        return [pathlib.Path(profile)]
+    return [CONFIG_DIR / name for name in parts.values()]
+
+
+def min_inertia_for(profile):
+    """
+    Return the inertia floor that applies to a profile's links.
+
+    A composition declares no `defaults` of its own -- each component
+    brings its own floor, and the composed robot has to satisfy the
+    lowest of them, because that is the weakest guarantee any of its
+    links was built under.
+    """
+    floors = [
+        yaml.safe_load(part.read_text())['defaults']['min_inertia']
+        for part in component_paths(profile)
+    ]
+    return min(floors)
 
 
 #: Every profile shipped in the package, regardless of family. Tests whose
@@ -77,6 +119,19 @@ for _p in ALL_PROFILES:
 
 ARM_PROFILES = PROFILES_BY_KIND.get('arm', [])
 BASE_PROFILES = PROFILES_BY_KIND.get('base', [])
+
+#: Families that describe hardware directly, declaring links, joints and
+#: masses. A COMPOSITION profile (the mobile manipulator) names component
+#: profiles and where they meet, and deliberately declares none of those
+#: things -- so the component schema tests do not apply to it, and
+#: running them against it fails on missing keys rather than on anything
+#: real.
+COMPONENT_KINDS = {'arm', 'base'}
+
+COMPONENT_PROFILES = [p for p in ALL_PROFILES
+                      if profile_kind(p) in COMPONENT_KINDS]
+COMPOSED_PROFILES = [p for p in ALL_PROFILES
+                     if profile_kind(p) not in COMPONENT_KINDS]
 
 #: Arm-family profiles. Tests that read arm-only keys (`servos`, `frames`,
 #: `initial_position_deg`) use this. The base's equivalents are asserted in

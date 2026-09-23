@@ -37,7 +37,8 @@ def _plugins(xml):
 
 
 @pytest.mark.parametrize('target', TARGETS)
-def test_exactly_one_hardware_plugin_per_target(expanded, target):
+def test_the_default_profile_selects_one_plugin_per_target(expanded, target):
+    """The single-subsystem arm has exactly one block, so exactly one plugin."""
     found = _plugins(expanded(target=target))
     assert found == [EXPECTED_PLUGIN[target]], (
         f'target={target!r} produced {found!r}, expected '
@@ -83,9 +84,34 @@ def test_gz_target_emits_the_controller_manager_plugin(expanded):
 @pytest.mark.parametrize('profile', ALL_PROFILES, ids=lambda p: p.stem)
 @pytest.mark.parametrize('target', TARGETS)
 def test_seam_holds_for_every_profile(expanded, profile, target):
-    """The seam must not depend on which robot profile is loaded."""
-    found = _plugins(expanded(profile=profile, target=target))
-    assert found == [EXPECTED_PLUGIN[target]]
+    """
+    EVERY ros2_control block selects the target's plugin. No exceptions.
+
+    This used to assert there was exactly one plugin, which was the same
+    statement while every robot had one subsystem. The mobile
+    manipulator has two -- an arm and a base, each its own
+    <ros2_control> block -- so "one" became wrong for a robot that is
+    entirely correct.
+
+    The invariant that actually matters is stronger than counting: every
+    block agrees on the target, and nothing else appears. A composed
+    robot whose base was simulated while its arm talked to a serial port
+    would satisfy the old test on neither count and this one on the
+    second.
+    """
+    xml = expanded(profile=profile, target=target)
+    found = _plugins(xml)
+    blocks = xml.count('<ros2_control ')
+
+    assert found, f'{profile.stem}/{target} declared no hardware plugin'
+    assert set(found) == {EXPECTED_PLUGIN[target]}, (
+        f'{profile.stem}/{target} mixes hardware plugins: {sorted(set(found))}'
+    )
+    assert len(found) == blocks, (
+        f'{profile.stem}/{target} has {blocks} ros2_control blocks but '
+        f'{len(found)} plugins -- a block without one falls back to a '
+        f'default at runtime rather than failing here'
+    )
 
 
 def test_mimic_joint_is_not_independently_commanded(expanded):

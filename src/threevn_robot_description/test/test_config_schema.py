@@ -20,7 +20,8 @@ Cheap discipline that directly implements the spec's requirement to
 must say so, and units must be visible in the key name rather than
 remembered.
 """
-from conftest import (ALL_PROFILES, ENTRY_POINTS, MASS_BAND,
+from conftest import (ALL_PROFILES, COMPONENT_KINDS, COMPONENT_PROFILES,
+                      COMPOSED_PROFILES, ENTRY_POINTS, MASS_BAND,
                       REQUIRED_FRAMES)
 import pytest
 import yaml
@@ -32,7 +33,7 @@ def _cfg(profile):
     return yaml.safe_load(profile.read_text())
 
 
-@pytest.mark.parametrize('profile', ALL_PROFILES, ids=lambda p: p.stem)
+@pytest.mark.parametrize('profile', COMPONENT_PROFILES, ids=lambda p: p.stem)
 def test_every_mass_declares_provenance(profile):
     """
     Right now every value in this file is an engineer's guess. That.
@@ -48,7 +49,7 @@ def test_every_mass_declares_provenance(profile):
         )
 
 
-@pytest.mark.parametrize('profile', ALL_PROFILES, ids=lambda p: p.stem)
+@pytest.mark.parametrize('profile', COMPONENT_PROFILES, ids=lambda p: p.stem)
 def test_revolute_joints_use_degree_keys(profile):
     """
     Revolute limits declare their units in the key name.
@@ -64,7 +65,7 @@ def test_revolute_joints_use_degree_keys(profile):
         assert 'initial_position_deg' in spec, f'{name}: use initial_position_deg'
 
 
-@pytest.mark.parametrize('profile', ALL_PROFILES, ids=lambda p: p.stem)
+@pytest.mark.parametrize('profile', COMPONENT_PROFILES, ids=lambda p: p.stem)
 def test_prismatic_joints_use_metre_keys(profile):
     for name, spec in _cfg(profile)['joints'].items():
         if spec['type'] != 'prismatic':
@@ -74,7 +75,7 @@ def test_prismatic_joints_use_metre_keys(profile):
         assert 'lower_deg' not in spec['limit'], f'{name}: prismatic limit in degrees?'
 
 
-@pytest.mark.parametrize('profile', ALL_PROFILES, ids=lambda p: p.stem)
+@pytest.mark.parametrize('profile', COMPONENT_PROFILES, ids=lambda p: p.stem)
 def test_no_dimension_is_zero_or_negative(profile):
     for name, spec in _cfg(profile)['links'].items():
         for key, value in spec['geometry'].items():
@@ -83,7 +84,7 @@ def test_no_dimension_is_zero_or_negative(profile):
             assert value > 0, f'{name}.geometry.{key} = {value} must be positive'
 
 
-@pytest.mark.parametrize('profile', ALL_PROFILES, ids=lambda p: p.stem)
+@pytest.mark.parametrize('profile', COMPONENT_PROFILES, ids=lambda p: p.stem)
 def test_every_joint_references_declared_links(profile):
     """
     Every joint references a link that is actually declared.
@@ -105,7 +106,7 @@ def test_every_joint_references_declared_links(profile):
         assert spec['child'] in known, f'{name}: unknown child {spec["child"]!r}'
 
 
-@pytest.mark.parametrize('profile', ALL_PROFILES, ids=lambda p: p.stem)
+@pytest.mark.parametrize('profile', COMPONENT_PROFILES, ids=lambda p: p.stem)
 def test_model_name_is_ros_legal(profile):
     """
     REP-144: an identifier that may become a node, topic or namespace.
@@ -123,7 +124,7 @@ def test_model_name_is_ros_legal(profile):
     )
 
 
-@pytest.mark.parametrize('profile', ALL_PROFILES, ids=lambda p: p.stem)
+@pytest.mark.parametrize('profile', COMPONENT_PROFILES, ids=lambda p: p.stem)
 def test_mimic_targets_an_existing_joint(profile):
     cfg = _cfg(profile)
     for name, spec in cfg['joints'].items():
@@ -155,3 +156,92 @@ def test_every_profile_declares_a_known_family(profile):
     )
     assert kind in MASS_BAND, f'kind={kind!r} has no mass band'
     assert kind in REQUIRED_FRAMES, f'kind={kind!r} has no required frames'
+
+
+# -- composition profiles ----------------------------------------------
+#
+# A composition declares no links, joints or masses. Its whole job is to
+# name components and say where they meet, so what is worth asserting is
+# the opposite of the component schema: that it stays empty of physical
+# numbers.
+
+@pytest.mark.parametrize('profile', COMPOSED_PROFILES, ids=lambda p: p.stem)
+def test_composition_names_components_that_exist(profile):
+    """Every named component resolves to a real profile."""
+    import yaml
+
+    cfg = yaml.safe_load(profile.read_text())
+    parts = cfg.get('components')
+    assert parts, f'{profile.name}: a composition must name its components'
+    for role, name in parts.items():
+        assert (profile.parent / name).is_file(), (
+            f'{profile.name}: component {role}={name!r} does not exist'
+        )
+
+
+@pytest.mark.parametrize('profile', COMPOSED_PROFILES, ids=lambda p: p.stem)
+def test_composition_components_are_components(profile):
+    """
+    A composition is built from component families, not other compositions.
+
+    Nesting would be defensible eventually, but nothing supports it today
+    -- the entry point loads each component's YAML directly and would
+    quietly build nothing from a profile that has no links.
+    """
+    import yaml
+
+    cfg = yaml.safe_load(profile.read_text())
+    for role, name in cfg['components'].items():
+        kind = yaml.safe_load((profile.parent / name).read_text())['meta']['kind']
+        assert kind in COMPONENT_KINDS, (
+            f'{profile.name}: component {role} has kind {kind!r}, which is '
+            f'not a component family {sorted(COMPONENT_KINDS)}'
+        )
+
+
+@pytest.mark.parametrize('profile', COMPOSED_PROFILES, ids=lambda p: p.stem)
+def test_composition_declares_no_physical_numbers(profile):
+    """
+    THE SINGLE SOURCE OF TRUTH, ENFORCED.
+
+    The moment a composition carries its own `links` or `servos`, the
+    same quantity exists in two files and one of them is stale. Every
+    dimension belongs to the component that owns it; this file may say
+    only which components and where they join.
+    """
+    import yaml
+
+    cfg = yaml.safe_load(profile.read_text())
+    owned_elsewhere = {'links', 'joints', 'servos', 'motors', 'frames',
+                       'sensors', 'limit_derate', 'defaults'}
+    present = owned_elsewhere & set(cfg)
+    assert not present, (
+        f'{profile.name} declares {sorted(present)}, which belong to the '
+        f'component profiles. Two sources of truth is one too many.'
+    )
+
+
+@pytest.mark.parametrize('profile', COMPOSED_PROFILES, ids=lambda p: p.stem)
+def test_composition_mount_is_fully_specified(profile):
+    """
+    The mount says everything needed to place one component on another.
+
+    Except the vertical offset, which is derived from the arm's own
+    mount_plate_link -- see the note in threevn_mm_v1.yaml. A `z` here
+    would be exactly the second source of truth the test above forbids,
+    so its ABSENCE is asserted rather than its value.
+    """
+    import yaml
+
+    mount = yaml.safe_load(profile.read_text()).get('mount')
+    assert mount, f'{profile.name}: no mount block'
+    for key in ('prefix', 'x', 'y', 'yaw'):
+        assert key in mount, f'{profile.name}: mount is missing {key!r}'
+    assert mount['prefix'].endswith('_'), (
+        f'{profile.name}: prefix {mount["prefix"]!r} must end in an '
+        f'underscore, or it runs into the link name'
+    )
+    assert 'z' not in mount, (
+        f'{profile.name}: mount.z is derived from the arm profile, not '
+        f'declared here'
+    )

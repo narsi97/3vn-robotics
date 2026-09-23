@@ -59,16 +59,6 @@
     </ros2_control>
 
     <xacro:if value="${'$(arg target)' == 'gz'}">
-      <gazebo>
-        <plugin filename="gz_ros2_control-system"
-                name="gz_ros2_control::GazeboSimROS2ControlPlugin">
-          <xacro:if value="${'$(arg controllers_file)' != ''}">
-            <parameters>$(arg controllers_file)</parameters>
-          </xacro:if>
-          <controller_manager_name>controller_manager</controller_manager_name>
-        </plugin>
-      </gazebo>
-
       <!-- Skid steer scrubs. Without tuned friction Gazebo either grips
            so hard the chassis will not rotate, or slides like ice. These
            values let it turn while still driving straight. -->

@@ -62,7 +62,10 @@
   <xacro:macro name="threevn_base" params="parent prefix">
     <xacro:property name="chassis" value="${cfg['links']['base_link']}"/>
 
-    <joint name="${prefix}chassis_joint" type="fixed">
+    <!-- base_footprint -> base_link. Named base_joint to match what
+         it connects; it was chassis_joint until the link it points at
+         stopped being chassis_link. -->
+    <joint name="${prefix}base_joint" type="fixed">
       <parent link="${parent}"/>
       <child link="${prefix}base_link"/>
       <!-- Lift the chassis so the wheels touch the ground plane.
