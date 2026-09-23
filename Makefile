@@ -120,7 +120,20 @@ sim: build stop
 	@echo "  Gazebo server headless. GUI=1 adds the gz GUI at $(NOVNC) (slow: llvmpipe)."
 	$(RUN_TTY) "ros2 launch threevn_sim sim.launch.py profile:=$(PROFILE) gui:=$(if $(filter 1,$(GUI)),true,false)"
 
+# Checks for the device first. Without it, controller_manager aborts
+# with an uncaught runtime_error and exit code -6, which reads as a crash
+# rather than "nothing is plugged in".
+ESP32_PORT ?= /dev/ttyUSB0
 robot: build stop
+	@$(RUN) "test -e $(ESP32_PORT)" 2>/dev/null || { \
+	  echo ""; \
+	  echo "  No device at $(ESP32_PORT) inside the container."; \
+	  echo ""; \
+	  echo "  Plug the ESP32 in, then pass it through to Docker. On macOS,"; \
+	  echo "  Docker Desktop cannot forward USB directly - see docs/firmware.md."; \
+	  echo "  Override the path with:  make robot ESP32_PORT=/dev/ttyACM0"; \
+	  echo ""; \
+	  exit 1; }
 	$(RUN_TTY) "ros2 launch threevn_bringup robot.launch.py target:=esp32 profile:=$(PROFILE)"
 
 # Stop any previously launched stack.

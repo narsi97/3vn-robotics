@@ -23,8 +23,13 @@ suite that takes minutes is a suite people stop running before they
 commit. Everything that needs a simulator is marked `slow` and excluded
 from `make test`.
 
-Current: **~215 fast tests in ~11 s**, **15 ROS integration tests**,
-**12 Gazebo integration tests**, and a passing end-to-end acceptance run.
+Current: **~315 fast tests**, **15 ROS integration tests**, **12 Gazebo
+integration tests**, and a passing end-to-end acceptance run.
+
+That includes **53 C++ tests** covering the wire protocol, the hardware
+interface (against a fake transport) and the ESP32 firmware's safety
+logic — none of which need a device. Testing an e-stop by flashing it
+onto a powered arm is the alternative.
 
 ## Layers
 

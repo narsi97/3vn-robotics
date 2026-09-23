@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>threevn_hardware</name>
+  <version>0.1.0</version>
+  <description>
+    ros2_control hardware interface for the physical 3VN arm, and the
+    wire protocol it speaks.
+
+    include/threevn_hardware/protocol.hpp is compiled into BOTH this
+    package and the ESP32 firmware under firmware/esp32/, so the two
+    cannot disagree about framing, field order or units. It has no
+    dependencies - no ROS, no Arduino, no STL containers, no allocation -
+    which is what lets it be tested natively with no hardware attached.
+
+    ARCHITECTURAL RULE: this package must never depend on Gazebo. It is
+    the real-hardware leg of the seam; a simulator dependency here would
+    mean deploying the simulator to the robot.
+  </description>
+  <maintainer email="narsipasham@gmail.com">3VN Systems</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>hardware_interface</depend>
+  <depend>pluginlib</depend>
+  <depend>rclcpp</depend>
+  <depend>rclcpp_lifecycle</depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+  <test_depend>ament_cmake_gmock</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+    <hardware_interface plugin="${prefix}/threevn_hardware.xml"/>
+  </export>
+</package>

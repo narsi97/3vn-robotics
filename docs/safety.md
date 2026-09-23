@@ -69,7 +69,7 @@ It is **not a safety system**:
 |---|---|---|
 | Physical hard stops | **not designed yet** | The most trustworthy limit is one the mechanism cannot exceed. Should be part of the CAD. |
 | Servo travel | inherent | An MG996R cannot exceed ~180° of its own range. |
-| Firmware clamp | **Phase 5** | The ESP32 must clamp every commanded angle independently of ROS. Non-negotiable: it is the last line that survives a host crash. |
+| Firmware clamp | **done** | `firmware/esp32/include/joint_limits.hpp`. Limits are COMPILED IN, not sent over the wire - a limit the host can set is a limit the host can get wrong. Tested natively by `test_firmware_logic.cpp`, and a test asserts the duplicated values have not drifted from the profile. |
 | `RobotClient` validation | **done** | Rejects out-of-limit goals before sending. |
 | `ros2_control` limits | **done** | `enforce_command_limits: true` on controller_manager. `ResourceManager` clamps every command below the hardware seam, so it holds for mock, Gazebo and the ESP32 alike. Asserted by `test_ros_integration.py`. |
 | Physics (simulation only) | inherent | Useful in Gazebo, meaningless on hardware. |
@@ -89,10 +89,30 @@ It is **not a safety system**:
 
 ## Emergency stop
 
-Not yet implemented. Phase 5, and it needs to work at two levels:
+**Partly implemented.** The firmware has a latching stop:
 
-1. A ROS-level stop that cancels goals and holds position.
-2. A **hardware** cut that does not depend on the host, the network, or
-   any software being responsive.
+- `kFlagEmergencyStop` cuts torque immediately.
+- It **stays latched** when the stop command stops arriving. An e-stop
+  that releases because the link dropped is not an e-stop.
+- Only an explicit `kFlagClearFault`, not also asserting stop, releases
+  it.
 
-Only the second is an actual e-stop. The first is a convenience.
+All four behaviours are asserted in `test_firmware_logic.cpp`.
+
+**A hardware cut is still missing, and it is the one that matters.** The
+above depends on the ESP32 running correct software. A real e-stop is a
+switch in the servo power line that works when the firmware has hung, and
+no amount of testing substitutes for it.
+
+Until that exists: **keep the power switch within reach before you power
+on.**
+
+## What a lost heartbeat does, and why
+
+250 ms of silence from the host (12 missed frames at 50 Hz) trips the
+firmware's timeout. It then **holds position** rather than releasing.
+
+Releasing would drop the arm under gravity. On a desk that means the
+gripper swinging into whatever is in front of it, so holding is the safer
+failure — and the operator still has the power switch, which is the
+layer that actually stops things.

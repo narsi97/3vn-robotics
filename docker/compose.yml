@@ -37,6 +37,12 @@ services:
     volumes:
       - ../src:/ws/src
       - ../scripts:/ws/scripts:ro
+      # The ESP32 firmware lives at the repository root, outside the ROS
+      # workspace, because it is not a ROS package. It is mounted anyway
+      # so its safety logic can be compiled and tested natively - the
+      # alternative is testing an e-stop by flashing it onto a powered
+      # arm. Read-only: nothing in the workspace should write to it.
+      - ../firmware:/ws/firmware:ro
       # build/install/log are NAMED VOLUMES, not bind mounts. colcon
       # writes tens of thousands of small files; through VirtioFS on
       # macOS that cost dominates every build. It also keeps generated

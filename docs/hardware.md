@@ -1,8 +1,9 @@
 # Hardware
 
-> No physical arm exists yet. Every value in `config/*.yaml` is
-> `provenance: estimated`. This document describes the intent and the
-> seam; Phase 5 makes it real.
+> No physical arm exists yet, and every value in `config/*.yaml` is
+> still `provenance: estimated`. But the software side of Phase 5 is
+> done: the firmware, the protocol and the hardware interface all exist
+> and are tested without a device. See [firmware.md](firmware.md).
 
 BOM and safety: [bom-hardware.md](bom-hardware.md).
 
@@ -54,23 +55,34 @@ private to `read()`/`write()` and can change later without touching
 anything else. micro-ROS becomes an optional advanced module, not a
 dependency.
 
-### The firmware's job, and what it is not
+### The firmware's job, and what it is not — now written
 
-Does: PWM generation, joint limit clamping, heartbeat, e-stop, reporting
-firmware version and health.
+`firmware/esp32/`. Does: PWM generation, joint limit clamping, heartbeat,
+a latching e-stop, reporting firmware version and health.
 
 Does **not**: kinematics, trajectory generation, planning. High-level
 intelligence stays in ROS 2, or the "not coupled to the ESP32" property is
 lost — and debugging a 4 MB microcontroller is far harder than debugging a
 laptop.
 
-### Protocol sketch
+### The protocol — implemented
 
-Framed binary, versioned, with a CRC. Position command and state frames
-at 50 Hz; a heartbeat whose absence triggers hold-position then disable.
+Framed binary, versioned, CRC-16/CCITT-FALSE, little-endian. Positions
+travel as signed micro-units of each joint's SI unit, the same conversion
+for every joint, so there is no per-joint scale table to get wrong.
 
-The codec will live in its own translation unit so it can be **unit-tested
-with no hardware attached** — which is the point of putting the seam here.
+`protocol.hpp` is compiled into **both** the firmware and the hardware
+interface, so the two cannot disagree. 20 tests cover it — round-trips,
+CRC against the published vector, corrupted payloads and lengths, wrong
+versions, frames split across reads, resync after garbage, and 200,000
+bytes of noise.
+
+One property worth knowing: a truncated frame costs you the **next** frame
+too, because the parser is stranded mid-payload until its CRC fails. That
+is inherent — payload bytes can legitimately contain the magic, so
+scanning for it inside a payload would resync on data. The loss is
+bounded at one frame (20 ms at 50 Hz), and a test asserts it stays
+bounded rather than wedging the link.
 
 ## Calibration debt
 

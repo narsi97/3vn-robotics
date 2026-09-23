@@ -1,0 +1,14 @@
+<library path="threevn_hardware">
+  <class name="threevn_hardware/Esp32SystemInterface"
+         type="threevn::hardware::Esp32SystemInterface"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>
+      Drives the physical 3VN arm through an ESP32 over a framed binary
+      serial protocol. The control loop runs here on the host at 50 Hz;
+      the device is a servo driver that clamps limits independently.
+
+      This class name is referenced by arm.ros2_control.xacro and has
+      been since Phase 1, which is what made Phase 5 purely additive.
+    </description>
+  </class>
+</library>

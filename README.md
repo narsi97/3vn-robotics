@@ -162,7 +162,7 @@ Full audit: [`THIRD_PARTY.md`](THIRD_PARTY.md) ·
 
 ## Status
 
-**Phases 0–4 complete.**
+**Phases 0–5 complete** (Phase 5 in software; no arm has been built yet).
 
 - The robot description expands for all three hardware targets.
 - The arm spawns in Gazebo Harmonic, with all three controllers active
@@ -200,7 +200,16 @@ make test-sim    # ~100s, Gazebo physics
 make acceptance  # the full sequence + report
 ```
 
-Phase 5 is the ESP32 firmware and the `Esp32SystemInterface`.
+- ESP32 firmware and the `Esp32SystemInterface` plugin, with the wire
+  protocol compiled into **both** so they cannot drift.
+- Joint limits now clamp in three places, the last of which survives the
+  host crashing.
+
+`make robot` loads the plugin and stops only because no device is
+attached — the honest state until an arm exists. See
+[`docs/firmware.md`](docs/firmware.md).
+
+Phase 6 is the runtime Docker images.
 
 See [`docs/roadmap.md`](docs/roadmap.md) for the 15-phase plan and
 [`docs/risks.md`](docs/risks.md) for what is known to be fragile.

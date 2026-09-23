@@ -11,8 +11,8 @@ One system that evolves. Not twelve disconnected tutorials.
 | 2 | Gazebo simulation + scenarios | **done** |
 | 3 | ROS 2 control runtime, dashboard | **done** |
 | 4 | Full automated test layers | **done** |
-| 5 | ESP32 firmware + `Esp32SystemInterface` | next |
-| 6 | Docker runtime images | |
+| 5 | ESP32 firmware + `Esp32SystemInterface` | **done** (software) |
+| 6 | Docker runtime images | next |
 | 7 | CI/CD pipelines | |
 | 8 | VPS deployment | |
 | 9 | Monitoring (OpenTelemetry → self-hosted stack) | |
@@ -32,14 +32,12 @@ phase that first needs it.
 | Package | Phase | For |
 |---|---|---|
 | `threevn_interfaces` | 2 | custom msgs/srvs/actions — none needed yet; `control_msgs` and `sensor_msgs` cover Phase 1 |
-| `threevn_hardware` | 5 | `Esp32SystemInterface` — the plugin name is already fixed in the description |
 | `threevn_telemetry` | 6 | OpenTelemetry emission |
 | `threevn_perception` | 12 | camera pipeline |
 | `threevn_navigation` | 11 | Nav2 integration |
 | `threevn_data` | 13 | dataset collection |
 | `threevn_ml` | 14 | training, inference |
 | `threevn_mlops` | 15 | registry, deployment, monitoring |
-| `firmware/esp32/` | 5 | ESP32 firmware |
 
 ## Mechanical design: not started
 
@@ -65,6 +63,24 @@ and redistributes the masses:
   rods. Much better mass distribution and the genuinely clever part of the
   EEZYbot design, but harder CAD and it changes the URDF (the linkage is a
   closed kinematic chain, which URDF cannot express directly).
+
+## Phase 5 is done in software, not on hardware
+
+The firmware, the protocol and the hardware interface exist and are
+tested — 53 C++ tests, none of which need a device. `make robot` now
+loads the plugin and fails only because no ESP32 is attached.
+
+What remains needs physical parts:
+
+- **No arm has been built.** Every dimension is still
+  `provenance: estimated`.
+- **Docker Desktop on macOS cannot forward USB to a container**, so
+  bring-up needs a Linux host, a VM, or the unimplemented `tcp`
+  transport. See [firmware.md](firmware.md).
+- **No hardware e-stop.** The firmware's latching stop depends on the
+  firmware running correctly. A switch in the servo power line does not.
+- **No position feedback.** Hobby servos report nothing, so the device
+  reports its target as `measured` and a stalled servo looks healthy.
 
 ## Tracked debt
 
