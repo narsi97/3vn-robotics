@@ -7,6 +7,11 @@
 # returning to a previous version never depends on rebuilding: if the
 # only way back is a successful build, you do not have a rollback, you
 # have a hope. Re-pointing a robot at ghcr.io/...:sha-<old> is a pull.
+#
+# Each architecture builds on its OWN NATIVE RUNNER and the results are
+# merged into one manifest. The first version used QEMU to emulate arm64
+# on an x86 runner and took 23 minutes; native arm64 runners are free for
+# public repositories, so there is no reason to pay that.
 name: Docker
 
 on:
@@ -29,25 +34,164 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  runtime:
-    name: runtime image
-    runs-on: ubuntu-24.04
+  build:
+    name: build ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
 
     steps:
       - uses: actions/checkout@v4
-
-      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
-      # Only pushes need credentials. A pull request from a fork has no
-      # write token, so it builds and verifies without publishing.
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Verified on THIS architecture before anything is published, so an
+      # image that is clean on x86 and broken on arm cannot ship.
+      - name: Build locally for verification
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: runtime
+          platforms: ${{ matrix.platform }}
+          load: true
+          tags: verify:local
+          build-args: |
+            THREEVN_GIT_COMMIT=${{ github.sha }}
+            THREEVN_GIT_BRANCH=${{ github.ref_name }}
+            THREEVN_BUILD_TIME=${{ github.event.repository.updated_at }}
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.arch }}
+
+      # The architectural claim, checked on the artifact rather than in
+      # the source. threevn_bringup and threevn_hardware have no
+      # simulator dependency, which is what lets the robot image drop
+      # Gazebo -- and a dependency added by accident would put it back.
+      #
+      # NOTE: no `set -e`, and every check is an if/else. The first
+      # version used `set -e` with `test -d ... && { fail=1; }`, so when
+      # the directory correctly did NOT exist the && list returned
+      # non-zero, set -e killed the shell, and the SUCCESS case exited 1.
+      - name: It must contain no simulator and no copyleft tooling
+        run: |
+          docker run --rm verify:local bash -lc '
+            fail=0
+            for pkg in ros-jazzy-ros-gz-sim ros-jazzy-gz-sim-vendor \
+                       ros-jazzy-gz-ros2-control ros-jazzy-ros-gz-bridge \
+                       x11vnc websockify novnc; do
+              if dpkg -l 2>/dev/null | grep -q " $pkg "; then
+                echo "FAIL: $pkg is in a distributed image"
+                fail=1
+              else
+                echo "ok: no $pkg"
+              fi
+            done
+            if [ -d /opt/threevn/share/threevn_sim ]; then
+              echo "FAIL: threevn_sim was installed into the robot image"
+              fail=1
+            else
+              echo "ok: threevn_sim not installed"
+            fi
+            exit $fail
+          '
+
+      - name: It must also actually run
+        # Small and licence-clean but unable to start the control stack
+        # would be worse than large and working.
+        run: |
+          docker run --rm -d --name verify \
+            -e ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST \
+            verify:local \
+            ros2 launch threevn_bringup robot.launch.py target:=mock
+          ok=0
+          for _ in $(seq 1 30); do
+            if docker exec verify bash -lc \
+                 'ros2 control list_controllers 2>/dev/null' 2>/dev/null \
+               | grep -q 'arm_controller.*active'; then
+              ok=1; break
+            fi
+            sleep 3
+          done
+          if [ "$ok" -ne 1 ]; then
+            echo "the runtime image never reached an active control stack"
+            docker logs verify 2>&1 | tail -30
+            docker rm -f verify; exit 1
+          fi
+          echo "control stack active"
+          docker exec verify bash -lc 'ros2 run threevn_control run_scenario home'
+          docker rm -f verify
+
+      - name: Push by digest
+        if: github.event_name != 'pull_request'
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: runtime
+          platforms: ${{ matrix.platform }}
+          build-args: |
+            THREEVN_GIT_COMMIT=${{ github.sha }}
+            THREEVN_GIT_BRANCH=${{ github.ref_name }}
+            THREEVN_BUILD_TIME=${{ github.event.repository.updated_at }}
+          cache-from: type=gha,scope=${{ matrix.arch }}
+          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+
+      - name: Record the digest
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          # The filename is the bare digest; the merge step reassembles
+          # `name@sha256:<digest>` from it.
+          mkdir -p /tmp/digests
+          touch "/tmp/digests/${DIGEST#sha256:}"
+
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: digest-${{ matrix.arch }}
+          path: /tmp/digests/*
+          retention-days: 1
+
+  merge:
+    name: publish manifest
+    runs-on: ubuntu-24.04
+    needs: build
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -62,85 +206,15 @@ jobs:
             type=raw,value=latest,enable={{is_default_branch}}
             type=sha,prefix=sha-,format=short
             type=semver,pattern=v{{version}}
-            type=ref,event=pr
 
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: docker/Dockerfile
-          target: runtime
-          # arm64 for a Raspberry Pi or SBC beside the arm; amd64 for a
-          # mini PC or a workstation. Both native manifests exist
-          # upstream, so nothing is emulated at runtime.
-          platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: |
-            THREEVN_GIT_COMMIT=${{ github.sha }}
-            THREEVN_GIT_BRANCH=${{ github.ref_name }}
-            THREEVN_BUILD_TIME=${{ github.event.repository.updated_at }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # The architectural claim, checked on the artifact rather than in
-      # the source. threevn_bringup and threevn_hardware have no
-      # simulator dependency, which is what lets the robot image drop
-      # Gazebo entirely - and a dependency added by accident would
-      # silently put it back.
-      - name: The runtime image must contain no simulator
+      - name: Merge the per-architecture images into one manifest
+        working-directory: /tmp/digests
         run: |
-          docker build -f docker/Dockerfile --target runtime -t verify:local .
-          docker run --rm verify:local bash -lc '
-            set -e
-            fail=0
-            for pkg in ros-jazzy-ros-gz-sim ros-jazzy-gz-sim-vendor \
-                       ros-jazzy-gz-ros2-control ros-jazzy-ros-gz-bridge; do
-              if dpkg -l 2>/dev/null | grep -q " $pkg "; then
-                echo "FAIL: $pkg is in the robot image"; fail=1
-              fi
-            done
-            # GPL/LGPL components live only in the dev stage. Nothing
-            # distributed may carry them -- see THIRD_PARTY.md.
-            for pkg in x11vnc websockify novnc; do
-              if dpkg -l 2>/dev/null | grep -q " $pkg "; then
-                echo "FAIL: $pkg is in a distributed image"; fail=1
-              fi
-            done
-            test -d /opt/threevn/share/threevn_sim && {
-              echo "FAIL: threevn_sim was installed into the robot image"; fail=1; }
-            exit $fail
-          '
-          echo "runtime image carries no simulator"
-
-      - name: It must also actually run
-        # An image that is small and clean but cannot start the control
-        # stack is worse than a large one that can.
-        run: |
-          docker run --rm -d --name verify \
-            -e ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST \
-            verify:local \
-            ros2 launch threevn_bringup robot.launch.py target:=mock
-          for i in $(seq 1 30); do
-            if docker exec verify bash -lc \
-                 'ros2 control list_controllers 2>/dev/null' \
-               | grep -q 'arm_controller.*active'; then
-              echo "control stack active"
-              docker exec verify bash -lc \
-                'ros2 run threevn_control run_scenario home'
-              docker rm -f verify
-              exit 0
-            fi
-            sleep 3
-          done
-          echo "the runtime image never reached an active control stack"
-          docker logs verify | tail -30
-          docker rm -f verify
-          exit 1
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY }}/${{ env.IMAGE }}@sha256:%s ' *)
 
       - name: Report what was published
-        if: github.event_name != 'pull_request'
         run: |
           {
             echo "### Runtime image published"
@@ -149,5 +223,7 @@ jobs:
             echo "${{ steps.meta.outputs.tags }}"
             echo '```'
             echo ""
-            echo "Roll a robot back with the immutable \`sha-\` tag - a pull, never a rebuild."
+            echo "linux/amd64 + linux/arm64, each built on its own native runner."
+            echo ""
+            echo "Roll a robot back with the immutable \`sha-\` tag — a pull, never a rebuild."
           } >> "$GITHUB_STEP_SUMMARY"
