@@ -85,8 +85,15 @@ jobs:
             -w /ws \
             threevn-robotics-ci:local \
             bash -lc '
-              colcon build --symlink-install > /dev/null &&
-              source install/setup.bash &&
+              set -e
+              # Build and source in the FOREGROUND. Writing this as
+              # `build && source ... && launch &` backgrounds the whole
+              # AND-list, so the source runs in a subshell and its
+              # environment never reaches the commands below - which
+              # fails as "Package \'"'"'threevn_control\'"'"' not found",
+              # naming a package that is sitting right there.
+              colcon build --symlink-install > /dev/null
+              source install/setup.bash
               ros2 launch threevn_sim sim.launch.py > /tmp/sim.log 2>&1 &
               ros2 launch threevn_dashboard dashboard.launch.py > /tmp/dash.log 2>&1 &
               sleep 50
@@ -119,8 +126,9 @@ jobs:
             -w /ws \
             threevn-robotics-ci:local \
             bash -lc '
-              colcon build --symlink-install > /dev/null &&
-              source install/setup.bash &&
+              set -e
+              colcon build --symlink-install > /dev/null
+              source install/setup.bash
               ros2 launch threevn_bringup robot.launch.py target:=mock > /tmp/mock.log 2>&1 &
               sleep 25
               ros2 run threevn_control run_scenario --all
