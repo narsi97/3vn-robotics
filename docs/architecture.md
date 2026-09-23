@@ -128,17 +128,31 @@ See [ADR-0005](decisions/0005-yaml-single-source.md).
 
 ## Where things run, after Phase 8
 
-
+```
+        on / beside the robot                 shared 3VN VPS
+   +------------------------------+      +---------------------+
+   | ros2_control @ 50 Hz         |      | fleet view (Go)     |
+   | threevn_bringup              |      | ~5 MB RSS           |
+   | threevn_hardware --> ESP32   |      | unlisted path       |
+   | dashboard :8107              |      +---------------------+
+   +--------------+---------------+                 ^
+                  |                                 |
+                  +------- POST /api/telemetry ------+
+                            every 10s, one way
+```
 
 **Nothing reaches into the robot.** Robots sit behind home NAT where
 inbound connections do not work — but the real reason is that a robot
 must never wait on the VPS. Losing the network degrades observability,
 never motion.
 
-Demonstrated rather than asserted: killing the fleet service leaves the
-robot at  200 with scenarios passing, and the reporter emits a
-single throttled warning.
+Demonstrated rather than asserted: killing the fleet service mid-run left
+the robot answering `/readyz` with 200 and scenarios still passing, while
+the reporter emitted a single throttled warning.
 
 The fleet view shows a robot as **stale** after 35 s and refuses to call
 it ready. A robot that stopped reporting is not healthy just because its
-last message said so — that converts an outage into a silent one.
+last message said so — that converts an outage into a silent one, which
+is worse than having no dashboard.
+
+Deployment details: [`../deploy/README.md`](../deploy/README.md).

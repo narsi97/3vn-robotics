@@ -55,7 +55,7 @@ stream looks exactly like a frozen dashboard.
 
 **The dashboard still runs on the robot, not the VPS.** What landed on
 the VPS in Phase 8 is a separate, much smaller thing: a fleet view that
-robots push to. See [](../deploy/README.md).
+robots push to. See [`../deploy/README.md`](../deploy/README.md).
 
 ## Two halves, deployed differently
 
