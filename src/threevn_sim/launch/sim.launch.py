@@ -63,13 +63,22 @@ def generate_launch_description():
     bridge_config = PathJoinSubstitution(
         [FindPackageShare(SIM_PKG), 'config', 'gz_bridge.yaml']
     )
+    # Resolved HERE, not inside the description. threevn_sim depends on
+    # both packages; the description depends on neither.
+    controllers_file = PathJoinSubstitution(
+        [FindPackageShare(BRINGUP_PKG), 'config', 'controllers.yaml']
+    )
 
     # target:=gz selects gz_ros2_control/GazeboSimSystem and emits the
     # <gazebo> plugin block. Identical description otherwise.
     # The raw substitution, shared by robot_state_publisher AND the
     # spawner below so the two cannot possibly disagree.
+    # threevn_sim depends on both the description and bringup, so it is
+    # the right place to join them. The description must not look up
+    # bringup itself -- bringup depends on the description.
     robot_description_content = Command(
-        ['xacro ', xacro_file, ' params_file:=', params_file, ' target:=gz']
+        ['xacro ', xacro_file, ' params_file:=', params_file, ' target:=gz',
+         ' controllers_file:=', controllers_file]
     )
 
     # A Command substitution yields URDF XML. Without value_type=str,

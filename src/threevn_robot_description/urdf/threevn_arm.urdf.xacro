@@ -24,6 +24,10 @@
              default="$(find threevn_robot_description)/config/threevn_arm_v1.yaml"/>
   <xacro:arg name="target" default="mock"/>
   <xacro:arg name="prefix" default=""/>
+  <!-- Path to the ros2_control controllers file, used only by the gz
+       target. Empty by default so this package never has to resolve a
+       package that depends on it. threevn_sim supplies it. -->
+  <xacro:arg name="controllers_file" default=""/>
 
   <!-- xacro.load_yaml is native to ROS 2 xacro. This is what makes the
        YAML a genuine single source of truth: there is no generated URDF

@@ -113,7 +113,24 @@
       <gazebo>
         <plugin filename="gz_ros2_control-system"
                 name="gz_ros2_control::GazeboSimROS2ControlPlugin">
-          <parameters>$(find threevn_bringup)/config/controllers.yaml</parameters>
+          <!--
+            The controllers file is PASSED IN, not looked up.
+
+            It used to be $(find threevn_bringup)/config/controllers.yaml,
+            which inverted the dependency direction: threevn_bringup
+            depends on this package, so this package must not reach back
+            into it. That went unnoticed because a fully sourced
+            workspace resolves the path anyway - it only surfaced when CI
+            built and tested this package in isolation and xacro raised
+            PackageNotFoundError.
+
+            threevn_sim depends on both and supplies the path, so the
+            dependency graph stays acyclic and the description stays
+            standalone.
+          -->
+          <xacro:if value="${'$(arg controllers_file)' != ''}">
+            <parameters>$(arg controllers_file)</parameters>
+          </xacro:if>
           <controller_manager_name>controller_manager</controller_manager_name>
         </plugin>
       </gazebo>

@@ -102,3 +102,42 @@ def test_mimic_joint_is_not_independently_commanded(expanded):
     assert 'gripper_right_finger_joint' not in commanded, (
         'the mimic joint must not have its own command interface'
     )
+
+
+def test_description_never_resolves_a_package_that_depends_on_it(expanded):
+    """
+    The description expands without any sibling package installed.
+
+    It once embedded `$(find threevn_bringup)/config/controllers.yaml`,
+    which inverted the dependency direction - threevn_bringup depends on
+    this package, not the reverse. A fully sourced workspace resolved it
+    anyway, so it only surfaced when CI built this package in isolation
+    and xacro raised PackageNotFoundError.
+
+    Every target must expand from this package alone.
+    """
+    for target in TARGETS:
+        xml = expanded(target=target)
+        assert 'threevn_bringup' not in xml, (
+            f'target={target} embeds a path into threevn_bringup; pass it '
+            'as the controllers_file argument instead'
+        )
+        assert 'threevn_sim' not in xml
+        assert 'threevn_control' not in xml
+
+
+def test_the_gz_target_accepts_a_controllers_file(expanded):
+    """When supplied, the path reaches the Gazebo plugin block."""
+    xml = expanded(target='gz', controllers_file='/tmp/controllers.yaml')
+    assert '<parameters>/tmp/controllers.yaml</parameters>' in xml
+
+
+def test_the_gz_target_omits_parameters_when_none_is_given(expanded):
+    """
+    Emit no <parameters> tag at all when the argument is empty.
+
+    An empty <parameters></parameters> would be worse than none: Gazebo
+    would try to load a controllers file named "".
+    """
+    xml = expanded(target='gz')
+    assert '<parameters>' not in xml

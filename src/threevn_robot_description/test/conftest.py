@@ -59,8 +59,9 @@ def expanded():
     """
     cache = {}
 
-    def _expand(profile=DEFAULT_PROFILE, target='mock', prefix=''):
-        key = (str(profile), target, prefix)
+    def _expand(profile=DEFAULT_PROFILE, target='mock', prefix='',
+                controllers_file=''):
+        key = (str(profile), target, prefix, controllers_file)
         if key not in cache:
             doc = xacro.process_file(
                 str(XACRO_ENTRY),
@@ -68,6 +69,7 @@ def expanded():
                     'params_file': str(profile),
                     'target': target,
                     'prefix': prefix,
+                    'controllers_file': controllers_file,
                 },
             )
             cache[key] = doc.toprettyxml(indent='  ')
