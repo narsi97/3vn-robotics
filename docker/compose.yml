@@ -37,6 +37,11 @@ services:
     volumes:
       - ../src:/ws/src
       - ../scripts:/ws/scripts:ro
+      # Datasets are large binary data that must survive the container
+      # and must never reach git. A named volume would survive too, but
+      # would be invisible from the host, and a dataset nobody can look
+      # at or copy is not much of a dataset. Gitignored.
+      - ../datasets:/ws/datasets
       # The ESP32 firmware lives at the repository root, outside the ROS
       # workspace, because it is not a ROS package. It is mounted anyway
       # so its safety logic can be compiled and tested natively - the

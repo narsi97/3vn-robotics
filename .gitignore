@@ -29,3 +29,7 @@ acceptance.md
 .idea/
 .DS_Store
 *.swp
+
+# Recorded datasets: large binary data, never in git.
+# See docs/data-pipeline.md.
+datasets/

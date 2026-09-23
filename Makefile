@@ -8,6 +8,14 @@
 SHELL   := /bin/bash
 COMPOSE := docker compose -f docker/compose.yml
 SVC     := ros
+# The container has git but no repository: .git is deliberately not
+# mounted. Dataset provenance needs the commit anyway, so the host
+# resolves it and passes it in. A manifest with no commit cannot be
+# tied to the code that produced it, and the validator says so.
+GIT_COMMIT := $(shell git rev-parse HEAD 2>/dev/null)
+GIT_DIRTY  := $(shell test -n "$$(git status --porcelain 2>/dev/null)" && echo 1 || echo 0)
+GITENV     := THREEVN_GIT_COMMIT=$(GIT_COMMIT) THREEVN_GIT_DIRTY=$(GIT_DIRTY)
+
 RUN     := $(COMPOSE) exec -T $(SVC) bash -lc
 RUN_TTY := $(COMPOSE) exec    $(SVC) bash -lc
 SHARE   := /ws/install/threevn_robot_description/share/threevn_robot_description
@@ -192,6 +200,16 @@ perception: build
 perception-verify: build
 	@echo '  needs a running sim AND a running: make perception'
 	$(RUN) "python3 /ws/scripts/verify_perception.py"
+
+
+# Dataset collection. Needs a running: make mm-sim WORLD=bench_with_target
+EPISODES ?= 6
+dataset: build
+	@echo '  needs a running: make mm-sim WORLD=bench_with_target'
+	$(RUN) "$(GITENV) ros2 run threevn_data collect --episodes $(EPISODES)"
+
+dataset-describe: build
+	$(RUN) "ros2 run threevn_data describe"
 
 
 robot: build stop

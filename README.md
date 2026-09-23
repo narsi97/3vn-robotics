@@ -162,7 +162,7 @@ Full audit: [`THIRD_PARTY.md`](THIRD_PARTY.md) ·
 
 ## Status
 
-**Phases 0–12 complete** (Phase 5 in software; no arm has been built yet).
+**Phases 0–13 complete** (Phase 5 in software; no arm has been built yet).
 
 - The robot description expands for all three hardware targets.
 - The arm spawns in Gazebo Harmonic, with all three controllers active
@@ -257,7 +257,15 @@ make mm-sim WORLD=bench_with_target
 make perception
 ```
 
-Phase 13 is the data pipeline. Nav2 is still outstanding from Phase 11 —
+- A dataset pipeline that labels frames from simulator ground truth,
+  records what produced them, and measures what a careless train/test
+  split would cost.
+
+```bash
+make dataset && make dataset-describe
+```
+
+Phase 14 is machine learning. Nav2 is still outstanding from Phase 11 —
 see [docs/roadmap.md](docs/roadmap.md).
 
 See [`docs/roadmap.md`](docs/roadmap.md) for the 15-phase plan and
