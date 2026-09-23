@@ -20,22 +20,42 @@ network degrades observability and remote management, never motion.
 roughly 4 vCPU / 8 GB. Simulation stays local; cloud Gazebo, if ever
 wanted, is free on GitHub Actions public runners.
 
-## Known blocker: CSP will block the dashboard WebSocket
+## The CSP blocker: resolved by design, not by exception
 
-The shared 3VN Caddy sets `connect-src 'self'` for **every** product on
-the domain. A dashboard connecting to a `rosbridge` or `foxglove_bridge`
-WebSocket on a different origin will be blocked by CSP.
+Flagged in Phase 1: the shared 3VN Caddy sets `connect-src 'self'` for
+**every** product on the domain, so a dashboard talking to a
+`rosbridge`/`foxglove_bridge` WebSocket on another origin would be
+blocked.
 
-Two options, decided in Phase 3:
+**Phase 3 removed the problem instead of working around it.** The
+dashboard uses Server-Sent Events over plain HTTP rather than a
+WebSocket, and serves its own static page. Proxied under the same origin,
+that satisfies `connect-src 'self'` with **no CSP change at all** — so
+no `Report-Only` rollout, and no policy loosened for the other five
+products.
 
-1. **Proxy the WebSocket under the same origin** via Caddy. Preferred —
-   no CSP change, so no other product is affected.
-2. **Add a targeted `connect-src` entry**, shipped as
-   `Content-Security-Policy-Report-Only` first and folded into the
-   enforcing policy once real traffic shows zero violations — per that
-   Caddyfile's own documented practice.
+Adding the dashboard to the shared Caddy is then the ordinary two-block
+pattern every other 3VN product uses:
 
-Flagged here so it is a design input rather than a demo-day surprise.
+```caddyfile
+@robotics path /robotics/api/*
+handle @robotics {
+    uri strip_prefix /robotics
+    reverse_proxy threevn-dashboard:8107
+}
+handle /robotics/* {
+    reverse_proxy threevn-dashboard:8107
+}
+```
+
+One caveat for whoever wires this up: SSE must not be buffered. The
+handler already sends `X-Accel-Buffering: no`, and Caddy's
+`reverse_proxy` streams by default — but verify it, because a buffered
+stream looks exactly like a frozen dashboard.
+
+**This is still not deployed.** The dashboard runs on the robot, and the
+robot is not on the VPS. What lands on the VPS in Phase 8 is telemetry
+ingestion and a remote view, not this node.
 
 ## Versioning
 

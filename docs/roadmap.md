@@ -9,8 +9,8 @@ One system that evolves. Not twelve disconnected tutorials.
 | 0 | Architecture, repository, dev environment | **done** |
 | 1 | Robot description (URDF/Xacro, YAML-driven) | **done** |
 | 2 | Gazebo simulation + scenarios | **done** |
-| 3 | ROS 2 control runtime, dashboard | next |
-| 4 | Full automated test layers | |
+| 3 | ROS 2 control runtime, dashboard | **done** |
+| 4 | Full automated test layers | next |
 | 5 | ESP32 firmware + `Esp32SystemInterface` | |
 | 6 | Docker runtime images | |
 | 7 | CI/CD pipelines | |
@@ -33,7 +33,6 @@ phase that first needs it.
 |---|---|---|
 | `threevn_interfaces` | 2 | custom msgs/srvs/actions — none needed yet; `control_msgs` and `sensor_msgs` cover Phase 1 |
 | `threevn_hardware` | 5 | `Esp32SystemInterface` — the plugin name is already fixed in the description |
-| `threevn_dashboard` | 3 | web UI |
 | `threevn_telemetry` | 6 | OpenTelemetry emission |
 | `threevn_perception` | 12 | camera pipeline |
 | `threevn_navigation` | 11 | Nav2 integration |
@@ -81,6 +80,13 @@ not a 20% one.
 `test_servo_limits.py` fails if any joint is configured beyond what its
 servo can deliver. Link *masses* remain `provenance: estimated` and still
 need measuring.
+
+**`rclpy` reports dead services as ready.** `service_is_ready()` keeps
+returning `True` after a service server has gone, so a poll keeps firing,
+never completes, and the caller silently keeps its last answer. Found
+twice in Phase 3 — controllers and then hardware both reported `active`
+for a control stack that had been killed. Mitigated by ageing the data
+out; worth remembering anywhere else a service is polled.
 
 **`ros2_control` does not enforce the joint limits it declares.**
 Measured in Phase 2: commanding `shoulder_pan_joint` to 180° against a 90°

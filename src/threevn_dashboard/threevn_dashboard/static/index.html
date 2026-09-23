@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<!--
+  3VN Robotics dashboard.
+
+  One file, no build step, no framework, no CDN. It is served by a ROS
+  node on the robot itself, so every byte here is one more thing that has
+  to work on a machine you may only reach over SSH.
+
+  Data arrives over Server-Sent Events from the same origin, which is why
+  this needs no CSP exception on the shared 3VN Caddy.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3VN Robotics</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1c1f25; --line: #2b2f37;
+    --text: #e6e8ec; --muted: #8b93a1;
+    --ok: #3fb950; --warn: #d29922; --bad: #f85149; --accent: #e67e22;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 16px; background: var(--bg); color: var(--text);
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1000px; margin: 0 auto; }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap;
+           margin-bottom: 20px; }
+  h1 { font-size: 20px; margin: 0; font-weight: 600; letter-spacing: -0.01em; }
+  h1 span { color: var(--accent); }
+  .pill {
+    font: 600 11px/1 var(--mono); text-transform: uppercase; letter-spacing: .08em;
+    padding: 5px 9px; border-radius: 999px; border: 1px solid var(--line);
+  }
+  .pill.ok   { color: var(--ok);   border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+  .pill.bad  { color: var(--bad);  border-color: color-mix(in srgb, var(--bad) 45%, transparent); }
+  .pill.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, transparent); }
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  .card { background: var(--panel); border: 1px solid var(--line);
+          border-radius: 10px; padding: 14px 16px; }
+  .card h2 { margin: 0 0 10px; font-size: 11px; text-transform: uppercase;
+             letter-spacing: .09em; color: var(--muted); font-weight: 600; }
+  table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12.5px; }
+  td { padding: 4px 0; vertical-align: middle; }
+  td.k { color: var(--muted); padding-right: 12px; white-space: nowrap; }
+  td.v { text-align: right; font-variant-numeric: tabular-nums; }
+  .bar { position: relative; height: 5px; background: #272b33; border-radius: 3px; overflow: hidden; }
+  .bar i { position: absolute; top: 0; bottom: 0; background: var(--accent); }
+  .bar u { position: absolute; top: -2px; bottom: -2px; width: 1px; background: var(--muted); opacity: .55; }
+  .reasons { margin: 8px 0 0; padding-left: 18px; color: var(--bad); font-size: 12.5px; }
+  footer { margin-top: 18px; color: var(--muted); font-size: 12px; }
+  .dim { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>3<span>VN</span> Robotics</h1>
+    <span id="conn" class="pill warn">connecting</span>
+    <span id="ready" class="pill warn">unknown</span>
+    <span id="target" class="pill">&mdash;</span>
+  </header>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Joints</h2>
+      <table id="joints"><tbody><tr><td class="dim">waiting for data…</td></tr></tbody></table>
+    </div>
+
+    <div class="card">
+      <h2>Controllers</h2>
+      <table id="controllers"><tbody><tr><td class="dim">waiting…</td></tr></tbody></table>
+      <h2 style="margin-top:14px">Hardware</h2>
+      <table id="hardware"><tbody><tr><td class="dim">waiting…</td></tr></tbody></table>
+    </div>
+
+    <div class="card">
+      <h2>Readiness</h2>
+      <table><tbody id="health"></tbody></table>
+      <ul id="reasons" class="reasons" hidden></ul>
+    </div>
+
+    <div class="card">
+      <h2>Version</h2>
+      <table><tbody id="version"></tbody></table>
+    </div>
+  </div>
+
+  <footer id="foot"></footer>
+</div>
+
+<script>
+'use strict';
+
+// Joint limits, so the position bars mean something. Kept in sync with
+// the profile YAML; the dashboard is read-only so a mismatch is cosmetic,
+// not a safety issue -- the robot enforces nothing based on this file.
+const LIMITS = {
+  shoulder_pan_joint:        [-1.5708,  1.5708],
+  shoulder_lift_joint:       [-0.2618,  2.0944],
+  elbow_joint:               [-2.0944,  0.1745],
+  wrist_joint:               [-1.5708,  1.5708],
+  gripper_left_finger_joint: [ 0.0,     0.018 ],
+};
+
+const $ = (id) => document.getElementById(id);
+const rows = (el, html) => { el.innerHTML = html; };
+const esc = (s) => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+function pill(el, text, cls) {
+  el.textContent = text;
+  el.className = 'pill' + (cls ? ' ' + cls : '');
+}
+
+function jointRow(name, data) {
+  const pos = data.position;
+  const lim = LIMITS[name];
+  const deg = (pos * 180 / Math.PI);
+  const isGripper = name.includes('finger');
+  const value = isGripper ? `${(pos * 1000).toFixed(1)} mm`
+                          : `${deg.toFixed(1)}°`;
+  let bar = '';
+  if (lim) {
+    const [lo, hi] = lim;
+    const frac = Math.max(0, Math.min(1, (pos - lo) / (hi - lo)));
+    const zero = Math.max(0, Math.min(1, (0 - lo) / (hi - lo)));
+    const mid = 0.5;
+    const left = Math.min(frac, mid) * 100;
+    const width = Math.abs(frac - mid) * 100;
+    bar = `<div class="bar"><u style="left:${zero * 100}%"></u>` +
+          `<i style="left:${left}%;width:${Math.max(width, 1.2)}%"></i></div>`;
+  }
+  const short = name.replace(/_joint$/, '').replace(/_/g, ' ');
+  return `<tr><td class="k">${esc(short)}</td>` +
+         `<td style="width:45%">${bar}</td>` +
+         `<td class="v">${value}</td></tr>`;
+}
+
+function render(s) {
+  rows($('joints'), Object.keys(s.joints).sort()
+    .map(n => jointRow(n, s.joints[n])).join('')
+    || '<tr><td class="dim">no joints reported</td></tr>');
+
+  // A stale controller list is shown as stale, never as current. Showing
+  // the last known "active" for a dead control stack is exactly the kind
+  // of confident wrong answer a dashboard must not give.
+  const cFresh = s.controllers_fresh;
+  rows($('controllers'), s.controllers.length
+    ? s.controllers.map(c => {
+        const good = cFresh && c.state === 'active';
+        const label = cFresh ? c.state : c.state + ' (stale)';
+        return `<tr><td class="k">${esc(c.name)}</td><td class="v" style="color:${
+          good ? 'var(--ok)' : 'var(--bad)'}">${esc(label)}</td></tr>`;
+      }).join('')
+    : '<tr><td class="dim">none &mdash; is the robot running?</td></tr>');
+
+  rows($('hardware'), s.hardware.length
+    ? s.hardware.map(h => {
+        const good = s.hardware_fresh && h.state === 'active';
+        return `<tr><td class="k">${esc(h.name)}</td>` +
+          `<td class="v" style="color:${good ? 'var(--ok)' : 'var(--bad)'}">` +
+          `${esc(s.hardware_fresh ? h.state : h.state + ' (stale)')}</td></tr>`;
+      }).join('')
+    : '<tr><td class="dim">none</td></tr>');
+
+  const age = s.joint_state_age_seconds;
+  rows($('health'), [
+    ['joint state', age === null ? 'never'
+      : `${age.toFixed(2)} s ago`, s.joints_fresh ? 'var(--ok)' : 'var(--bad)'],
+    ['messages', s.joint_messages.toLocaleString(), ''],
+    ['uptime', `${s.uptime_seconds.toFixed(0)} s`, ''],
+  ].map(([k, v, colour]) =>
+    `<tr><td class="k">${k}</td><td class="v"${colour ? ` style="color:${colour}"` : ''}>${v}</td></tr>`
+  ).join(''));
+
+  pill($('ready'), s.ready ? 'ready' : 'not ready', s.ready ? 'ok' : 'bad');
+
+  // Readiness is the interesting signal, so say WHY when it is false.
+  fetch('readyz').then(r => r.json()).then(r => {
+    const ul = $('reasons');
+    if (r.ready || !r.reasons.length) { ul.hidden = true; return; }
+    ul.hidden = false;
+    ul.innerHTML = r.reasons.map(x => `<li>${esc(x)}</li>`).join('');
+  }).catch(() => {});
+}
+
+fetch('api/version').then(r => r.json()).then(v => {
+  const order = ['robot_id', 'software_version', 'git_commit', 'robot_model',
+                 'config_profile', 'hardware_target', 'firmware_version',
+                 'deployed_at'];
+  rows($('version'), order.map(k => {
+    const val = v[k] ?? 'unknown';
+    const unknown = val === 'unknown';
+    return `<tr><td class="k">${k.replace(/_/g, ' ')}</td>` +
+           `<td class="v"${unknown ? ' style="color:var(--warn)"' : ''}>${esc(val)}</td></tr>`;
+  }).join(''));
+  pill($('target'), v.hardware_target === 'unknown' ? 'target unset' : v.hardware_target, '');
+  $('foot').textContent = `reported ${v.reported_at}`;
+}).catch(() => {});
+
+let source;
+function connect() {
+  source = new EventSource('api/stream');
+  source.onopen = () => pill($('conn'), 'live', 'ok');
+  source.onmessage = (e) => { try { render(JSON.parse(e.data)); } catch (_) {} };
+  source.onerror = () => {
+    pill($('conn'), 'reconnecting', 'bad');
+    // EventSource retries on its own, but only while the server is
+    // reachable. An explicit reconnect survives the node restarting,
+    // which during development is most of the time.
+    source.close();
+    setTimeout(connect, 2000);
+  };
+}
+connect();
+</script>
+</body>
+</html>

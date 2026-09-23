@@ -15,10 +15,11 @@ PROFILE ?= threevn_arm_v1
 TARGET  ?= mock
 GUI     ?= 0
 NOVNC   := http://localhost:8106/vnc.html
+DASH    := http://localhost:8107/
 
 .DEFAULT_GOAL := help
 .PHONY: help doctor setup up down shell build test test-sim lint urdf \
-        view mock sim robot stop scenario clean nuke
+        view mock sim robot stop scenario dash clean nuke
 
 help:
 	@echo ""
@@ -40,6 +41,7 @@ help:
 	@echo "  make sim       Run the stack in Gazebo (GUI=1 for pixels)"
 	@echo "  make robot     Run against real hardware        (Phase 5)"
 	@echo ""
+	@echo "  make dash      Live dashboard             -> $(DASH)"
 	@echo "  make scenario  Run a scenario (NAME=home, or NAME=all)"
 	@echo "  make stop      Stop any running robot/sim stack"
 	@echo ""
@@ -121,6 +123,22 @@ robot: build stop
 #
 # The bracket in the pattern stops pkill matching its own command line,
 # which would otherwise kill the shell running it.
+# The dashboard observes whatever robot is already running. It does NOT
+# depend on `stop`, so it can be started alongside `make sim` / `make mock`
+# without killing them.
+#
+# THREEVN_GIT_COMMIT is passed through so the version block is real rather
+# than "unknown"; in production CI injects it at image build time.
+dash: build
+	@echo ""
+	@echo "  dashboard -> $(DASH)"
+	@echo ""
+	$(RUN_TTY) "THREEVN_GIT_COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo unknown) \
+	            THREEVN_GIT_BRANCH=$(shell git rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown) \
+	            THREEVN_TARGET=$(TARGET) \
+	            THREEVN_PROFILE=$(PROFILE) \
+	            ros2 launch threevn_dashboard dashboard.launch.py"
+
 stop: up
 	-@$(RUN) "pkill -9 -f 'ros2 laun[c]h' ; pkill -9 -f '[g]z sim' ; \
 	          pkill -9 -f 'robot_state_pub[l]isher' ; pkill -9 -f '[r]viz2' ; \

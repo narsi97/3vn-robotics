@@ -22,7 +22,8 @@ services:
     shm_size: "1gb"
     ports:
       # 8083/8085/8087/8100/8102/8104 belong to the other 3VN products.
-      - "127.0.0.1:8106:8080"
+      - "127.0.0.1:8106:8080"          # noVNC
+      - "127.0.0.1:8107:8107"          # dashboard
     environment:
       ROS_DOMAIN_ID: "42"
       # Jazzy's replacement for the deprecated ROS_LOCALHOST_ONLY. Keeps

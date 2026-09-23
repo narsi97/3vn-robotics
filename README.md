@@ -162,7 +162,7 @@ Full audit: [`THIRD_PARTY.md`](THIRD_PARTY.md) ·
 
 ## Status
 
-**Phases 0–2 complete.**
+**Phases 0–3 complete.**
 
 - The robot description expands for all three hardware targets.
 - The arm spawns in Gazebo Harmonic, with all three controllers active
@@ -178,7 +178,17 @@ make scenario NAME=pick_and_place
 make test-sim                     # the full Gazebo suite
 ```
 
-Phase 3 is the control runtime and dashboard.
+- A live dashboard on the robot itself, with liveness/readiness split
+  and the deployment version block.
+
+```bash
+make sim &                        # Gazebo, headless
+make dash                         # -> http://localhost:8107/
+make scenario NAME=pick_and_place
+make test-sim                     # the full Gazebo suite
+```
+
+Phase 4 is the remaining automated test layers.
 
 See [`docs/roadmap.md`](docs/roadmap.md) for the 15-phase plan and
 [`docs/risks.md`](docs/risks.md) for what is known to be fragile.

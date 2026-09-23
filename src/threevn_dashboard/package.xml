@@ -1,0 +1,40 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>threevn_dashboard</name>
+  <version>0.1.0</version>
+  <description>
+    Live web dashboard and health endpoints for the 3VN arm.
+
+    Aggregates robot state from ROS and serves it over plain HTTP:
+    a snapshot, a Server-Sent Events stream, health and readiness probes,
+    and the deployment version block.
+
+    Uses Server-Sent Events rather than a WebSocket. A dashboard only
+    needs one direction, SSE is ordinary HTTP so it proxies without
+    special configuration, and it satisfies the shared Caddy's
+    `connect-src 'self'` policy when served under the same origin -
+    which means no product-wide CSP change is needed.
+
+    ARCHITECTURAL RULE: like threevn_bringup and threevn_control, this
+    package must never depend on Gazebo. It reads the same ROS interface
+    whether the robot is mock, simulated or physical.
+  </description>
+  <maintainer email="narsipasham@gmail.com">3VN Systems</maintainer>
+  <license>Apache-2.0</license>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>controller_manager_msgs</exec_depend>
+  <exec_depend>threevn_control</exec_depend>
+
+  <test_depend>ament_copyright</test_depend>
+  <test_depend>ament_flake8</test_depend>
+  <test_depend>ament_pep257</test_depend>
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
