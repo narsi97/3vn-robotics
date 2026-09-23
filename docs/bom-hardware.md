@@ -1,5 +1,11 @@
 # Bill of materials — hardware
 
+> **No printable parts exist yet.** The repository contains a *kinematic*
+> model (URDF primitives with correct lengths, masses and joint axes) but
+> no CAD: no STL, no STEP, and `meshes/` is empty. The filament line below
+> is therefore a **projected** cost for parts that still have to be
+> designed. See [roadmap.md](roadmap.md).
+
 **Two figures, stated separately and on purpose.** Quoting "$30 robot arm"
 while excluding the controller, the power supply and the wiring would be a
 misrepresentation. The arm can be ~$30. The *system* cannot.
@@ -20,7 +26,7 @@ supplier. Buying servos in multi-packs moves the arm figure toward $20.
 |---|---|---|---|---|
 | MG996R metal-gear servo | 3 | $3–6 | $9–18 | base, shoulder, elbow |
 | SG90 / MG90S micro servo | 1 | $2–3 | $2–3 | wrist or gripper |
-| PLA filament | ~250 g | $20/kg | ~$5 | at $20/kg |
+| PLA filament | ~250 g | $20/kg | ~$5 | **projected** - parts not yet designed |
 | M3 hardware, bearings, zip ties | — | — | ~$5 | |
 | | | | **~$21–31** | |
 

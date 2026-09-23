@@ -37,6 +37,38 @@ defaults:
   joint_damping: 0.05
   joint_friction: 0.01
 
+# Servo datasheet values. Joint effort/velocity limits are DERIVED from
+# these, not guessed, and test_servo_limits.py asserts no joint is ever
+# configured beyond what its servo can physically deliver.
+#
+# Why this matters: an effort limit above the servo's stall torque lets
+# the controller command force the hardware cannot produce. The motion
+# then succeeds in Gazebo and stalls on the bench -- the exact sim-to-real
+# mismatch this platform exists to catch.
+#
+# Figures are the 4.8 V column, because BOM specifies a 5 V supply.
+# Source: servodatabase.com (TowerPro MG996R, TowerPro SG90).
+servos:
+  mg996r:
+    voltage: 4.8
+    stall_torque_nm: 0.922      # 9.40 kg.cm
+    no_load_speed_rads: 5.51    # 0.19 s/60deg
+    mass_kg: 0.055
+    provenance: datasheet
+  sg90:
+    voltage: 4.8
+    stall_torque_nm: 0.177      # 1.80 kg.cm
+    no_load_speed_rads: 8.73    # 0.12 s/60deg
+    mass_kg: 0.009
+    provenance: datasheet
+
+# Fraction of datasheet figures we allow a joint limit to use.
+# Stall torque is a stall figure: a servo held at stall overheats and
+# strips gears. Speed is a no-load figure and drops sharply under load.
+limit_derate:
+  effort: 1.0      # effort limit may reach stall, ros2_control clamps there
+  velocity: 0.55   # ~55% of no-load is realistic under load
+
 links:
   base_link:
     geometry: {type: box, x: 0.100, y: 0.100, z: 0.030}
@@ -74,43 +106,55 @@ links:
 joints:
   shoulder_pan_joint:
     type: revolute
+    servo: mg996r
     parent: base_link
     child: shoulder_link
     origin: {xyz: [0.0, 0.0, 0.030], rpy: [0.0, 0.0, 0.0]}
     axis: [0, 0, 1]
-    limit: {lower_deg: -90.0, upper_deg: 90.0, effort: 1.5, velocity: 3.0}
+    limit: {lower_deg: -90.0, upper_deg: 90.0, effort: 0.922, velocity: 3.0}
     initial_position_deg: 0.0
   shoulder_lift_joint:
     type: revolute
+    servo: mg996r
     parent: shoulder_link
     child: upper_arm_link
     origin: {xyz: [0.0, 0.0, 0.020], rpy: [0.0, 0.0, 0.0]}
     axis: [0, 1, 0]
     # Asymmetric on purpose: the arm cannot fold back through its own base.
-    limit: {lower_deg: -15.0, upper_deg: 120.0, effort: 1.5, velocity: 3.0}
+    limit: {lower_deg: -15.0, upper_deg: 120.0, effort: 0.922, velocity: 3.0}
     initial_position_deg: 0.0
   elbow_joint:
     type: revolute
+    servo: mg996r
     parent: upper_arm_link
     child: forearm_link
     origin: {xyz: [0.0, 0.0, 0.110], rpy: [0.0, 0.0, 0.0]}
     axis: [0, 1, 0]
-    limit: {lower_deg: -120.0, upper_deg: 10.0, effort: 1.2, velocity: 3.0}
+    limit: {lower_deg: -120.0, upper_deg: 10.0, effort: 0.922, velocity: 3.0}
     initial_position_deg: 0.0
   wrist_joint:
     type: revolute
+    servo: sg90
     parent: forearm_link
     child: wrist_link
     origin: {xyz: [0.0, 0.0, 0.095], rpy: [0.0, 0.0, 0.0]}
     axis: [0, 1, 0]
-    limit: {lower_deg: -90.0, upper_deg: 90.0, effort: 0.8, velocity: 4.0}
+    limit: {lower_deg: -90.0, upper_deg: 90.0, effort: 0.177, velocity: 4.8}
     initial_position_deg: 0.0
   gripper_left_finger_joint:
     type: prismatic
+    servo: sg90
+    # Prismatic effort is a FORCE (N), so it depends on the horn
+    # radius of a linkage that does not exist yet. 15 N ~= the sg90
+    # stall torque through a 12 mm horn. provenance: estimated.
+    servo_horn_radius_m: 0.012
     parent: gripper_base_link
     child: gripper_left_finger_link
     origin: {xyz: [0.0, 0.010, 0.025], rpy: [0.0, 0.0, 0.0]}
     axis: [0, 1, 0]
+    # Deliberately below the ~14.7 N ceiling (sg90 stall through a
+    # 12 mm horn): a gripper configured at stall crushes what it
+    # picks up and cooks the servo holding it closed.
     limit: {lower: 0.0, upper: 0.018, effort: 10.0, velocity: 0.05}
     initial_position: 0.0
   gripper_right_finger_joint:
@@ -119,6 +163,9 @@ joints:
     child: gripper_right_finger_link
     origin: {xyz: [0.0, -0.010, 0.025], rpy: [0.0, 0.0, 0.0]}
     axis: [0, -1, 0]
+    # Deliberately below the ~14.7 N ceiling (sg90 stall through a
+    # 12 mm horn): a gripper configured at stall crushes what it
+    # picks up and cooks the servo holding it closed.
     limit: {lower: 0.0, upper: 0.018, effort: 10.0, velocity: 0.05}
     initial_position: 0.0
     # The right finger follows the left through the URDF <mimic> tag, which

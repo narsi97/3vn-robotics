@@ -136,6 +136,13 @@ rather than hidden in a comment.
 3VN Arm v1 uses **our own geometry** — primitive boxes and cylinders —
 rather than an existing 3D-printable design.
 
+**To be clear about what that is:** it is a *kinematic* model — correct
+link lengths, masses, joint axes and collision volumes, enough for
+physics, TF and planning. It is **not** printable CAD. There are no STLs,
+no STEP files, and nothing yet describing a servo pocket, a horn spline
+or a bearing seat. Designing the physical parts is tracked in
+[`docs/roadmap.md`](docs/roadmap.md).
+
 This was a licence decision before it was a technical one. The EEZYbotARM
 family, the obvious starting point and the design originally specified for
 this project, is **CC BY-NC 4.0** — NonCommercial — which is incompatible

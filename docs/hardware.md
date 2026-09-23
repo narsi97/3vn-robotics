@@ -10,13 +10,24 @@ BOM and safety: [bom-hardware.md](bom-hardware.md).
 
 4 DOF plus a gripper:
 
-| Joint | Axis | Range | Servo |
-|---|---|---|---|
-| `shoulder_pan` | Z | −90°…+90° | MG996R |
-| `shoulder_lift` | Y | −15°…+120° | MG996R |
-| `elbow` | Y | −120°…+10° | MG996R |
-| `wrist` | Y | −90°…+90° | SG90/MG90S |
-| gripper | prismatic | 0…18 mm | SG90 |
+| Joint | Axis | Range | Servo | Effort limit |
+|---|---|---|---|---|
+| `shoulder_pan` | Z | −90°…+90° | MG996R | 0.922 N·m |
+| `shoulder_lift` | Y | −15°…+120° | MG996R | 0.922 N·m |
+| `elbow` | Y | −120°…+10° | MG996R | 0.922 N·m |
+| `wrist` | Y | −90°…+90° | SG90 | 0.177 N·m |
+| gripper | prismatic | 0…18 mm | SG90 | 10 N |
+
+Effort and velocity limits are **derived from the servo datasheets** at
+4.8 V (the BOM specifies a 5 V supply), recorded in the `servos:` block of
+each profile. `test_servo_limits.py` fails if any joint is configured
+beyond what its servo can deliver — an effort limit above stall torque
+lets Gazebo validate motions that stall on the bench, which is the
+sim-to-real mismatch this platform exists to catch.
+
+Static check: holding the arm horizontal needs **0.282 N·m** at the
+shoulder against a 0.922 N·m limit — **3.3× headroom** unloaded, ~1.7×
+with a 100 g payload.
 
 Asymmetric ranges are deliberate — the arm cannot fold back through its
 own base.

@@ -43,6 +43,31 @@ phase that first needs it.
 | `threevn_mlops` | 15 | registry, deployment, monitoring |
 | `firmware/esp32/` | 5 | ESP32 firmware |
 
+## Mechanical design: not started
+
+The repository has **no printable CAD**. The URDF is a kinematic model —
+right lengths, masses and axes — which is what simulation, TF and planning
+need. It says nothing about servo mounting pockets, 25T horn splines,
+bearing seats, screw bosses, wall thickness, clearance fits or print
+orientation.
+
+The intended approach is **parametric CAD generated from the same YAML**
+(CadQuery/build123d or OpenSCAD), so `threevn_arm_v1.yaml` drives both the
+simulation and the printed part and the two cannot drift. Deferred until
+the simulation stack is proven, per the simulation-first principle.
+
+One design decision must be made first, because it determines the parts
+and redistributes the masses:
+
+- **Direct drive** — a servo at each joint. Simpler CAD, but servo mass
+  sits out on the arm. At 55 g, `upper_arm_link`'s current mass is about
+  *one MG996R* with nothing left over for structure, so today's numbers
+  only hold if the servo is elsewhere.
+- **Parallel linkage** — servos at the base driving distal joints through
+  rods. Much better mass distribution and the genuinely clever part of the
+  EEZYbot design, but harder CAD and it changes the URDF (the linkage is a
+  closed kinematic chain, which URDF cannot express directly).
+
 ## Tracked debt
 
 **Every physical value is `provenance: estimated`.** Link lengths, masses
@@ -51,6 +76,12 @@ first arm is fabricated, measure each link with calipers and a scale,
 update the YAML, and change `provenance` to `measured`. The plausibility
 tests (total mass 0.2–3.0 kg) will catch an order-of-magnitude error but
 not a 20% one.
+
+**Joint limits are now servo-derived, masses are not.** `effort` and
+`velocity` come from the MG996R and SG90 datasheets at 4.8 V, and
+`test_servo_limits.py` fails if any joint is configured beyond what its
+servo can deliver. Link *masses* remain `provenance: estimated` and still
+need measuring.
 
 **Gazebo spawn verification is a skipped test.**
 `threevn_sim/test/test_gz_spawn.py` is marked `slow` and skips. It becomes
