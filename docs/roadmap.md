@@ -95,6 +95,37 @@ deliberately independent: a host updated a dozen times can still face
 firmware nobody reflashed, and one number would hide that. See
 [versioning.md](versioning.md).
 
+## Course structure: built at the end, tagged as we go
+
+Each phase boundary is tagged (`phase-01-end` … ), so the state at the
+end of any phase is recoverable. Tags are immutable and cost nothing to
+maintain.
+
+**Per-phase branches are deliberately NOT being kept.** Later phases
+invalidated earlier ones: Phase 4 rewrote kinematics from YAML-driven to
+URDF-driven, Phase 6 restructured the Dockerfile into six stages, Phase 7
+changed `VERSION` across eight files. A branch frozen at Phase 2 would
+contain a Dockerfile that contradicts the Phase 6 documentation, and
+keeping fifteen branches coherent through refactors like those means
+backporting every change fifteen times. That is how course repositories
+rot.
+
+The teaching history is also a **different artifact** from this
+development history. Of 16 commits, four are fixes to mistakes made
+earlier in the same session. A student starting a chapter wants the
+previous chapter's clean end state, not `Phase 4` followed by
+`repair docs mangled by an unquoted heredoc`.
+
+Several of those mistakes are, however, the most valuable material in
+the course — the CC BY-NC licence discovery, finding that nothing
+enforced joint limits, a Grafana dashboard that was empty because metric
+names are translated. Those belong in the narrative, not as broken
+commits a student inherits.
+
+So the course structure gets built deliberately once the platform is
+complete, when the right chapter boundaries are actually known. Phases 6
+and 7 are both CI/CD and will probably merge; Phase 5 may split.
+
 ## Tracked debt
 
 **Every physical value is `provenance: estimated`.** Link lengths, masses
