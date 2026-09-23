@@ -15,7 +15,7 @@
     runs unchanged against mock, against Gazebo and against the physical
     arm. A simulator dependency here would quietly destroy that.
   </description>
-  <maintainer email="narsipasham@gmail.com">3VN Systems</maintainer>
+  <maintainer email="61094479+narsi97@users.noreply.github.com">3VN Systems</maintainer>
   <license>Apache-2.0</license>
 
   <exec_depend>threevn_robot_description</exec_depend>

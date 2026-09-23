@@ -21,7 +21,7 @@ setup(
     tests_require=['pytest'],
     zip_safe=True,
     maintainer='3VN Systems',
-    maintainer_email='narsipasham@gmail.com',
+    maintainer_email='61094479+narsi97@users.noreply.github.com',
     description='Live web dashboard and health endpoints for the 3VN arm.',
     license='Apache-2.0',
     entry_points={

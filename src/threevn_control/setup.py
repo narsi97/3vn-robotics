@@ -19,7 +19,7 @@ setup(
     tests_require=['pytest'],
     zip_safe=True,
     maintainer='3VN Systems',
-    maintainer_email='narsipasham@gmail.com',
+    maintainer_email='61094479+narsi97@users.noreply.github.com',
     description='3VN robot abstraction and scenario library.',
     license='Apache-2.0',
     entry_points={

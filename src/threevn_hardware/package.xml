@@ -17,7 +17,7 @@
     the real-hardware leg of the seam; a simulator dependency here would
     mean deploying the simulator to the robot.
   </description>
-  <maintainer email="narsipasham@gmail.com">3VN Systems</maintainer>
+  <maintainer email="61094479+narsi97@users.noreply.github.com">3VN Systems</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>

@@ -20,7 +20,7 @@
     package must never depend on Gazebo. It reads the same ROS interface
     whether the robot is mock, simulated or physical.
   </description>
-  <maintainer email="narsipasham@gmail.com">3VN Systems</maintainer>
+  <maintainer email="61094479+narsi97@users.noreply.github.com">3VN Systems</maintainer>
   <license>Apache-2.0</license>
 
   <exec_depend>rclpy</exec_depend>

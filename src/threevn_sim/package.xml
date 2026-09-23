@@ -11,7 +11,7 @@
     reverse - which is what keeps the simulator out of a physical-robot
     deployment.
   </description>
-  <maintainer email="narsipasham@gmail.com">3VN Systems</maintainer>
+  <maintainer email="61094479+narsi97@users.noreply.github.com">3VN Systems</maintainer>
   <license>Apache-2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
