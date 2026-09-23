@@ -14,8 +14,8 @@ One system that evolves. Not twelve disconnected tutorials.
 | 5 | ESP32 firmware + `Esp32SystemInterface` | **done** (software) |
 | 6 | Docker runtime images | **done** |
 | 7 | CI/CD pipelines | **done** |
-| 8 | VPS deployment | next |
-| 9 | Monitoring (OpenTelemetry → self-hosted stack) | |
+| 8 | VPS deployment | **done** |
+| 9 | Monitoring (OpenTelemetry → self-hosted stack) | next |
 | 10 | Mobile base | |
 | 11 | Mobile manipulator | |
 | 12 | Camera + perception | |

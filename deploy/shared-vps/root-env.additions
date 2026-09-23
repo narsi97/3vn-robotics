@@ -1,0 +1,5 @@
+# Append to 3vnsystems-infrastructure/.env (and to .env.prod.example).
+#
+# deploy.sh resolves each product repo as a sibling checkout; this tells
+# it where this one lives.
+THREEVN_ROBOTICS_REPO_PATH=../3vn-robotics

@@ -1,0 +1,33 @@
+# Add inside the `{$DOMAIN} { ... }` site block in
+# 3vnsystems-infrastructure/caddy/Caddyfile, alongside the existing
+# product blocks and BEFORE the catch-all `handle { reverse_proxy
+# homepage:80 }` at the end — Caddy matches handle blocks in order, and
+# the catch-all would otherwise swallow these.
+
+	# --- 3vn-robotics fleet view ---
+	#
+	# UNLISTED, following the house pattern used by delivery-manager and
+	# the client sites: the path itself is the only access control, so
+	# treat it as a secret. Do not link it from 3vnsystems-homepage and
+	# add it to that repo's robots.txt Disallow list.
+	#
+	# The ingest endpoint is separate from the view on purpose. It is the
+	# one thing robots POST to, it is authenticated by a bearer token,
+	# and keeping it on its own path makes it obvious in access logs
+	# which requests are machines and which are a person looking.
+	@robotIngest path /fleet-fab0308e05e11b540b5324b1/api/telemetry
+	handle @robotIngest {
+		uri strip_prefix /fleet-fab0308e05e11b540b5324b1
+		reverse_proxy threevn-fleet:8080
+	}
+
+	# The read-only view and its JSON. Same prefix strip: the Go service
+	# registers its routes at the root and knows nothing about the
+	# unlisted prefix, so the prefix can be rotated by editing this file
+	# alone.
+	handle /fleet-fab0308e05e11b540b5324b1/* {
+		uri strip_prefix /fleet-fab0308e05e11b540b5324b1
+		reverse_proxy threevn-fleet:8080
+	}
+
+	redir /fleet-fab0308e05e11b540b5324b1 /fleet-fab0308e05e11b540b5324b1/ permanent

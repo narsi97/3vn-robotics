@@ -124,3 +124,21 @@ See [ADR-0005](decisions/0005-yaml-single-source.md).
   REP-103 rotation.
 - **Multiple robots.** Every macro takes a `prefix`, and a test asserts it
   reaches every link.
+
+
+## Where things run, after Phase 8
+
+
+
+**Nothing reaches into the robot.** Robots sit behind home NAT where
+inbound connections do not work — but the real reason is that a robot
+must never wait on the VPS. Losing the network degrades observability,
+never motion.
+
+Demonstrated rather than asserted: killing the fleet service leaves the
+robot at  200 with scenarios passing, and the reporter emits a
+single throttled warning.
+
+The fleet view shows a robot as **stale** after 35 s and refuses to call
+it ready. A robot that stopped reporting is not healthy just because its
+last message said so — that converts an outage into a silent one.

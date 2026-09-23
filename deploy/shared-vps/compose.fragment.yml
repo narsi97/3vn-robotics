@@ -1,0 +1,36 @@
+# Append this service to 3vnsystems-infrastructure's
+# docker/compose.prod.yml, and add it to the `caddy` service's
+# depends_on list. It follows the same shape as the other product
+# backends already there: built from a sibling checkout, no registry
+# involved.
+#
+# This fragment is not a compose file you run directly — it is the block
+# to copy. It lives in this repo rather than only in the infra repo so
+# that the deployment shape ships with the code it deploys.
+#
+# NOTE the asymmetry with the rest of this project: the robot runtime
+# image IS published to GHCR and deployed by digest, because a robot is
+# remote and rollback has to be a pull. This service is built on the VPS
+# like every other 3VN product, because that is how that host already
+# works and one exception is cheaper than two deployment models.
+
+  # --- 3vn-robotics fleet view ---
+  threevn-fleet:
+    build:
+      context: ${THREEVN_ROBOTICS_REPO_PATH:-../../3vn-robotics}/vps/fleet
+      dockerfile: cloud/Dockerfile
+    image: threevn-fleet:local
+    restart: unless-stopped
+    env_file:
+      - ../env/threevn-fleet.env
+    # No postgres dependency. This holds a handful of rows describing
+    # what robots said moments ago — a view, not a record. Losing it on
+    # restart costs one reporting interval, and a database would buy
+    # durability for data whose value expires in seconds.
+    healthcheck:
+      # 127.0.0.1, never localhost — house rule. The binary binds IPv4
+      # and a container's /etc/hosts resolves localhost to ::1 first.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 6

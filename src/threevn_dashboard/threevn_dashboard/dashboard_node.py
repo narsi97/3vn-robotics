@@ -33,6 +33,7 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 
+from threevn_dashboard.fleet_reporter import FleetReporter
 from threevn_dashboard.http_server import make_server, serve_in_background
 from threevn_dashboard.robot_state import RobotState
 from threevn_dashboard.version import missing_fields, version_info
@@ -89,6 +90,16 @@ class DashboardNode(Node):
 
         self.get_logger().info(f'dashboard on http://{host}:{port}/')
 
+        # Opt-in. Unset THREEVN_FLEET_URL means nothing starts and
+        # nothing is sent -- a robot on a bench should not phone home.
+        self._reporter = FleetReporter.from_env(
+            state_fn=self._fleet_state,
+            version_fn=version_info,
+            logger=self.get_logger(),
+        )
+        if self._reporter is not None:
+            self._reporter.start()
+
         absent = missing_fields()
         if absent:
             # Loud on purpose. A robot that cannot say which commit it is
@@ -97,6 +108,13 @@ class DashboardNode(Node):
             self.get_logger().warn(
                 'version fields not set: ' + ', '.join(absent)
                 + ' -- set THREEVN_GIT_COMMIT etc. at build/deploy time')
+
+    def _fleet_state(self):
+        """Summarise state for the fleet view, with readiness reasons."""
+        snapshot = self.state.snapshot()
+        _, reasons = self.state.readiness_detail()
+        snapshot['reasons'] = reasons
+        return snapshot
 
     # -- ROS callbacks -------------------------------------------------
 
@@ -144,7 +162,9 @@ class DashboardNode(Node):
             [(c.name, c.state.label) for c in response.component])
 
     def shutdown(self):
-        """Stop the HTTP server."""
+        """Stop the fleet reporter and the HTTP server."""
+        if self._reporter is not None:
+            self._reporter.stop()
         self._server.shutdown()
         self._server.server_close()
 

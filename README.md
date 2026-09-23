@@ -162,7 +162,7 @@ Full audit: [`THIRD_PARTY.md`](THIRD_PARTY.md) ·
 
 ## Status
 
-**Phases 0–7 complete** (Phase 5 in software; no arm has been built yet).
+**Phases 0–8 complete** (Phase 5 in software; no arm has been built yet).
 
 - The robot description expands for all three hardware targets.
 - The arm spawns in Gazebo Harmonic, with all three controllers active
@@ -221,7 +221,10 @@ make runtime-verify   # asserts it is clean AND that it runs
   multi-arch image publishing, releases, and a **gated** hardware deploy.
 - One source of version truth, enforced by a test.
 
-Phase 8 is VPS deployment.
+- A fleet view on the shared VPS that robots **push** to — ~5 MB of RSS,
+  behind an unlisted path, and the robot keeps working when it is gone.
+
+Phase 9 is observability: OpenTelemetry into a self-hosted stack.
 
 See [`docs/roadmap.md`](docs/roadmap.md) for the 15-phase plan and
 [`docs/risks.md`](docs/risks.md) for what is known to be fragile.

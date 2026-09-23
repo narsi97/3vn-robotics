@@ -20,6 +20,60 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The VPS fleet view is Go, not ROS, so it builds and tests on its own
+  # rather than inside the ROS image. It is the only part of this project
+  # that runs on the shared 3VN VPS, where the house default is Go.
+  fleet:
+    name: fleet view (Go)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache-dependency-path: vps/fleet/go.sum
+
+      - name: Vet
+        working-directory: vps/fleet
+        run: go vet ./...
+
+      - name: Formatting
+        working-directory: vps/fleet
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "::error::gofmt would change these files:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Test
+        working-directory: vps/fleet
+        # -race because reports arrive on HTTP handler goroutines while
+        # the page renders on another.
+        run: go test ./... -race -count=1
+
+      - name: The image must build and answer
+        run: |
+          docker build -f vps/fleet/cloud/Dockerfile -t fleet:ci vps/fleet
+          docker run --rm -d --name fleet-ci -p 8080:8080 \
+            -e FLEET_INGEST_TOKEN=ci-token fleet:ci
+          for _ in $(seq 1 20); do
+            curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1 && break
+            sleep 1
+          done
+          # Ingest must refuse an unauthenticated write. This endpoint is
+          # internet-facing; anything able to write to it can lie about a
+          # robot's state.
+          code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
+                 http://127.0.0.1:8080/api/telemetry -d '{"robot_id":"x"}')
+          docker rm -f fleet-ci
+          if [ "$code" != "401" ]; then
+            echo "::error::unauthenticated ingest returned $code, expected 401"
+            exit 1
+          fi
+          echo "fleet image builds, serves, and refuses unauthenticated writes"
+
   build-and-test:
     name: build + test (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
