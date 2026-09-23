@@ -31,5 +31,12 @@ acceptance.md
 *.swp
 
 # Recorded datasets: large binary data, never in git.
+#
+# The DIRECTORY is tracked (via .gitkeep) even though its contents are
+# not. compose.yml bind-mounts it, and Docker creates a missing bind
+# source as root - which the container's non-root user then cannot write
+# to. On a fresh clone that is a dataset recorder that fails on
+# permissions for reasons having nothing to do with data.
 # See docs/data-pipeline.md.
-datasets/
+datasets/*
+!datasets/.gitkeep

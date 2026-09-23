@@ -1,0 +1,9 @@
+Recorded datasets land here. Nothing in this directory is tracked except
+this file, which exists so the directory does.
+
+compose.yml bind-mounts it into the container. Docker creates a missing
+bind source as root, and the container runs as a non-root user, so on a
+fresh clone the recorder would fail on permissions rather than on
+anything to do with data.
+
+See docs/data-pipeline.md.
