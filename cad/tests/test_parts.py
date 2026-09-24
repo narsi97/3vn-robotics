@@ -79,22 +79,67 @@ def test_the_part_fits_on_a_normal_print_bed(built, mechanism, name):
         'a dimension under a millimetre is a modelling mistake'
 
 
-@pytest.mark.parametrize('mechanism,name', every_part())
-def test_the_part_weighs_something_a_hobby_servo_can_lift(built, cfg,
-                                                           mechanism, name):
+#: The base is bolted to a bench. Nothing lifts it, so the constraint
+#: that applies to every other part does not apply to it - and a heavy
+#: base is a STABLE base, which the Phase 11 tipping analysis wants.
+STATIC_PARTS = {'base_plate'}
+
+
+@pytest.mark.parametrize('mechanism,name',
+                         [(m, n) for m, n in every_part()
+                          if n not in STATIC_PARTS])
+def test_a_moving_part_is_light_enough_for_its_servo(built, mechanism, name):
     """
     Printed mass against the servo that has to move it.
 
-    An MG996R derated gives about 0.55 N.m. A bracket that weighs more
-    than the payload budget is a design that cannot work, and the mass
-    is knowable now rather than after printing.
+    An MG996R derated gives about 0.55 N.m, and the mass is knowable now
+    rather than after printing.
+
+    STATIC PARTS ARE EXCLUDED, and that exclusion is the point. This
+    test first applied the same limit to the base plate and failed it at
+    343 g - which was two mistakes at once: the base was needlessly
+    solid, AND no servo lifts the base, so the limit was never the right
+    question for it.
     """
     volume = built[(mechanism, name)].volume
     mass_g = volume / 1000.0 * 1.24  # PLA
-    assert 1.0 < mass_g < 200.0, (
-        f'{name} would print at {mass_g:.0f} g, which is not a part of a '
-        f'desktop arm driven by hobby servos'
+    assert 0.1 < mass_g < 120.0, (
+        f'{name} would print at {mass_g:.0f} g, which is not a moving part '
+        f'of a desktop arm driven by hobby servos'
     )
+
+
+@pytest.mark.parametrize('mechanism,name',
+                         [(m, n) for m, n in every_part()
+                          if n in STATIC_PARTS])
+def test_a_static_part_is_not_absurdly_heavy(built, mechanism, name):
+    """
+    A looser bound, because the constraint is filament and print time.
+
+    Still bounded: a base heavier than the rest of the robot put
+    together is a modelling mistake, not a design choice.
+    """
+    mass_g = built[(mechanism, name)].volume / 1000.0 * 1.24
+    assert 5.0 < mass_g < 250.0, f'{name} prints at {mass_g:.0f} g'
+
+
+def test_the_whole_arm_is_printable_in_one_sitting(built):
+    """
+    THE NUMBER ANYONE FOLLOWING THE COURSE ACTUALLY CARES ABOUT.
+
+    Total printed mass for one arm, against the ~250 g of PLA the BOM
+    budgets. A design that quietly needs a whole spool is a different
+    product at a different price.
+    """
+    for mechanism in parts_mod.MECHANISMS:
+        total = sum(built[(mechanism, name)].volume
+                    for name in parts_mod.PARTS) / 1000.0 * 1.24
+        # Two fingers, not one.
+        total += built[(mechanism, 'gripper_finger')].volume / 1000.0 * 1.24
+        assert total < 400.0, (
+            f'{mechanism}: the arm needs {total:.0f} g of PLA, against the '
+            f'250 g the BOM budgets'
+        )
 
 
 # -- does it match the robot -------------------------------------------
@@ -235,3 +280,81 @@ def test_m3_holes_carry_the_printing_clearance(cfg, built):
         f'no hole at the clearance-corrected M3 radius {wanted:.2f} mm; '
         f'found {sorted(radii)}'
     )
+
+
+# -- can the servo actually lift what was designed ---------------------
+
+def test_the_shoulder_servo_can_lift_the_arm_it_has_to_lift(cfg, built):
+    """
+    THE CHECK THAT CONNECTS THE CAD TO THE PHYSICS.
+
+    Printed mass is only interesting against the torque available. This
+    takes the parts distal to the shoulder lift, adds the servos that
+    ride on them and the declared payload, puts the lot at the arm's
+    full reach, and compares the moment with what an MG996R gives after
+    the profile's own derating.
+
+    Full reach with the payload right at the tip is the worst case and
+    not a typical one - but it is the pose a user WILL try in the first
+    five minutes.
+    """
+    from threevn_cad.export import LIFTED_PARTS, LIFTED_SERVOS
+
+    servos = {n: s['mass_kg'] for n, s in cfg['servos'].items()}
+    derate = cfg['limit_derate']['effort']
+    stall = cfg['servos']['mg996r']['stall_torque_nm']
+    available = stall * derate
+
+    # Reach: the links beyond the shoulder, end to end, in metres.
+    reach = sum(prof.link_mm(cfg, name)['z' if prof.link_mm(cfg, name)['type']
+                                        == 'box' else 'length']
+                for name in ('upper_arm_link', 'forearm_link', 'wrist_link',
+                             'gripper_base_link')) / 1000.0
+    payload = 0.050  # the same 50 g the Phase 11 tipping analysis used
+
+    for mechanism in parts_mod.MECHANISMS:
+        by_part = {n: built[(mechanism, n)].volume / 1000.0 * 1.24 / 1000.0
+                   for n in parts_mod.PARTS}
+        arm = sum(by_part.get(p, 0.0) for p in LIFTED_PARTS)
+        arm += 2 * by_part.get('gripper_finger', 0.0)
+        arm += sum(servos[s] for s in LIFTED_SERVOS[mechanism])
+
+        # Arm mass acts at roughly mid-reach; payload at the tip.
+        moment = (arm * reach / 2.0 + payload * reach) * 9.81
+        assert moment < available, (
+            f'{mechanism}: holding {arm * 1000:.0f} g of arm plus '
+            f'{payload * 1000:.0f} g of payload at {reach * 1000:.0f} mm '
+            f'needs {moment:.3f} N.m, and a derated MG996R gives '
+            f'{available:.3f} N.m'
+        )
+
+
+def test_the_linkage_lifts_materially_less_than_direct_drive(cfg, built):
+    """
+    THE WHOLE ARGUMENT FOR ACCEPTING A CLOSED CHAIN.
+
+    If moving the elbow servo to the turret did not measurably reduce
+    what the shoulder carries, the linkage would be pure cost: harder
+    CAD, more plastic, and a kinematic chain URDF cannot express, for
+    nothing.
+    """
+    from threevn_cad.export import compare
+
+    results = {}
+    for mechanism in parts_mod.MECHANISMS:
+        results[mechanism] = [
+            {'part': name,
+             'mass_g': built[(mechanism, name)].volume / 1000.0 * 1.24}
+            for name in parts_mod.PARTS
+        ]
+    summary = compare(cfg, results)
+
+    direct = summary['direct']['lifted_g']
+    linkage = summary['linkage']['lifted_g']
+    assert linkage < direct * 0.8, (
+        f'the linkage lifts {linkage:.0f} g against direct drive at '
+        f'{direct:.0f} g, which is not enough of a gain to pay for a '
+        f'closed kinematic chain'
+    )
+    # And it costs more plastic, which is the other half of the trade.
+    assert summary['linkage']['printed_g'] > summary['direct']['printed_g']

@@ -26,7 +26,7 @@ supplier. Buying servos in multi-packs moves the arm figure toward $20.
 |---|---|---|---|---|
 | MG996R metal-gear servo | 3 | $3–6 | $9–18 | base, shoulder, elbow |
 | SG90 / MG90S micro servo | 1 | $2–3 | $2–3 | wrist or gripper |
-| PLA filament | ~250 g | $20/kg | ~$5 | **projected** - parts not yet designed |
+| PLA filament | 161 g direct / 257 g linkage | $20/kg | $3–5 | **measured from the generated geometry**, not projected. The linkage variant exceeds the old 250 g estimate; see docs/cad.md |
 | M3 hardware, bearings, zip ties | — | — | ~$5 | |
 | | | | **~$21–31** | |
 

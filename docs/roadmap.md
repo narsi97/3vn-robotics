@@ -37,13 +37,16 @@ phase that first needs it.
 
 ## Mechanical design: started, and deliberately undecided
 
-The repository now has **parametric CAD for two parts** — the shoulder
-bracket and the upper-arm link — generated from `threevn_arm_v1.yaml` by
-`cad/`, for BOTH candidate mechanisms. See [cad.md](cad.md).
+The repository now has **parametric CAD for every structural part** —
+base, turret, shoulder bracket, both beams, wrist and gripper —
+generated from `threevn_arm_v1.yaml` by `cad/`, for BOTH candidate
+mechanisms. See [cad.md](cad.md).
 
-Still missing: the base and its bearing, the forearm, the wrist, the
-gripper and its linkage, and every fastener detail where parts meet.
-Nothing has been printed.
+Still missing: the ASSEMBLY. Push rods for the linkage, the bearing,
+servo horn adapters and fasteners. Nothing has been printed.
+
+The decision now has its number: direct drive lifts 154 g at the
+shoulder, a linkage lifts 99 g, and the linkage costs 96 g more PLA.
 
 The generated geometry also showed the URDF's link masses are wrong:
 `upper_arm_link` is declared 55 g and the printed beam computes to

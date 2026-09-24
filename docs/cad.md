@@ -112,17 +112,70 @@ assembly.
 only cylindrical faces in the part were the corner rounds. The bracket
 is now sized to the flange span.
 
-## What is not designed
+## The number the decision turns on
 
-Two parts of roughly six: the shoulder bracket and the upper-arm link.
-**Enough to print, hold a servo and compare mechanisms — not an arm.**
+Every structural part now generates for both mechanisms, so the
+comparison can be made on the quantity that matters rather than the one
+that is easy to measure:
 
-Missing: the base and its bearing, the forearm, the wrist, the gripper
-and its linkage, and every fastener detail where parts actually meet.
-The roadmap says so rather than a comment here implying otherwise.
+| mechanism | PLA total | **lifted by the shoulder servo** |
+|---|---|---|
+| direct drive | 161 g | **154 g** |
+| parallel linkage | 257 g | **99 g** |
 
-Nothing has been printed. These are solids that pass geometric checks,
-which is a different claim from parts that fit together.
+The linkage needs **96 g more plastic** and lifts **36% less** at the
+joint with the longest lever and the least margin. Total printed mass is
+the number that favours direct drive, and it is nearly irrelevant — a
+gram at the base costs nothing and a gram at the wrist costs a moment
+arm.
+
+Most of that extra plastic is one part: the linkage turret is 93.5 g
+against 24.7 g, because it carries **two** servos instead of one. That
+is not a side effect, it is the mechanism — moving the elbow servo down
+there is the whole reason to accept a closed chain.
+
+`test_the_shoulder_servo_can_lift_the_arm_it_has_to_lift` closes the
+loop between the CAD and the physics: it takes the parts distal to the
+shoulder, adds the servos riding on them and the 50 g payload, puts the
+lot at full reach, and compares the moment against a derated MG996R.
+Both mechanisms pass; the linkage has far more margin.
+
+### The linkage blows the filament budget
+
+257 g against the 250 g the BOM assumed. Small, and worth saying out
+loud rather than rounding away: the BOM now carries **measured** figures
+for both variants instead of a projection made before any part existed.
+
+## The URDF masses, revisited
+
+With every part generated, the gap is no longer one link:
+
+| link | URDF says | printed structure |
+|---|---|---|
+| `upper_arm_link` | 55.0 g | 16.7 g |
+| `forearm_link` | 45.0 g | 12.6 g |
+| `base_link` | 250.0 g | 33.7 g |
+| `gripper_base_link` | 35.0 g | 28.5 g |
+
+Every one is `provenance: estimated` and every one is wrong, some by 7×.
+They still cannot simply be replaced, because a link's *total* mass
+includes whatever servo rides on it — and that depends on the mechanism
+nobody has chosen yet.
+
+The Phase 11 tipping margins were computed from the estimated column.
+
+## What is still not designed
+
+The parts exist. **The assembly does not.**
+
+Missing: the push rods for the linkage variant, the bearing itself, the
+servo horn adapters, and the fasteners. Those are bought parts and joint
+details, and the horn adapter in particular is the fiddliest piece of a
+printed arm — a 25T spline is not something to model casually.
+
+**Nothing has been printed.** These are solids that pass geometric
+checks, which is a different claim from parts that fit together. The
+first print will find things no test here can.
 
 ## The toolchain costs 772 MB
 

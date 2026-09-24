@@ -69,6 +69,42 @@ def generate(cfg, mechanism, out_dir):
     return written
 
 
+#: Parts distal to the shoulder-lift joint: everything that servo has to
+#: raise. The turret and base are proximal to it and are not lifted.
+LIFTED_PARTS = ('upper_arm_link', 'forearm_link', 'wrist_bracket',
+                'gripper_base')
+
+#: Servos distal to the shoulder lift, per mechanism. This is the whole
+#: argument for a linkage: the elbow servo moves from the arm to the
+#: turret, and 55 g at the end of a lever is worth more than 55 g.
+LIFTED_SERVOS = {
+    'direct': ('mg996r', 'sg90', 'sg90'),   # elbow, wrist, gripper
+    'linkage': ('sg90', 'sg90'),            # wrist, gripper only
+}
+
+
+def compare(cfg, results):
+    """
+    Report the number the mechanism decision actually turns on.
+
+    Not total printed mass - that favours direct drive and is nearly
+    irrelevant. What matters is what the shoulder servo has to lift,
+    because that is the joint with the longest lever and the least
+    margin.
+    """
+    servos = {name: spec['mass_kg'] * 1000.0
+              for name, spec in cfg['servos'].items()}
+    out = {}
+    for mechanism, rows in results.items():
+        by_part = {row['part']: row['mass_g'] for row in rows}
+        printed = sum(by_part.values()) + by_part.get('gripper_finger', 0.0)
+        lifted = sum(by_part.get(p, 0.0) for p in LIFTED_PARTS)
+        lifted += 2 * by_part.get('gripper_finger', 0.0)
+        lifted += sum(servos[s] for s in LIFTED_SERVOS[mechanism])
+        out[mechanism] = {'printed_g': printed, 'lifted_g': lifted}
+    return out
+
+
 def main(argv=None):
     """Generate parts for both mechanisms and report."""
     parser = argparse.ArgumentParser(description=__doc__)
@@ -83,10 +119,12 @@ def main(argv=None):
               else (args.mechanism,))
 
     print()
+    collected = {}
     for mechanism in wanted:
         print(f'  {mechanism}')
         results = generate(cfg, mechanism,
                            pathlib.Path(args.out) / mechanism)
+        collected[mechanism] = results
         for row in results:
             print('    %-18s %7.0f mm3  %5.1f g  %4.0f x %4.0f x %4.0f mm' % (
                 row['part'], row['volume_mm3'], row['mass_g'],
@@ -94,6 +132,33 @@ def main(argv=None):
         print()
 
     print(f'  written to {args.out}/<mechanism>/')
+
+    if len(wanted) > 1:
+        summary = compare(cfg, collected)
+        print()
+        print('  mechanism      PLA total   lifted by the shoulder servo')
+        for mechanism, row in summary.items():
+            print('    %-12s %6.0f g    %6.0f g' % (
+                mechanism, row['printed_g'], row['lifted_g']))
+        direct = summary['direct']
+        linkage = summary['linkage']
+        print()
+        print('  The linkage needs %.0f g MORE plastic and lifts %.0f g LESS'
+              % (linkage['printed_g'] - direct['printed_g'],
+                 direct['lifted_g'] - linkage['lifted_g']))
+        print('  (%.0f%% less at the joint with the longest lever). Total'
+              % (100 * (direct['lifted_g'] - linkage['lifted_g'])
+                 / direct['lifted_g']))
+        print('  printed mass is the number that favours direct drive and')
+        print('  it is nearly irrelevant; this one is not.')
+        budget = 250.0
+        for mechanism, row in summary.items():
+            if row['printed_g'] > budget:
+                print()
+                print('  NOTE: %s needs %.0f g of PLA against the %.0f g the'
+                      % (mechanism, row['printed_g'], budget))
+                print('  BOM budgets. docs/bom-hardware.md needs updating or')
+                print('  the design needs thinning.')
     print()
     print('  The masses above are what the PARTS weigh. The URDF still')
     print('  carries provenance: estimated guesses that predate any')
