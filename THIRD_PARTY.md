@@ -55,6 +55,91 @@ published dimensions.
 
 ---
 
+## Rejected: Annin Robotics AR4 (MK2 / MK3 / MK5)
+
+| | |
+|---|---|
+| Author | Chris Annin, Annin Robotics |
+| Source | [anninrobotics.com](https://anninrobotics.com), [github.com/Annin-Robotics](https://github.com/Annin-Robotics/ar4-hmi) |
+| Licence | **Annin Robotics Open Source Non-Commercial License v1.1 (2025)** |
+| Status | **Not used. No files from it are present in this repository.** |
+
+Checked because it is frequently recommended as *the* solid open-source
+arm, and it is a genuinely impressive piece of engineering: six axes,
+machined aluminium, steppers with proper drivers, a real build manual,
+and control software with a ROS interface.
+
+It is rejected for this project on two independent grounds, either of
+which alone would be sufficient.
+
+### 1. The licence is more restrictive than EEZYbotARM's, not less
+
+Read from the licence file in their own repository. Software (Section 1):
+
+> Permission is hereby granted [...] to use, copy, and redistribute it
+> [...] for **non-commercial purposes only**
+
+> **Prohibited Use:** Commercial sale, licensing, or monetization of the
+> Software or derivative works thereof is strictly prohibited without
+> prior written consent.
+
+Mechanical designs, CAD and print files (Section 2) are tighter still:
+
+> These materials are provided strictly for educational, research, and
+> personal non-commercial use.
+
+> **No Redistribution:** Redistribution, republishing, or hosting of
+> design files or physical components in any form is strictly
+> prohibited.
+
+> **No Commercial Use:** Selling robots, robot parts, kits, derivatives,
+> or modified versions of these designs is strictly prohibited without
+> explicit written permission.
+
+EEZYbotARM's CC BY-NC 4.0 at least permits redistribution with
+attribution for non-commercial purposes. This prohibits redistribution
+outright, and names derivatives and modified versions explicitly. A
+course sold for money that is built around it is exactly what Section 2
+forbids.
+
+**There is a stated commercial path, and it is worth knowing about.**
+The licence invites it directly:
+
+> If you wish to incorporate Annin Robotics designs or software into a
+> commercial product or service [...] please contact
+> info@anninrobotics.com to discuss a separate commercial license.
+
+That is a real option this project does not have with an anonymous
+Thingiverse upload. It has not been pursued, and pursuing it would be a
+business decision rather than a technical one. (Not legal advice.)
+
+### 2. It is a different machine by a factor of forty
+
+| | |
+|---|---|
+| AR4 MK3 combo kit | ~$1,189 |
+| stepper motors, drivers, PSU | ~$750 |
+| gripper | $75–112 |
+| **AR4 total** | **~$2,000** |
+| **this project's whole robot** | **~$45–55** |
+
+The AR4 is an industrial-class arm that happens to be buildable at home.
+This project's arm is four hobby servos and printed plastic. Even with a
+commercial licence, adopting it would replace the thing the course is
+about — carrying software practice into *affordable* hardware — with a
+$2,000 prerequisite.
+
+### What it is still good for
+
+Nothing here stops anyone **building one personally**: that is
+explicitly permitted, and it is a better robot than the one in this
+repository. It is also worth reading as a reference for how a serious
+open arm is documented — its build manual and BOM structure set a bar
+this project's own hardware docs should aim at.
+
+What cannot happen is any of its files, meshes, or derived geometry
+entering this repository or a paid course built on it.
+
 ## Considered: SO-ARM100 / SO-101
 
 | | |
