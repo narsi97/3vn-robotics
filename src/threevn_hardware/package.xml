@@ -2,7 +2,7 @@
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
   <name>threevn_hardware</name>
-  <version>0.13.0</version>
+  <version>0.14.0</version>
   <description>
     ros2_control hardware interface for the physical 3VN arm, and the
     wire protocol it speaks.

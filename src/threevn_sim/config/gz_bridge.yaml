@@ -32,3 +32,12 @@
   ros_type_name: "sensor_msgs/msg/CameraInfo"
   gz_type_name: "gz.msgs.CameraInfo"
   direction: GZ_TO_ROS
+
+# The IMU. Small messages at 100 Hz, and the only sensor on this robot
+# that measures rotation directly - which Phase 10 established is the
+# one quantity wheel odometry cannot get right on a skid-steer chassis.
+- ros_topic_name: "/imu"
+  gz_topic_name: "/imu"
+  ros_type_name: "sensor_msgs/msg/Imu"
+  gz_type_name: "gz.msgs.IMU"
+  direction: GZ_TO_ROS

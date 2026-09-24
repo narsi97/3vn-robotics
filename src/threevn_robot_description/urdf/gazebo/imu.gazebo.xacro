@@ -1,0 +1,77 @@
+<?xml version="1.0"?>
+<!--
+  The simulated IMU.
+
+  Phase 1 created imu_link and emitted no sensor. Phase 10 then measured
+  why one is needed: wheel odometry over-reports heading by 63%, and the
+  standard correction saturates around 26%, because skid-steer scrub is
+  not a fixed track-width error and no single constant represents it.
+
+  WITH NOISE, DELIBERATELY. A noiseless gyro integrates to a perfect
+  heading and makes fusing it a foregone conclusion, which teaches
+  nothing about why a filter exists. The values come from the MPU6050
+  datasheet, so the drift seen here is the drift the $2 part actually
+  has.
+
+  The sensor hangs off imu_link, which sits at base_link's origin, so
+  its measurements need no lever-arm correction. That is a choice the
+  description made in Phase 1 and it is why this file is short.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <xacro:macro name="threevn_imu_sensor" params="prefix">
+    <xacro:property name="imu" value="${cfg['sensors']['imu']}"/>
+
+    <gazebo reference="${prefix}imu_link">
+      <sensor name="${prefix}imu" type="imu">
+        <always_on>1</always_on>
+        <update_rate>${imu['update_rate']}</update_rate>
+        <topic>${imu['topic']}</topic>
+        <gz_frame_id>${prefix}imu_link</gz_frame_id>
+        <imu>
+          <angular_velocity>
+            <x><noise type="gaussian">
+              <mean>0.0</mean>
+              <stddev>${imu['gyro_noise_stddev']}</stddev>
+              <bias_mean>0.0</bias_mean>
+              <bias_stddev>${imu['gyro_bias_stddev']}</bias_stddev>
+            </noise></x>
+            <y><noise type="gaussian">
+              <mean>0.0</mean>
+              <stddev>${imu['gyro_noise_stddev']}</stddev>
+              <bias_mean>0.0</bias_mean>
+              <bias_stddev>${imu['gyro_bias_stddev']}</bias_stddev>
+            </noise></y>
+            <z><noise type="gaussian">
+              <mean>0.0</mean>
+              <stddev>${imu['gyro_noise_stddev']}</stddev>
+              <bias_mean>0.0</bias_mean>
+              <bias_stddev>${imu['gyro_bias_stddev']}</bias_stddev>
+            </noise></z>
+          </angular_velocity>
+          <linear_acceleration>
+            <x><noise type="gaussian">
+              <mean>0.0</mean>
+              <stddev>${imu['accel_noise_stddev']}</stddev>
+              <bias_mean>0.0</bias_mean>
+              <bias_stddev>${imu['accel_bias_stddev']}</bias_stddev>
+            </noise></x>
+            <y><noise type="gaussian">
+              <mean>0.0</mean>
+              <stddev>${imu['accel_noise_stddev']}</stddev>
+              <bias_mean>0.0</bias_mean>
+              <bias_stddev>${imu['accel_bias_stddev']}</bias_stddev>
+            </noise></y>
+            <z><noise type="gaussian">
+              <mean>0.0</mean>
+              <stddev>${imu['accel_noise_stddev']}</stddev>
+              <bias_mean>0.0</bias_mean>
+              <bias_stddev>${imu['accel_bias_stddev']}</bias_stddev>
+            </noise></z>
+          </linear_acceleration>
+        </imu>
+      </sensor>
+    </gazebo>
+  </xacro:macro>
+
+</robot>

@@ -235,6 +235,16 @@ serve: build
 	$(RUN_TTY) "ros2 run threevn_mlops serve"
 
 
+heading: build
+	@echo '  needs a running: make mm-sim WORLD=bench_with_target'
+	$(RUN) "python3 /ws/scripts/verify_heading.py"
+
+
+fused-odom: build
+	@echo '  needs a running: make mm-sim WORLD=bench_with_target'
+	$(RUN_TTY) "ros2 run threevn_navigation fused_odom"
+
+
 robot: build stop
 	@$(RUN) "test -e $(ESP32_PORT)" 2>/dev/null || { \
 	  echo ""; \

@@ -52,6 +52,7 @@
   <xacro:include filename="$(find threevn_robot_description)/urdf/gazebo/materials.gazebo.xacro"/>
   <xacro:include filename="$(find threevn_robot_description)/urdf/gazebo/camera.gazebo.xacro"/>
   <xacro:include filename="$(find threevn_robot_description)/urdf/ros2_control/gz_control_plugin.xacro"/>
+  <xacro:include filename="$(find threevn_robot_description)/urdf/gazebo/imu.gazebo.xacro"/>
 
   <!--
     The base subsystem, in its own config scope.
@@ -66,6 +67,11 @@
     <xacro:property name="min_inertia" value="${cfg['defaults']['min_inertia']}"/>
     <xacro:threevn_base parent="${parent}" prefix="${prefix}"/>
     <xacro:threevn_base_ros2_control prefix="${prefix}"/>
+    <xacro:if value="${'$(arg target)' == 'gz'}">
+      <xacro:if value="${cfg['sensors']['imu']['enabled']}">
+        <xacro:threevn_imu_sensor prefix="${prefix}"/>
+      </xacro:if>
+    </xacro:if>
   </xacro:macro>
 
   <!--

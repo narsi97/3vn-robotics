@@ -17,7 +17,7 @@ One system that evolves. Not twelve disconnected tutorials.
 | 8 | VPS deployment | **done** |
 | 9 | Monitoring (OpenTelemetry → self-hosted stack) | **done** |
 | 10 | Mobile base | **done** (simulation) |
-| 11 | Mobile manipulator | **done** (simulation); Nav2 outstanding |
+| 11 | Mobile manipulator | **done** (simulation); heading solved, Nav2 needs a range sensor |
 | 12 | Camera + perception | **done** (simulation) |
 | 13 | Data pipeline | **done** (simulation) |
 | 14 | Machine learning | **done** (simulation) |
@@ -33,7 +33,7 @@ phase that first needs it.
 |---|---|---|
 | `threevn_interfaces` | 2 | custom msgs/srvs/actions — none needed yet; `control_msgs` and `sensor_msgs` cover Phase 1 |
 | `threevn_telemetry` | 6 | OpenTelemetry emission |
-| `threevn_navigation` | 11 | Nav2 integration - still outstanding; the composed robot drives and manipulates but does not yet plan or map |
+| `threevn_navigation` | 11 | **exists**: gyro/wheel heading fusion. Nav2 itself is blocked on a range sensor the BOM does not have - see docs/navigation.md |
 
 ## Mechanical design: not started
 

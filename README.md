@@ -281,9 +281,18 @@ make train
 make registry-status && make serve
 ```
 
-**Still outstanding**: Nav2 from Phase 11, and everything physical —
+- A $2 gyroscope that fixes the heading error Phase 10 proved no
+  calibration constant could: 17.6° down to 0.2° per turn.
+
+```bash
+make fused-odom && make heading
+```
+
+**Still outstanding**: Nav2 needs a range sensor the BOM does not have
+(an RPLIDAR is ~$100 against a $45–55 robot), and everything physical —
 there is no printable CAD and no robot has been built. See
-[docs/roadmap.md](docs/roadmap.md) and [docs/hardware.md](docs/hardware.md).
+[docs/navigation.md](docs/navigation.md), [docs/roadmap.md](docs/roadmap.md)
+and [docs/hardware.md](docs/hardware.md).
 
 See [`docs/roadmap.md`](docs/roadmap.md) for the 15-phase plan and
 [`docs/risks.md`](docs/risks.md) for what is known to be fragile.

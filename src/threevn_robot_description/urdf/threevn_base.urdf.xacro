@@ -23,6 +23,7 @@
   <xacro:include filename="$(find threevn_robot_description)/urdf/base/base_macro.xacro"/>
   <xacro:include filename="$(find threevn_robot_description)/urdf/base/base.ros2_control.xacro"/>
   <xacro:include filename="$(find threevn_robot_description)/urdf/ros2_control/gz_control_plugin.xacro"/>
+  <xacro:include filename="$(find threevn_robot_description)/urdf/gazebo/imu.gazebo.xacro"/>
 
   <!-- Same root name as the arm. It is the robot's projection onto the
        floor either way, which is what lets Phase 11 join them without
@@ -31,6 +32,12 @@
 
   <xacro:threevn_base parent="${prefix}base_footprint" prefix="${prefix}"/>
   <xacro:threevn_base_ros2_control prefix="${prefix}"/>
+
+  <xacro:if value="${'$(arg target)' == 'gz'}">
+    <xacro:if value="${cfg['sensors']['imu']['enabled']}">
+      <xacro:threevn_imu_sensor prefix="${prefix}"/>
+    </xacro:if>
+  </xacro:if>
 
   <!-- Exactly one controller_manager, however many ros2_control blocks
        the robot has. See gz_control_plugin.xacro. -->

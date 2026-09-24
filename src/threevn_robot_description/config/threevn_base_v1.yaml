@@ -120,6 +120,35 @@ odometry:
   # correct heading before anything depends on it.
   publish_tf: true
 
+sensors:
+  # An MPU6050 or equivalent, about $2. It is in the BOM because the
+  # alternative is not.
+  #
+  # Phase 10 measured that wheel odometry on this chassis over-reports
+  # heading by 63%, and that wheel_separation_multiplier - the standard
+  # correction - SATURATES at about 26% error. No value of that constant
+  # fixes it, because skid-steer scrub is not a fixed track-width error.
+  #
+  # Heading has to come from a sensor that measures rotation directly.
+  # This is that sensor, and it is the cheapest part on the robot.
+  imu:
+    enabled: true
+    parent: imu_link
+    # 100 Hz. Faster than the 50 Hz control loop so a fused estimate
+    # never waits on it, and slow enough to be honest about a $2 part.
+    update_rate: 100.0
+    topic: imu
+    # Gyroscope noise, from the MPU6050 datasheet: 0.005 deg/s/sqrt(Hz)
+    # rate noise density, and a bias stability that dominates over the
+    # seconds a turn takes. Simulating a NOISELESS gyro would make the
+    # result of fusing it a foregone conclusion and teach nothing about
+    # why anyone bothers with a filter.
+    gyro_noise_stddev: 0.0002        # rad/s
+    gyro_bias_stddev: 0.0000075      # rad/s, constant offset per run
+    accel_noise_stddev: 0.017        # m/s^2
+    accel_bias_stddev: 0.001         # m/s^2
+    provenance: datasheet
+
 hardware:
   # A SECOND ESP32, separate from the arm's. The arm and base must be
   # independently controllable, and one microcontroller driving both

@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'threevn_data'
+package_name = 'threevn_navigation'
 
 setup(
     name=package_name,
@@ -18,12 +18,11 @@ setup(
     zip_safe=True,
     maintainer='3VN Systems',
     maintainer_email='61094479+narsi97@users.noreply.github.com',
-    description='Dataset collection for the 3VN robot.',
+    description='Heading estimation for the 3VN mobile base.',
     license='Apache-2.0',
     entry_points={
         'console_scripts': [
-            'collect = threevn_data.collect:main',
-            'describe = threevn_data.describe:main',
+            'fused_odom = threevn_navigation.fused_odom:main',
         ],
     },
 )

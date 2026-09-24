@@ -38,6 +38,7 @@ does not move.
 | Item | Qty | Unit | Note |
 |---|---|---|---|
 | ESP32 DevKitC | 1 | ~$6.40 | the controller |
+| MPU6050 IMU | 1 | ~$2 | **not optional on a skid-steer base** - wheel odometry gets heading 30% wrong and no calibration constant fixes it; see docs/navigation.md |
 | PCA9685 16-ch servo driver | 1 | ~$7 | see below |
 | 5 V 5 A power supply | 1 | ~$10 | see below |
 | Dupont wire, barrel jack, capacitor | — | ~$3 | |

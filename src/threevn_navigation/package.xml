@@ -1,31 +1,32 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>threevn_perception</name>
+  <name>threevn_navigation</name>
   <version>0.14.0</version>
   <description>
-    Finding things in camera images.
+    Knowing which way the robot is pointing.
 
-    The detection itself is pure functions over numpy arrays: no ROS, no
-    simulator, no camera. That split is the point. Image processing that
-    can only be exercised by starting Gazebo and waiting for a frame is
-    image processing nobody tests, and perception is exactly where a
-    wrong sign or a swapped axis produces output that looks reasonable
-    and is wrong.
+    Phase 10 measured that wheel odometry on a skid-steer chassis gets
+    heading badly wrong, and that the standard correction saturates
+    because scrub is not a fixed track-width error. This package fuses
+    the gyroscope, which measures rotation directly, with the wheel
+    encoders, which measure distance well.
 
-    ARCHITECTURAL RULE: like threevn_control and threevn_bringup, this
-    package must never depend on Gazebo. It consumes sensor_msgs, which
-    a real camera and a simulated one both publish.
+    It is NOT a Nav2 stack, and the reason is in docs/navigation.md:
+    this robot has no range sensor, so there is nothing for a costmap to
+    see or for a scan matcher to match. Heading first.
+
+    ARCHITECTURAL RULE: never depends on Gazebo. It consumes Odometry and
+    Imu, which a simulated robot and a real one both publish.
   </description>
   <maintainer email="61094479+narsi97@users.noreply.github.com">3VN Systems</maintainer>
   <license>Apache-2.0</license>
 
   <exec_depend>rclpy</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
   <exec_depend>geometry_msgs</exec_depend>
-  <exec_depend>vision_msgs</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
-  <exec_depend>tf2_geometry_msgs</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
 
   <test_depend>ament_copyright</test_depend>

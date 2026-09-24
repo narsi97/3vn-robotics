@@ -30,6 +30,20 @@
       <render_engine>ogre2</render_engine>
     </plugin>
 
+    <!--
+      The IMU system, which is what actually simulates a <sensor
+      type="imu">.
+
+      gz-sim-sensors-system above drives RENDERING sensors - cameras,
+      depth, lidar. It does not touch an IMU, so without this the sensor
+      parses, the bridge is created, and `gz topic -i` reports "No
+      publishers on topic [/imu]": every layer looks configured and
+      nothing produces a reading.
+    -->
+    <plugin filename="gz-sim-imu-system"
+            name="gz::sim::systems::Imu">
+    </plugin>
+
     <light type="directional" name="sun">
       <cast_shadows>true</cast_shadows>
       <pose>0 0 10 0 0 0</pose>
