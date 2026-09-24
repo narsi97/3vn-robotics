@@ -221,6 +221,10 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--profile', default=None)
     parser.add_argument('--out', default=str(OUT))
+    # DIRECT DRIVE IS THE DESIGN. The linkage stays generatable because
+    # the comparison that chose between them should remain reproducible,
+    # and because a parameter that has only ever been exercised one way
+    # is a parameter that has quietly stopped working.
     parser.add_argument('--mechanism', choices=parts_mod.MECHANISMS + ('both',),
                         default='both')
     args = parser.parse_args(argv if argv is not None else sys.argv[1:])

@@ -455,17 +455,55 @@ def shoulder_turret(cfg, mechanism='direct'):
                          align=(Align.CENTER, Align.CENTER, Align.CENTER),
                          mode=Mode.SUBTRACT)
 
+        # THE SERVO'S FLANGE SCREWS. The part had none: the lift servo
+        # sat in its pocket held by nothing, and the turret bolted to
+        # nothing below. A pocket is not a mounting.
+        #
+        # The flange stands proud of the case near the shaft end, so the
+        # screws run along the shaft axis, spaced along the body.
+        for offset in (-servo['mount_hole_spacing_mm'] / 2.0,
+                       servo['mount_hole_spacing_mm'] / 2.0):
+            with Locations(Plane.XZ.offset(-width / 2.0)):
+                with Locations((offset, lift_axis_z)):
+                    Cylinder(radius=fits.screw_bore_radius(cfg),
+                             height=width * 2,
+                             align=(Align.CENTER, Align.CENTER, Align.CENTER),
+                             mode=Mode.SUBTRACT)
+
+        # And the screws that fasten this whole part to the pan servo's
+        # horn adapter, on the adapter's own driven circle.
+        pan = prof.servo(cfg, 'mg996r')
+        driven = (pan['horn_screw_circle_mm'] / 2.0
+                  + fab['m3_head_mm'] / 2.0)
+        for index in range(2):
+            angle = math.pi * index + math.pi / 4.0
+            with Locations((driven * math.cos(angle),
+                            driven * math.sin(angle), 0)):
+                Cylinder(radius=fits.screw_bore_radius(cfg),
+                         height=wall * 6,
+                         align=(Align.CENTER, Align.CENTER, Align.CENTER),
+                         mode=Mode.SUBTRACT)
+
     return part.part
 
 
 def wrist_bracket(cfg, mechanism='direct'):
     """
-    The wrist, between the forearm and the gripper.
+    The wrist link, between the forearm and the gripper. PASSIVE.
 
-    A short cylinder rather than a beam, because it carries no bending
-    load worth speaking of - the gripper hangs off its end and the whole
-    assembly is under fifty grams. Its job is to hold the SG90 and
-    present a flat face for the gripper to bolt to.
+    IT CARRIES NO SERVO, and the URDF is why: `wrist_joint`'s servo
+    rides on `forearm_link`, its parent, and the gripper's rides on
+    `gripper_base_link`. Nothing drives anything from here.
+
+    The first version held an SG90 anyway - a pocket for a servo the
+    robot does not have there. It would have printed, fitted a servo,
+    and left that servo with no joint to move while the real wrist
+    servo had nowhere to mount. Choosing direct drive is what made the
+    servo-to-link assignment unambiguous enough to notice.
+
+    So this is a short spacer with a pivot at one end and a bolt face at
+    the other: it takes the wrist servo's horn adapter, and the gripper
+    bolts to its far face.
     """
     fab = prof.fabrication(cfg)
     wrist = prof.link_mm(cfg, 'wrist_link')
@@ -475,22 +513,39 @@ def wrist_bracket(cfg, mechanism='direct'):
     if wrist['type'] != 'cylinder':
         raise ValueError('wrist_link is expected to be a cylinder')
 
-    # Wide enough for the micro servo, whatever the nominal radius says:
-    # the profile describes the COLLISION shape, and a pocket has to hold
-    # a real part.
-    radius = max(wrist['radius'], servo['width_mm'] / 2.0 + wall)
+    # Wide enough to take the horn adapter that drives it.
+    radius = max(wrist['radius'],
+                 servo['horn_screw_circle_mm'] / 2.0 + wall)
 
     with BuildPart() as part:
         Cylinder(radius=radius, height=wrist['length'],
                  align=(Align.CENTER, Align.CENTER, Align.MIN))
+
+        # Lighten it: this link carries the gripper and nothing else.
         with Locations((0, 0, wall)):
-            insert(_servo_pocket(servo, fab, depth=wrist['length'] - wall),
-                   mode=Mode.SUBTRACT)
-        # Pivot bore to the forearm.
-        with Locations(Plane.XZ.offset(-radius)):
-            with Locations((0, wall / 2.0)):
+            Cylinder(radius=radius - wall, height=wrist['length'] - 2 * wall,
+                     align=(Align.CENTER, Align.CENTER, Align.MIN),
+                     mode=Mode.SUBTRACT)
+
+        # Screws into the wrist servo's horn adapter, on its circle.
+        circle = servo['horn_screw_circle_mm']
+        for index in range(2):
+            angle = math.pi * index
+            with Locations((circle / 2.0 * math.cos(angle),
+                            circle / 2.0 * math.sin(angle), 0)):
                 Cylinder(radius=fits.screw_bore_radius(cfg),
-                         height=radius * 3,
+                         height=wall * 4,
+                         align=(Align.CENTER, Align.CENTER, Align.CENTER),
+                         mode=Mode.SUBTRACT)
+
+        # And the gripper bolts to the far face.
+        for index in range(2):
+            angle = math.pi * index + math.pi / 2.0
+            with Locations((circle / 2.0 * math.cos(angle),
+                            circle / 2.0 * math.sin(angle),
+                            wrist['length'])):
+                Cylinder(radius=fits.screw_bore_radius(cfg),
+                         height=wall * 4,
                          align=(Align.CENTER, Align.CENTER, Align.CENTER),
                          mode=Mode.SUBTRACT)
 
@@ -757,7 +812,6 @@ def thrust_washer(cfg, mechanism='direct'):
 PARTS = {
     'base_plate': base_plate,
     'shoulder_turret': shoulder_turret,
-    'shoulder_bracket': shoulder_bracket,
     'upper_arm_link': upper_arm_link,
     'forearm_link': forearm_link,
     'wrist_bracket': wrist_bracket,
@@ -778,7 +832,17 @@ PARTS = {
 #: the other mechanism would make "generate everything" fail for a
 #: reason that is not an error.
 MECHANISM_ONLY = {
-    'linkage': {'push_rod': push_rod},
+    # The push rod IS the linkage. So, it turns out, is the shoulder
+    # bracket: under direct drive the turret carries the lift servo at
+    # the joint and there is nothing for a separate bracket to do, while
+    # under a linkage it holds the plain pivot and the rod anchor that
+    # replace that servo.
+    #
+    # It was in the common set until direct drive was chosen, carrying a
+    # VERTICAL servo pocket - which no joint on this arm wants, since
+    # every axis but the pan is horizontal. 21 g of part with no job.
+    'linkage': {'push_rod': push_rod,
+                'shoulder_bracket': shoulder_bracket},
     'direct': {},
 }
 

@@ -64,6 +64,19 @@ limit_derate:
   velocity: 0.55   # ~55% of no-load is realistic under load
 
 links:
+  # MASSES HERE ARE STILL ESTIMATED, unlike threevn_arm_v1.
+  #
+  # This profile is a KINEMATIC variant: it exists to prove that link
+  # lengths come from the YAML and not from the xacro. It carries no
+  # `fabrication` block and no servo envelopes, so the CAD cannot
+  # generate parts for it and there is no geometry to compute a mass
+  # from.
+  #
+  # Inventing printer data for it to make the numbers look consistent
+  # would be worse than this note: the arm it describes has never been
+  # designed, only dimensioned. Anything reading these masses - the
+  # tipping analysis in particular - is reading guesses.
+
   base_link:
     geometry: {type: box, x: 0.100, y: 0.100, z: 0.030}
     mass: 0.250

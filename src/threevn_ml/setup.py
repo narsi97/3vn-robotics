@@ -4,7 +4,7 @@ package_name = 'threevn_ml'
 
 setup(
     name=package_name,
-    version='0.19.0',
+    version='0.20.0',
     packages=find_packages(exclude=['test']),
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),

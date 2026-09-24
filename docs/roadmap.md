@@ -73,8 +73,16 @@ The intended approach is **parametric CAD generated from the same YAML**
 simulation and the printed part and the two cannot drift. Deferred until
 the simulation stack is proven, per the simulation-first principle.
 
-One design decision must be made first, because it determines the parts
-and redistributes the masses:
+**DECIDED: direct drive.** A servo at each joint. The linkage lifts 39%
+less at the shoulder, which is real and not enough to pay for a closed
+kinematic chain URDF cannot express - every test, FK check and tipping
+margin here rests on the model being faithful.
+
+The masses are now `provenance: computed` from the generated geometry
+rather than estimated, and a test keeps the profile and the CAD in
+agreement.
+
+The alternatives, for the record:
 
 - **Direct drive** — a servo at each joint. Simpler CAD, but servo mass
   sits out on the arm. At 55 g, `upper_arm_link`'s current mass is about

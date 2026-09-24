@@ -112,162 +112,90 @@ assembly.
 only cylindrical faces in the part were the corner rounds. The bracket
 is now sized to the flange span.
 
-## The number the decision turns on
+## The decision: direct drive
 
-Every structural part now generates for both mechanisms, so the
-comparison can be made on the quantity that matters rather than the one
-that is easy to measure:
+Chosen, on these numbers:
 
-| mechanism | PLA total | **lifted by the shoulder servo** |
+| | PLA | **lifted at the shoulder** |
 |---|---|---|
-| direct drive | 161 g | **154 g** |
-| parallel linkage | 257 g | **99 g** |
+| **direct drive** (chosen) | **168 g** | **140 g** |
+| parallel linkage | 264 g | 85 g |
 
-The linkage needs **96 g more plastic** and lifts **36% less** at the
-joint with the longest lever and the least margin. Total printed mass is
-the number that favours direct drive, and it is nearly irrelevant — a
-gram at the base costs nothing and a gram at the wrist costs a moment
-arm.
+The linkage lifts 39% less at the joint with the least margin — a real
+advantage, and not enough to pay for a **closed kinematic chain that
+URDF cannot express**. Every test, FK check, tipping margin and ML label
+in this repository rests on the model being faithful to the robot, and a
+mechanism that forces the simulation into an approximation costs more
+than the grams it saves.
 
-Most of that extra plastic is one part: the linkage turret is 93.5 g
-against 24.7 g, because it carries **two** servos instead of one. That
-is not a side effect, it is the mechanism — moving the elbow servo down
-there is the whole reason to accept a closed chain.
+It also needs 96 g more plastic and exceeds the 250 g filament budget.
 
-`test_the_shoulder_servo_can_lift_the_arm_it_has_to_lift` closes the
-loop between the CAD and the physics: it takes the parts distal to the
-shoulder, adds the servos riding on them and the 50 g payload, puts the
-lot at full reach, and compares the moment against a derated MG996R.
-Both mechanisms pass; the linkage has far more margin.
+The linkage remains generatable. The comparison that chose between them
+should stay reproducible, and a parameter only ever exercised one way is
+a parameter that has quietly stopped working.
 
-### The linkage blows the filament budget
+### Choosing settled two design errors
 
-257 g against the 250 g the BOM assumed. Small, and worth saying out
-loud rather than rounding away: the BOM now carries **measured** figures
-for both variants instead of a projection made before any part existed.
+Direct drive made the servo-to-link assignment unambiguous, and two
+parts were immediately wrong:
 
-## The URDF masses, revisited
+- **`shoulder_bracket` had no job.** The turret carries the lift servo
+  at the joint; the bracket duplicated it with a *vertical* servo
+  pocket, which no axis on this arm wants — every joint but the pan is
+  horizontal. It is now linkage-only, where it holds the pivot and rod
+  anchor that replace that servo.
+- **`wrist_bracket` held a servo it should not.** The wrist servo rides
+  on `forearm_link` and the gripper's on `gripper_base_link`;
+  `wrist_link` carries none. It would have printed, fitted a servo, and
+  left that servo with no joint to move while the real one had nowhere
+  to mount.
 
-With every part generated, the gap is no longer one link:
+A third came from a test: **the turret had no mounting holes at all** —
+nothing held the lift servo in, and nothing bolted the turret to the pan
+servo's horn. A pocket is not a mounting.
 
-| link | URDF says | printed structure |
+## The masses are computed now, not guessed
+
+For fifteen phases the link masses were guesses, because nothing had
+been designed. They were wrong in **both directions**:
+
+| link | was (estimated) | now (computed) |
 |---|---|---|
-| `upper_arm_link` | 55.0 g | 16.7 g |
-| `forearm_link` | 45.0 g | 12.6 g |
-| `base_link` | 250.0 g | 33.7 g |
-| `gripper_base_link` | 35.0 g | 28.5 g |
+| `base_link` | 250.0 g | **110.5 g** |
+| `shoulder_link` | 60.0 g | **99.9 g** |
+| `upper_arm_link` | 55.0 g | **73.5 g** |
+| `forearm_link` | 45.0 g | **22.7 g** |
+| `wrist_link` | 30.0 g | **6.3 g** |
+| `gripper_base_link` | 35.0 g | **38.9 g** |
 
-Every one is `provenance: estimated` and every one is wrong, some by 7×.
-They still cannot simply be replaced, because a link's *total* mass
-includes whatever servo rides on it — and that depends on the mechanism
-nobody has chosen yet.
+Base 2.3× too heavy, shoulder 40% too *light*. That is worse than being
+uniformly wrong: a tipping margin computed from them could have been
+optimistic or pessimistic and nobody could tell which.
 
-The Phase 11 tipping margins were computed from the estimated column.
+A link's mass is its printed structure plus the servo that **rides** on
+it plus that servo's horn adapter — and which servo rides where is read
+from the joints, not a hand-written table, so re-parenting the arm moves
+the mass with it. My first pass *did* hand-write that table and got two
+links wrong, giving the wrist an adapter for a servo it does not carry.
 
-## The assembly
+`test_the_profile_masses_match_the_geometry` keeps them together: change
+a part and the profile has to follow, or the simulation goes back to
+modelling a robot nobody designed.
 
-The parts that join the other parts — and most of them fail in ways a
-bracket cannot: a rod of the wrong length still moves, a bushing that is
-a slip fit still assembles.
+**`provenance: computed`** — a new value, kept distinct from `measured`,
+because PLA density is nominal, servo masses are datasheet figures,
+fasteners are not counted, and **nothing here has been weighed**.
 
-### The spline is not printed, and here is the arithmetic
+The mobile manipulator now masses **1.136 kg** against the estimated
+1.267 kg, and its worst tipping margin improves to **+43.2 mm** against
+a required 21 mm.
 
-A 25T spline on a 5.9 mm shaft has a **0.74 mm tooth pitch** — **1.9
-extrusions** across a tooth at a 0.4 mm nozzle. The tooth form is
-unresolvable at that scale, and a printed spline driven by a servo
-delivering 0.9 N·m is not a part, it is a consumable.
+The long-reach profile keeps `estimated` masses and says so in the file:
+it is a kinematic variant with no `fabrication` block and no servo
+envelopes, so there is no geometry to compute from. Inventing printer
+data to make the numbers look consistent would be worse than the note.
 
-Every hobby servo ships a **metal horn**. `horn_adapter` bolts to it,
-takes its screws, and presents a flat interface to the driven part. The
-metal carries the torque; the plastic only locates. A recess receives
-the horn so the adapter seats on the servo boss rather than perching on
-the horn's rim — the difference between a joint with a defined axis and
-one that rocks.
-
-That reasoning lives in `test_the_spline_is_too_fine_to_print` rather
-than a comment, so that a coarser spline or a finer nozzle makes the
-number change and the decision get revisited.
-
-**The horn dimensions are the most likely numbers in this repository to
-be wrong.** Horns vary between manufacturers even for a servo sold as an
-MG996R, so they carry `horn_provenance: estimated` and a test asserts
-they still claim no better. Measure the horn that arrives before
-printing the adapter.
-
-### The push rod's length is not free
-
-A parallel linkage works because the rod and the link it parallels form
-a **parallelogram** — equal and parallel sides — so the forearm holds
-its angle as the shoulder moves. The rod length therefore comes from the
-same `upper_arm_link` entry the URDF reads.
-
-Get it wrong and the mechanism still moves. It just stops being a
-parallelogram: the forearm angle drifts with shoulder angle, and the
-arm's kinematics quietly stop matching any model of it. Two tests pin
-it, one on the outline and one on the **bore centres**, because the
-bores are what define the linkage.
-
-`push_rod` raises for direct drive rather than returning something,
-which would put a rod in a box of parts with nothing to connect it to.
-
-### Bushings and a washer, not bearings
-
-`pivot_bushing` is a **sliding fit inside and an interference fit
-outside**. Backwards, and it spins in its bore while gripping the screw,
-wearing the bracket instead of the sacrificial part — the exact outcome
-it exists to prevent. Printed plastic on a steel screw wears *oval*
-rather than staying round, so the slop appears in one direction and
-reads as a wobbly arm rather than a worn bearing.
-
-`thrust_washer` is **not a bearing**, and a test asserts the docstring
-says so. A real thrust bearing is a bought part; this is what makes the
-joint work without one, by putting the wear somewhere replaceable.
-"Printed bearing" is how a design acquires a reputation for slop.
-
-## Every part, both mechanisms
-
-| | PLA total | **lifted by the shoulder servo** |
-|---|---|---|
-| direct drive | 165 g | **154 g** |
-| parallel linkage | 265 g | **99 g** |
-
-Twelve parts for direct drive, thirteen for the linkage — the rod is the
-linkage in the same way a servo pocket is direct drive, so the registry
-is mechanism-aware rather than letting a part raise for a reason that is
-not an error.
-
-## Every part prints without support
-
-`max_overhang_deg` sat in the profile unused while the CAD was written,
-which made it a number describing an intention rather than a constraint.
-Enforcing it changed the design twice.
-
-The checker was **wrong twice before it was right**, and both mistakes
-produced reassuring output:
-
-1. The comparison was inverted, so it skipped exactly the steep
-   downward faces that *are* overhangs — and reported **zero**
-   unsupported area for every part in the design.
-2. It measured the bridge across a cavity's **length** rather than its
-   width, flagging both arm beams. A slicer bridges the narrow
-   direction; a 107 mm cavity that spans 15 mm is trivial.
-
-A printability check that says "all clear" while doing nothing is worse
-than no check, which is why the corrected version has its own tests for
-a horizontal ceiling, a vertical wall and the bridge direction.
-
-With it working, two real design faults surfaced:
-
-- **The bearing seat was a disc over a cavity**, carried on a 1.2 mm
-  rim, with the whole arm's overturning moment through it. It now has a
-  tube under it. *A face that needs support is usually a face with
-  nothing under it.*
-- **The central bore punched through the base's own floor**, leaving an
-  836 mm² ledge. It now stops at the floor — and is widened to clear the
-  servo's diagonal, since a 41 × 20 mm body sweeps a 23 mm radius.
-
-**0 of 13 parts need support**, and a test holds it there.
-
+## The CAD changed the robot
 ## The CAD changed the robot
 
 The pan servo stands in the base with its shaft up. An MG996R is

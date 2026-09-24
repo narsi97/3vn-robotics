@@ -26,7 +26,11 @@ from conftest import (ALL_PROFILES, COMPONENT_KINDS, COMPONENT_PROFILES,
 import pytest
 import yaml
 
-VALID_PROVENANCE = {'measured', 'datasheet', 'estimated'}
+#: `computed` joined the set when the CAD produced real geometry: a
+#: mass derived from a modelled solid plus a datasheet servo mass is
+#: better than a guess and worse than a scale. Keeping it distinct from
+#: `measured` is the point - nothing here has been weighed.
+VALID_PROVENANCE = {'measured', 'datasheet', 'computed', 'estimated'}
 
 
 def _cfg(profile):
@@ -36,10 +40,13 @@ def _cfg(profile):
 @pytest.mark.parametrize('profile', COMPONENT_PROFILES, ids=lambda p: p.stem)
 def test_every_mass_declares_provenance(profile):
     """
-    Right now every value in this file is an engineer's guess. That.
+    Where a number came from is part of the number.
 
-    should be visible in the data, not implied by a comment, so it can be
-    audited and re-measured after fabrication.
+    The arm's link masses were guesses until the CAD existed; they are
+    now `computed` from modelled geometry plus datasheet servo masses.
+    That distinction has to be visible in the data rather than implied
+    by a comment, because nothing here has been weighed and the
+    difference decides how much to trust a tipping margin.
     """
     for name, spec in _cfg(profile)['links'].items():
         assert 'provenance' in spec, f'{name}: no provenance declared'

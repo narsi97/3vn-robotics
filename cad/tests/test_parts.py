@@ -183,45 +183,61 @@ def test_changing_the_profile_changes_the_part(cfg):
 
 # -- the servo has to physically fit ----------------------------------
 
-def test_the_direct_drive_bracket_admits_its_servo(cfg, built):
+def test_the_turret_admits_the_lift_servo(cfg, built):
     """
     THE POCKET IS BIGGER THAN THE SERVO.
 
     FDM prints internal features proud, so a pocket cut to the nominal
     body size does not accept the part. Finding that out costs a print;
-    finding it out here costs nothing.
+    finding it here costs nothing.
+
+    This used to check the shoulder BRACKET, which under direct drive
+    turned out to have no job at all - the turret holds the lift servo
+    at the joint. The bracket only exists for the linkage now.
     """
     servo = prof.servo(cfg, 'mg996r')
     fab = prof.fabrication(cfg)
-    bracket = built[('direct', 'shoulder_bracket')]
-    box = bracket.bounding_box()
+    turret = built[('direct', 'shoulder_turret')]
+    box = turret.bounding_box()
 
-    # The bracket has to be wider than the servo plus a wall each side.
-    needed = servo['width_mm'] + 2 * fab['min_wall_mm']
-    assert box.size.Y >= needed - 0.01, (
-        f'the bracket is {box.size.Y:.1f} mm wide, and the servo plus two '
-        f'walls needs {needed:.1f} mm'
+    # Lying down, the servo's LENGTH runs across the turret's X.
+    needed = servo['length_mm'] + 2 * fab['servo_pocket_clearance_mm']
+    assert box.size.X >= needed - 0.01, (
+        f'the turret is {box.size.X:.1f} mm across and the servo lying in '
+        f'it needs {needed:.1f} mm'
     )
 
 
-def test_the_linkage_bracket_carries_no_servo_pocket(cfg, built):
+def test_the_shoulder_bracket_exists_only_for_the_linkage(cfg):
     """
-    THE MECHANISMS ACTUALLY DIFFER.
+    THE MECHANISMS ACTUALLY DIFFER, and now they differ in their PARTS.
+
+    Under direct drive the turret carries the lift servo at the joint
+    and there is nothing for a separate bracket to do. Under a linkage
+    the bracket holds the plain pivot and rod anchor that replace that
+    servo.
+
+    It sat in the common set until direct drive was chosen, carrying a
+    vertical servo pocket that no joint on this arm wants - every axis
+    but the pan is horizontal.
+    """
+    assert 'shoulder_bracket' in parts_mod.parts_for('linkage')
+    assert 'shoulder_bracket' not in parts_mod.parts_for('direct')
+
+
+def test_the_linkage_turret_carries_more_than_the_direct_one(cfg, built):
+    """
+    Two servos against one, which is the whole trade.
 
     A parameter that changes nothing is worse than no parameter: the
-    comparison the whole decision rests on would be between two
-    identical parts. The linkage variant puts the servo at the base, so
-    its bracket should be materially lighter at the joint.
+    comparison the mechanism decision rested on would be between two
+    identical parts.
     """
-    direct = built[('direct', 'shoulder_bracket')].volume
-    linkage = built[('linkage', 'shoulder_bracket')].volume
-    assert linkage != pytest.approx(direct), (
-        'both mechanisms produced the same bracket, so the parameter is '
-        'doing nothing and the comparison is meaningless'
-    )
-    assert linkage > direct, (
-        'the linkage bracket has no servo cavity, so it should contain '
-        'MORE material than the one with a servo-sized hole in it'
+    direct = built[('direct', 'shoulder_turret')].volume
+    linkage = built[('linkage', 'shoulder_turret')].volume
+    assert linkage > direct * 1.2, (
+        'the linkage turret holds a second servo, so it should be '
+        'materially larger'
     )
 
 
@@ -274,8 +290,8 @@ def test_m3_holes_carry_the_printing_clearance(cfg, built):
     fab = prof.fabrication(cfg)
     wanted = (fab['m3_hole_mm'] + fab['hole_clearance_mm']) / 2.0
 
-    bracket = built[('direct', 'shoulder_bracket')]
-    radii = {round(f.radius, 3) for f in bracket.faces()
+    turret = built[('direct', 'shoulder_turret')]
+    radii = {round(f.radius, 3) for f in turret.faces()
              if f.geom_type == GeomType.CYLINDER}
     assert any(r == pytest.approx(wanted, abs=0.01) for r in radii), (
         f'no hole at the clearance-corrected M3 radius {wanted:.2f} mm; '

@@ -364,3 +364,69 @@ def test_the_assembled_arm_is_a_plausible_desktop_size(cfg):
         f'the arm stands {box.size.Z:.0f} mm tall'
     )
     assert max(box.size.X, box.size.Y) < 250.0
+
+
+# -- the model weighs what the parts weigh -----------------------------
+
+def test_the_profile_masses_match_the_geometry(cfg):
+    """
+    THE URDF AND THE CAD AGREE ABOUT WHAT THE ROBOT WEIGHS.
+
+    For fifteen phases the link masses were guesses, because nothing had
+    been designed. They were wrong in both directions - base_link 2.3x
+    too heavy, shoulder_link 40% too light - so a tipping margin
+    computed from them could have been optimistic or pessimistic and
+    nobody could tell which.
+
+    Now that the geometry exists they are computed from it, and this
+    keeps them that way: change a part and the profile has to follow, or
+    the simulation goes back to modelling a robot nobody designed.
+    """
+    from threevn_cad import masses
+
+    stale = []
+    for link, declared, computed in masses.compare(cfg, 'direct'):
+        if abs(declared - computed) > 0.0005:
+            stale.append(
+                f'{link}: profile says {declared * 1000:.1f} g, the '
+                f'geometry computes {computed * 1000:.1f} g')
+
+    assert not stale, (
+        'the profile disagrees with the CAD:\n  ' + '\n  '.join(stale)
+        + '\n\nRegenerate with `make cad-masses`.')
+
+
+def test_a_servo_rides_on_the_parent_of_the_joint_it_drives(cfg):
+    """
+    Read from the joints, not from a hand-maintained list.
+
+    Direct drive means the servo sits at the joint it drives, so it is
+    carried by that joint's PARENT. Re-parenting the arm then moves the
+    mass with it; a table written out by hand would not.
+    """
+    from threevn_cad import masses
+
+    riders = masses.servo_riders(cfg)
+    assert riders['base_link'] == ['mg996r'], 'the pan servo sits in the base'
+    assert riders['upper_arm_link'] == ['mg996r'], 'the elbow servo'
+    assert 'wrist_link' not in riders, (
+        'nothing is driven from the wrist link - its servo rides on the '
+        'forearm and the gripper has its own'
+    )
+
+
+def test_the_computed_mass_includes_the_servo_not_just_the_plastic(cfg):
+    """
+    A link carrying an MG996R weighs more than its printed structure.
+
+    55 g of servo against 16 g of beam: counting only the plastic would
+    understate the upper arm by three quarters, which is most of what
+    the shoulder has to lift.
+    """
+    from threevn_cad import masses
+    from threevn_cad import parts as parts_mod
+
+    structure = parts_mod.upper_arm_link(cfg).volume / 1000.0 * 1.24
+    computed = masses.compute(cfg)['upper_arm_link'] * 1000.0
+    servo = cfg['servos']['mg996r']['mass_kg'] * 1000.0
+    assert computed > structure + servo * 0.9

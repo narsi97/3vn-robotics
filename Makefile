@@ -33,7 +33,7 @@ DASH    := http://localhost:8107/
 .DEFAULT_GOAL := help
 .PHONY: help doctor setup up down shell build test test-sim lint urdf \
         view mock sim robot stop scenario dash acceptance clean nuke test-ros \
-        cad cad-test
+        cad cad-test cad-masses
 
 help:
 	@echo ""
@@ -253,6 +253,9 @@ CAD_RUN := $(COMPOSE) exec -T $(SVC) bash -lc
 
 cad:
 	$(CAD_RUN) "cd /ws/cad && \$$CAD_PYTHON -m threevn_cad.export"
+
+cad-masses:
+	$(CAD_RUN) "cd /ws/cad && \$$CAD_PYTHON -c \"from threevn_cad import masses, profile; cfg=profile.load(); [print('  %-26s %7.1f g declared   %7.1f g computed' % (l, d*1000, c*1000)) for l,d,c in masses.compare(cfg)]\""
 
 cad-test:
 	$(CAD_RUN) "cd /ws/cad && \$$CAD_PYTHON -m pytest tests -q"
