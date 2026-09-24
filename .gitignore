@@ -40,3 +40,8 @@ acceptance.md
 # See docs/data-pipeline.md.
 datasets/*
 !datasets/.gitkeep
+
+# Generated CAD. A build product, like build/ and install/:
+# regenerate with `make cad`. Committing it would create a second
+# copy of the truth that goes stale when the profile changes.
+cad/out/

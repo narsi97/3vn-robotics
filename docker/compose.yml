@@ -37,6 +37,10 @@ services:
     volumes:
       - ../src:/ws/src
       - ../scripts:/ws/scripts:ro
+      # Parametric CAD. NOT read-only: the exporter writes
+      # generated STL and STEP into cad/out/, which is gitignored
+      # and wanted on the host so the files can be sliced.
+      - ../cad:/ws/cad
       # Datasets are large binary data that must survive the container
       # and must never reach git. A named volume would survive too, but
       # would be invisible from the host, and a dataset nobody can look

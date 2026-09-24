@@ -60,16 +60,75 @@ servos:
     no_load_speed_rads: 5.51    # 0.19 s/60deg
     mass_kg: 0.055
     provenance: datasheet
+    # PHYSICAL ENVELOPE, for the CAD. Millimetres, because that is what
+    # every servo datasheet, every 3D printer and every M3 screw is
+    # specified in - and converting to metres here to match the URDF
+    # would put a unit conversion between the datasheet and the pocket
+    # that has to hold the part.
+    body:
+      length_mm: 40.7
+      width_mm: 19.7
+      height_mm: 42.9          # to the top of the case, excluding horn
+      # The flange the mounting screws pass through.
+      flange_length_mm: 54.8
+      flange_thickness_mm: 2.8
+      flange_height_mm: 27.7   # from the base of the case to the flange
+      mount_hole_spacing_mm: 49.5
+      mount_hole_diameter_mm: 4.2
+      # The output shaft, offset from the body centre - getting this
+      # wrong puts the joint axis in the wrong place, which the
+      # simulation would never notice because the URDF says where the
+      # axis is regardless of whether the plastic agrees.
+      shaft_offset_mm: 10.0
+      horn_type: 25T
+      horn_diameter_mm: 5.9
   sg90:
     voltage: 4.8
     stall_torque_nm: 0.177      # 1.80 kg.cm
     no_load_speed_rads: 8.73    # 0.12 s/60deg
     mass_kg: 0.009
     provenance: datasheet
+    body:
+      length_mm: 22.8
+      width_mm: 12.2
+      height_mm: 22.5
+      flange_length_mm: 32.2
+      flange_thickness_mm: 2.5
+      flange_height_mm: 15.9
+      mount_hole_spacing_mm: 27.8
+      mount_hole_diameter_mm: 2.5
+      shaft_offset_mm: 5.9
+      horn_type: SG90
+      horn_diameter_mm: 4.6
 
 # Fraction of datasheet figures we allow a joint limit to use.
 # Stall torque is a stall figure: a servo held at stall overheats and
 # strips gears. Speed is a no-load figure and drops sharply under load.
+# Fabrication. These describe the PRINTER and the fasteners, not the
+# robot, and they are separated for that reason: the same arm printed on
+# a better machine wants different clearances, and nothing about the
+# kinematics changes.
+fabrication:
+  # FDM, 0.4 mm nozzle, 0.2 mm layers - the default everything assumes.
+  nozzle_mm: 0.4
+  layer_mm: 0.2
+  # Three perimeters at 0.4 mm. Thinner walls print but do not survive a
+  # servo stalling against them.
+  min_wall_mm: 1.2
+  # Clearance added to every hole that something has to pass through.
+  # FDM holes print undersize; a nominal 3.0 mm hole takes an M3 screw
+  # only with help.
+  hole_clearance_mm: 0.35
+  # Clearance around a servo body so it drops into its pocket.
+  servo_pocket_clearance_mm: 0.30
+  # Steepest unsupported overhang. Past this an FDM part needs support,
+  # which on small brackets means a surface nobody can clean up.
+  max_overhang_deg: 45.0
+  m3_hole_mm: 3.0
+  m3_head_mm: 5.5
+  m3_nut_across_flats_mm: 5.5
+  provenance: measured
+
 limit_derate:
   effort: 1.0      # effort limit may reach stall, ros2_control clamps there
   velocity: 0.55   # ~55% of no-load is realistic under load

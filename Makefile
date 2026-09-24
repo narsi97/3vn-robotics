@@ -32,7 +32,8 @@ DASH    := http://localhost:8107/
 
 .DEFAULT_GOAL := help
 .PHONY: help doctor setup up down shell build test test-sim lint urdf \
-        view mock sim robot stop scenario dash acceptance clean nuke test-ros
+        view mock sim robot stop scenario dash acceptance clean nuke test-ros \
+        cad cad-test
 
 help:
 	@echo ""
@@ -243,6 +244,18 @@ heading: build
 fused-odom: build
 	@echo '  needs a running: make mm-sim WORLD=bench_with_target'
 	$(RUN_TTY) "ros2 run threevn_navigation fused_odom"
+
+
+# Parametric CAD. Runs under the venv python from the `cad` Dockerfile
+# stage, because build123d cannot be installed into Debian's system
+# python without fighting dpkg over typing_extensions.
+CAD_RUN := $(COMPOSE) exec -T $(SVC) bash -lc
+
+cad:
+	$(CAD_RUN) "cd /ws/cad && \$$CAD_PYTHON -m threevn_cad.export"
+
+cad-test:
+	$(CAD_RUN) "cd /ws/cad && \$$CAD_PYTHON -m pytest tests -q"
 
 
 robot: build stop

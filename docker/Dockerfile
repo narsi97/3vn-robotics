@@ -95,8 +95,43 @@ RUN chmod +x /usr/local/bin/entrypoint.sh
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 CMD ["bash"]
 
+# --------------------------------------------------------------- cad --
+# Parametric CAD, so the same YAML that drives the simulation drives the
+# printed part and the two cannot disagree.
+#
+# IN A VENV, not system Python. build123d wants a newer typing_extensions
+# than Debian ships, and pip cannot uninstall a dpkg-managed package
+# (no RECORD file), so a plain `pip install` fails part-way and leaves
+# the system Python in a state neither tool owns. `--system-site-packages`
+# keeps yaml, numpy and the ROS packages visible, so one interpreter has
+# both.
+#
+# IT COSTS 760 MB, essentially all of it OpenCascade via cadquery-ocp,
+# and there is no lighter path to real B-rep solids with STEP export.
+# That is about 15% on top of a ~5 GB image and it is in the CI stage
+# deliberately: CAD tests that only run on one laptop are CAD tests that
+# rot, and the geometry checks here are exactly the kind that catch a
+# part nobody can print.
+FROM ci AS cad
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3-venv python3-pip \
+ && rm -rf /var/lib/apt/lists/* \
+ && python3 -m venv --system-site-packages /opt/cadenv \
+ && /opt/cadenv/bin/pip install --no-cache-dir --quiet build123d==0.13.0 \
+ && /opt/cadenv/bin/python -c "from build123d import Box; v = Box(1,1,1).volume; assert abs(v - 1.0) < 1e-9, v"
+# The smoke test uses a TOLERANCE. It first asserted the volume of a
+# unit cube was exactly 1.0, which failed the build after a ten-minute
+# install: OpenCascade integrates the solid and returns
+# 0.9999999999999998. Exact float equality against a geometry kernel is
+# wrong in the same way it is wrong anywhere else, and here it cost a
+# full image rebuild to discover.
+#
+# Pinned: OpenCascade is exactly the kind of dependency where a minor
+# bump silently changes a fillet and a part stops fitting.
+ENV CAD_PYTHON=/opt/cadenv/bin/python
+
 # ----------------------------------------------------------------- dev --
-FROM ci AS dev
+FROM cad AS dev
 ARG ROS_DISTRO
 ARG UID=10001
 

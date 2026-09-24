@@ -35,13 +35,21 @@ phase that first needs it.
 | `threevn_telemetry` | 6 | OpenTelemetry emission |
 | `threevn_navigation` | 11 | **exists**: gyro/wheel heading fusion. Nav2 itself is blocked on a range sensor the BOM does not have - see docs/navigation.md |
 
-## Mechanical design: not started
+## Mechanical design: started, and deliberately undecided
 
-The repository has **no printable CAD**. The URDF is a kinematic model —
-right lengths, masses and axes — which is what simulation, TF and planning
-need. It says nothing about servo mounting pockets, 25T horn splines,
-bearing seats, screw bosses, wall thickness, clearance fits or print
-orientation.
+The repository now has **parametric CAD for two parts** — the shoulder
+bracket and the upper-arm link — generated from `threevn_arm_v1.yaml` by
+`cad/`, for BOTH candidate mechanisms. See [cad.md](cad.md).
+
+Still missing: the base and its bearing, the forearm, the wrist, the
+gripper and its linkage, and every fastener detail where parts meet.
+Nothing has been printed.
+
+The generated geometry also showed the URDF's link masses are wrong:
+`upper_arm_link` is declared 55 g and the printed beam computes to
+16.7 g. One number cannot serve both mechanisms - direct drive adds the
+elbow servo to that link (71.7 g), a linkage leaves it at the base
+(~20 g) - so the mass model DEPENDS on the decision below.
 
 The intended approach is **parametric CAD generated from the same YAML**
 (CadQuery/build123d or OpenSCAD), so `threevn_arm_v1.yaml` drives both the
