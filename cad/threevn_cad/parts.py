@@ -360,44 +360,100 @@ def shoulder_turret(cfg, mechanism='direct'):
     """
     The rotating turret between the pan joint and the upper arm.
 
-    THIS IS WHERE THE TWO MECHANISMS DIVERGE MOST. Under direct drive it
-    carries one servo, for the shoulder lift. Under a linkage it carries
-    TWO - lift and elbow - because moving the elbow servo down here is
-    the whole reason to accept a closed chain, and the elbow's rod runs
-    from this part up past the shoulder.
+    THE LIFT SERVO LIES ON ITS SIDE, and that is not cosmetic. The
+    shoulder-lift axis is horizontal - the URDF says `axis: [0, 1, 0]` -
+    so the servo's output shaft has to point along Y. The first version
+    of this part stood the servo upright like the pan servo below it,
+    which would have put the lift axis about 44 mm up instead of the
+    20 mm the URDF places it at: an arm that assembles into a different
+    robot than the one every test, trajectory and tipping margin was
+    computed for.
 
-    So the linkage turret is the heavier part and the linkage ARM is the
-    lighter one, which is exactly the trade the decision turns on.
+    Nothing in a bracket's own geometry reveals that. It took comparing
+    the printed stack against the joint origins, which is what
+    test_the_printed_stack_matches_the_joint_origins does.
+
+    Under direct drive the turret carries one servo. Under a linkage it
+    carries TWO - lift and elbow - because moving the elbow servo down
+    here is the whole reason to accept a closed chain.
     """
     fab = prof.fabrication(cfg)
     turret = prof.link_mm(cfg, 'shoulder_link')
     servo = prof.servo(cfg, 'mg996r')
     wall = fab['min_wall_mm']
+    slack = fab['servo_pocket_clearance_mm']
+
+    # Where the URDF puts the lift axis, relative to this part's base.
+    lift_axis_z = prof.mm(
+        cfg['joints']['shoulder_lift_joint']['origin']['xyz'][2])
 
     mounted = 2 if mechanism == 'linkage' else 1
-    # Long enough for however many servo flanges have to land on it.
     span = servo['mount_hole_spacing_mm'] + 2 * fab['m3_head_mm']
-    width = mounted * (servo['width_mm'] + 2 * wall)
-    height = turret['length'] + wall
+    # Lying down, the servo's WIDTH is its vertical dimension.
+    lying_height = servo['width_mm'] + 2 * slack
+    # The shaft sits on the servo's centreline in that direction, so the
+    # body's floor has to be half a width below the axis.
+    floor = lift_axis_z - lying_height / 2.0
+    if floor < wall:
+        raise ValueError(
+            f'the lift axis at {lift_axis_z:.1f} mm is too low for a '
+            f'{servo["width_mm"]:.1f} mm servo lying on its side; the body '
+            f'would start {floor:.1f} mm above this part\'s base')
+
+    width = max(mounted * (servo['height_mm'] + 2 * wall),
+                2 * fits.turret_bore_radius(cfg) + 2 * wall)
+    height = lift_axis_z + lying_height / 2.0 + wall
 
     with BuildPart() as part:
         with BuildSketch(Plane.XY):
             RectangleRounded(span, width, radius=min(wall * 2, 3.0))
         extrude(amount=height)
 
-        for index in range(mounted):
-            offset = (index - (mounted - 1) / 2.0) * (servo['width_mm']
-                                                      + 2 * wall)
-            with Locations((0, offset, wall)):
-                insert(_servo_pocket(servo, fab), mode=Mode.SUBTRACT)
-
-        # The bore that drops over the base's bearing seat. Derived
-        # from the SEAT, not from the turret's nominal radius - that
-        # gave a 4.1 mm interference.
+        # The bore that drops over the base's bearing seat. Derived from
+        # the SEAT, not from the turret's nominal radius.
+        #
+        # It runs UP TO THE SERVO CAVITY rather than stopping short. A
+        # blind bore leaves a 53 mm flat roof - far past what the
+        # printer will bridge - and the only way to print it is upside
+        # down, which then puts the servo cavity's floor in the air.
+        # Meeting the cavity makes the turret open top to bottom and the
+        # problem disappears. The servo hangs on its flange screws,
+        # which is how it mounts in any case.
+        #
+        # FULL HEIGHT. Stopping at the cavity floor works for one servo,
+        # whose cavity sits over the bore and consumes its roof. With
+        # TWO cavities side by side the roof survives as a strip between
+        # them - 226 mm2 spanning 27 mm, past what the printer bridges.
+        # Taking the bore all the way up removes it.
         Cylinder(radius=fits.turret_bore_radius(cfg),
-                 height=wall * 3,
+                 height=height + wall,
                  align=(Align.CENTER, Align.CENTER, Align.MIN),
                  mode=Mode.SUBTRACT)
+
+        # Servo cavities, lying down: length along X, shaft along Y,
+        # width vertical.
+        for index in range(mounted):
+            offset = (index - (mounted - 1) / 2.0) * (servo['height_mm']
+                                                      + 2 * wall)
+            # OPEN AT THE TOP. The servo drops in from above, which is
+            # how it is fitted anyway - and a closed cavity leaves a
+            # 0.7 mm ceiling spanning 20.3 mm, just past what the
+            # printer will bridge, for no benefit.
+            with Locations((0, offset, floor)):
+                Box(servo['length_mm'] + 2 * slack,
+                    servo['height_mm'] + 2 * slack,
+                    height - floor + wall,
+                    align=(Align.CENTER, Align.CENTER, Align.MIN),
+                    mode=Mode.SUBTRACT)
+
+        # The shaft's own clearance, out through the side at axis height.
+        with Locations(Plane.XZ.offset(-width / 2.0)):
+            with Locations((0, lift_axis_z)):
+                Cylinder(radius=(servo['horn_diameter_mm'] / 2.0
+                                 + fab['hole_clearance_mm']),
+                         height=width * 2,
+                         align=(Align.CENTER, Align.CENTER, Align.CENTER),
+                         mode=Mode.SUBTRACT)
 
     return part.part
 

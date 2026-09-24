@@ -32,7 +32,7 @@ import socket
 
 #: Bumped by hand at release. Distinct from the git commit, which changes
 #: on every push.
-SOFTWARE_VERSION = '0.18.0'
+SOFTWARE_VERSION = '0.19.0'
 
 UNKNOWN = 'unknown'
 

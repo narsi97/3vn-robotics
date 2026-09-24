@@ -304,15 +304,41 @@ nobody has decided between nuts, heat-set inserts and self-tapping
 screws. A confident schedule from half the information would be worse
 than saying "buy an M3 assortment".
 
+## The printed parts must build the robot the URDF describes
+
+A beam of the right length can still assemble into a different machine.
+
+The shoulder-lift axis is **horizontal** — the URDF says
+`axis: [0, 1, 0]` — so that servo's shaft points along Y, which means it
+**lies on its side**. The first turret stood it upright like the pan
+servo below it, which would have put the lift axis about **44 mm** up
+instead of the **20 mm** the URDF places it at.
+
+Nothing in the bracket's own geometry reveals that. It looks like a
+perfectly good bracket. It just assembles into a different robot than
+the one every trajectory, FK test and tipping margin was computed for —
+and it would have been found by holding the arm up and noticing it was
+the wrong shape.
+
+`test_the_lift_axis_sits_where_the_urdf_puts_it` now checks the shaft
+clearance against the joint origin, and companion tests check the beams
+against their joint spacing and the turret against its own bore.
+
+Getting there took three more geometry fixes, each found by the
+printability check rather than by inspection: the servo cavity opens at
+the top (a closed one left a 0.7 mm ceiling spanning 20.3 mm), and the
+bearing-seat bore runs the full height (stopping short left a 53 mm
+roof with one servo, and a 226 mm strip between cavities with two).
+
 ## What is still not designed
 
-**Nothing has been printed.** These parts pass geometric, fit and
-printability checks, which is a different claim from parts that fit
-together.
+**Nothing has been printed.** These parts pass geometric, fit,
+printability and stack-up checks — which is still a different claim from
+parts that fit together.
 
-Two things a geometric check cannot verify, and both are cheap to test
-first: the **press fit** of a bushing and the **clearance** of the
-thrust washer. Print one of each before committing to a full set.
+Two things no geometric check can verify, both cheap to test first: the
+**press fit** of a bushing and the **clearance** of the thrust washer.
+Print one of each before committing to a full set.
 
 The **horn adapter** rests on `horn_provenance: estimated` dimensions
 and is where the first print will find trouble. Measure the horn that

@@ -194,3 +194,92 @@ def test_no_part_computes_a_mating_dimension_for_itself(cfg):
         'fits.py, which is how the 2.4 mm and 4.1 mm interferences '
         'happened'
     )
+
+
+# -- does the printed stack build the robot the URDF describes ---------
+
+def test_the_lift_axis_sits_where_the_urdf_puts_it(cfg):
+    """
+    THE CHECK THAT CAUGHT A TURRET HOLDING ITS SERVO THE WRONG WAY UP.
+
+    The shoulder-lift axis is horizontal - the URDF says
+    `axis: [0, 1, 0]` - so the servo's shaft must point along Y, which
+    means the servo lies on its side. The first turret stood it upright
+    like the pan servo below it, putting the lift axis about 44 mm up
+    instead of the 20 mm the URDF places it at.
+
+    Nothing in the bracket's own geometry reveals that. It looks like a
+    perfectly good bracket. It just assembles into a different robot
+    than the one every trajectory, FK test and tipping margin was
+    computed for.
+    """
+    from build123d import GeomType
+
+    servo = prof.servo(cfg, 'mg996r')
+    fab = prof.fabrication(cfg)
+    lift_z = cfg['joints']['shoulder_lift_joint']['origin']['xyz'][2] * 1000.0
+
+    for mechanism in parts_mod.MECHANISMS:
+        turret = parts_mod.shoulder_turret(cfg, mechanism=mechanism)
+        wanted = servo['horn_diameter_mm'] / 2.0 + fab['hole_clearance_mm']
+        shafts = [f for f in turret.faces()
+                  if f.geom_type == GeomType.CYLINDER
+                  and f.radius is not None
+                  and abs(f.radius - wanted) < 0.05]
+        assert shafts, (
+            f'{mechanism}: the turret has no shaft clearance at '
+            f'{wanted * 2:.1f} mm, so the lift servo has nowhere to point'
+        )
+        heights = [f.center().Z for f in shafts]
+        assert min(heights) == pytest.approx(lift_z, abs=0.5), (
+            f'{mechanism}: the lift shaft is at {min(heights):.1f} mm and '
+            f'the URDF puts the joint at {lift_z:.1f} mm'
+        )
+
+
+def test_the_turret_is_tall_enough_for_a_servo_lying_down(cfg):
+    """
+    The axis height has to clear half a servo width plus a floor.
+
+    Asked for an axis lower than that, the generator raises rather than
+    producing a part with the servo poking out of the bottom.
+    """
+    import copy
+
+    low = copy.deepcopy(cfg)
+    low['joints']['shoulder_lift_joint']['origin']['xyz'][2] = 0.002
+    with pytest.raises(ValueError, match='too low'):
+        parts_mod.shoulder_turret(low)
+
+
+def test_the_arm_beams_match_their_joint_spacing(cfg):
+    """
+    A beam's length IS the distance to the next joint.
+
+    The elbow sits 110 mm along the upper arm and the wrist 95 mm along
+    the forearm, so a beam of any other length moves a joint.
+    """
+    for link, joint in (('upper_arm_link', 'elbow_joint'),
+                        ('forearm_link', 'wrist_joint')):
+        spacing = cfg['joints'][joint]['origin']['xyz'][2] * 1000.0
+        for mechanism in parts_mod.MECHANISMS:
+            beam = parts_mod.parts_for(mechanism)[link](
+                cfg, mechanism=mechanism)
+            assert beam.bounding_box().size.Z == pytest.approx(
+                spacing, abs=0.01), f'{mechanism}/{link}'
+
+
+def test_the_turret_clears_the_base_it_sits_on(cfg):
+    """
+    The turret's footprint has to cover the bearing seat it drops over.
+
+    A turret narrower than its own bore is a part with a hole in its
+    edge rather than a bore through its middle.
+    """
+    turret = parts_mod.shoulder_turret(cfg)
+    box = turret.bounding_box()
+    needed = fits.turret_bore_radius(cfg) * 2
+    assert min(box.size.X, box.size.Y) >= needed, (
+        f'the turret is {min(box.size.X, box.size.Y):.1f} mm across and its '
+        f'bore is {needed:.1f} mm'
+    )
