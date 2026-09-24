@@ -330,6 +330,33 @@ the top (a closed one left a 0.7 mm ceiling spanning 20.3 mm), and the
 bearing-seat bore runs the full height (stopping short left a 53 mm
 roof with one servo, and a 226 mm strip between cavities with two).
 
+## The assembled arm, in one file
+
+`make cad` writes `assembly.step` — every part placed at the joint
+origin the URDF gives it, at the home pose.
+
+Every other check here tests **one number at a time**: a bore against a
+bushing, a beam against a joint spacing, a shaft against an origin. All
+of them passed while the turret held its servo the wrong way up, because
+no single measurement was wrong — the part was simply the wrong shape,
+which a person sees in a second and a test does not see at all.
+
+Opening that file is the cheapest review the design gets before filament
+is spent.
+
+It also enables the one check that needs the whole arm rather than one
+joint: **pairwise intersection**. Parts can each be correct and still
+collide once placed — the turret reaches up past the lift axis and the
+upper arm starts at it, so the two are a few millimetres from sharing
+space. Currently none overlap.
+
+The assembly is **not** a kinematic model. The URDF is, and it stays the
+source of truth; this reads its origins and puts plastic at them. If the
+two disagree, the URDF is right, because it is what the controllers, the
+planner and every test actually use.
+
+The arm stands **285 mm** at the home pose.
+
 ## What is still not designed
 
 **Nothing has been printed.** These parts pass geometric, fit,

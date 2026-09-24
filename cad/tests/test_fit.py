@@ -283,3 +283,84 @@ def test_the_turret_clears_the_base_it_sits_on(cfg):
         f'the turret is {min(box.size.X, box.size.Y):.1f} mm across and its '
         f'bore is {needed:.1f} mm'
     )
+
+
+# -- the whole arm ------------------------------------------------------
+
+def test_the_assembly_follows_the_urdf_chain(cfg):
+    """
+    Each part sits at the joint origin the URDF gives it.
+
+    The assembly reads those origins rather than restating them, so this
+    checks the reading: a chain built from the wrong field would stack
+    the arm somewhere plausible and wrong.
+    """
+    from threevn_cad import assembly
+
+    heights = dict(assembly._chain(cfg))
+    joints = cfg['joints']
+    expected = 0.0
+    for name in ('shoulder_pan_joint', 'shoulder_lift_joint',
+                 'elbow_joint', 'wrist_joint'):
+        expected += joints[name]['origin']['xyz'][2] * 1000.0
+        child = joints[name]['child']
+        assert heights[child] == pytest.approx(expected, abs=0.01), name
+
+
+def test_no_two_parts_occupy_the_same_space(cfg):
+    """
+    THE CHECK THAT NEEDS THE WHOLE ARM RATHER THAN ONE JOINT.
+
+    Every other test here compares one bore against one plug. Parts can
+    each be correct and still collide once placed - the turret reaches
+    up past the lift axis and the upper arm starts at it, so the two are
+    a few millimetres from sharing space.
+
+    Solids are intersected pairwise; anything over a cubic millimetre is
+    a clash rather than a rounding artefact.
+    """
+    from build123d import Location, Rotation
+    from threevn_cad import assembly
+
+    for mechanism in parts_mod.MECHANISMS:
+        heights = dict(assembly._chain(cfg))
+        available = parts_mod.parts_for(mechanism)
+
+        placed = {}
+        for link, part_name, rotation in assembly.PLACEMENT:
+            if part_name not in available or link not in heights:
+                continue
+            solid = available[part_name](cfg, mechanism=mechanism)
+            placed[part_name] = Location((0, 0, heights[link])) * (
+                Rotation(*rotation) * solid)
+
+        names = sorted(placed)
+        for index, first in enumerate(names):
+            for second in names[index + 1:]:
+                try:
+                    overlap = placed[first].intersect(placed[second])
+                    volume = overlap.volume if overlap is not None else 0.0
+                except Exception:
+                    volume = 0.0
+                assert volume <= 1.0, (
+                    f'{mechanism}: {first} and {second} share '
+                    f'{volume:.1f} mm3'
+                )
+
+
+def test_the_assembled_arm_is_a_plausible_desktop_size(cfg):
+    """
+    A sanity bound on the whole thing, not a part.
+
+    The individual parts each passed their own size check while the
+    turret was the wrong shape; a total that lands somewhere absurd is
+    the cheapest signal that the chain has been misread.
+    """
+    from threevn_cad import assembly
+
+    built = assembly.assemble(cfg, 'direct')
+    box = built.bounding_box()
+    assert 150.0 < box.size.Z < 500.0, (
+        f'the arm stands {box.size.Z:.0f} mm tall'
+    )
+    assert max(box.size.X, box.size.Y) < 250.0

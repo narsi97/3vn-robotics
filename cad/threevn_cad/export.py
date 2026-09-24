@@ -35,6 +35,7 @@ import sys
 
 from build123d import export_step, export_stl
 
+from threevn_cad import assembly as assembly_mod
 from threevn_cad import fasteners
 from threevn_cad import parts as parts_mod
 from threevn_cad import printability
@@ -244,6 +245,16 @@ def main(argv=None):
     for mechanism, rows in collected.items():
         guide = pathlib.Path(args.out) / mechanism / 'PRINTING.md'
         guide.write_text(printing_guide(cfg, mechanism, rows))
+
+        # The whole arm at its home pose, in one file. Every other check
+        # tests one number at a time; this is the one a person can look
+        # at, and looking at it is the cheapest review the design gets
+        # before filament is spent.
+        built = assembly_mod.assemble(cfg, mechanism)
+        export_step(built, str(pathlib.Path(args.out) / mechanism
+                               / 'assembly.step'))
+        print(f'  {mechanism}: assembled height '
+              f'{assembly_mod.stack_height(cfg):.0f} mm -> assembly.step')
 
     print(f'  written to {args.out}/<mechanism>/, with PRINTING.md')
 
