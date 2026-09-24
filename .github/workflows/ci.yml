@@ -189,3 +189,56 @@ jobs:
         with:
           name: expanded-urdf
           path: artifacts/*.urdf
+
+  cad:
+    name: parametric CAD
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      # The CAD stage carries ~772 MB of OpenCascade and takes about ten
+      # minutes to install from scratch. Cached, it is seconds - and
+      # without the cache this job would add ten minutes to every push,
+      # which is how a job gets deleted rather than fixed.
+      - name: Build the CAD image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          target: cad
+          tags: threevn-robotics-cad:local
+          load: true
+          cache-from: type=gha,scope=cad
+          cache-to: type=gha,scope=cad,mode=max
+
+      # These ran on one laptop until now. build123d was put in the CI
+      # stage precisely so they could run here, and then they were not
+      # wired in - which is how 161 tests quietly become decorative.
+      - name: Geometry, fit and printability
+        run: |
+          docker run --rm \
+            -v "$PWD/cad:/ws/cad" \
+            -v "$PWD/src:/ws/src" \
+            -w /ws/cad \
+            threevn-robotics-cad:local \
+            bash -lc '$CAD_PYTHON -m pytest tests -q'
+
+      # Generating the parts is itself a check: a geometry kernel can
+      # build a solid that will not export.
+      - name: The parts must generate
+        run: |
+          docker run --rm \
+            -v "$PWD/cad:/ws/cad" \
+            -v "$PWD/src:/ws/src" \
+            -w /ws/cad \
+            threevn-robotics-cad:local \
+            bash -lc '$CAD_PYTHON -m threevn_cad.export --out /ws/cad/out'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: printable-parts
+          path: |
+            cad/out/**/*.stl
+            cad/out/**/*.step
+            cad/out/**/PRINTING.md
