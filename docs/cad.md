@@ -164,18 +164,91 @@ nobody has chosen yet.
 
 The Phase 11 tipping margins were computed from the estimated column.
 
+## The assembly
+
+The parts that join the other parts — and most of them fail in ways a
+bracket cannot: a rod of the wrong length still moves, a bushing that is
+a slip fit still assembles.
+
+### The spline is not printed, and here is the arithmetic
+
+A 25T spline on a 5.9 mm shaft has a **0.74 mm tooth pitch** — **1.9
+extrusions** across a tooth at a 0.4 mm nozzle. The tooth form is
+unresolvable at that scale, and a printed spline driven by a servo
+delivering 0.9 N·m is not a part, it is a consumable.
+
+Every hobby servo ships a **metal horn**. `horn_adapter` bolts to it,
+takes its screws, and presents a flat interface to the driven part. The
+metal carries the torque; the plastic only locates. A recess receives
+the horn so the adapter seats on the servo boss rather than perching on
+the horn's rim — the difference between a joint with a defined axis and
+one that rocks.
+
+That reasoning lives in `test_the_spline_is_too_fine_to_print` rather
+than a comment, so that a coarser spline or a finer nozzle makes the
+number change and the decision get revisited.
+
+**The horn dimensions are the most likely numbers in this repository to
+be wrong.** Horns vary between manufacturers even for a servo sold as an
+MG996R, so they carry `horn_provenance: estimated` and a test asserts
+they still claim no better. Measure the horn that arrives before
+printing the adapter.
+
+### The push rod's length is not free
+
+A parallel linkage works because the rod and the link it parallels form
+a **parallelogram** — equal and parallel sides — so the forearm holds
+its angle as the shoulder moves. The rod length therefore comes from the
+same `upper_arm_link` entry the URDF reads.
+
+Get it wrong and the mechanism still moves. It just stops being a
+parallelogram: the forearm angle drifts with shoulder angle, and the
+arm's kinematics quietly stop matching any model of it. Two tests pin
+it, one on the outline and one on the **bore centres**, because the
+bores are what define the linkage.
+
+`push_rod` raises for direct drive rather than returning something,
+which would put a rod in a box of parts with nothing to connect it to.
+
+### Bushings and a washer, not bearings
+
+`pivot_bushing` is a **sliding fit inside and an interference fit
+outside**. Backwards, and it spins in its bore while gripping the screw,
+wearing the bracket instead of the sacrificial part — the exact outcome
+it exists to prevent. Printed plastic on a steel screw wears *oval*
+rather than staying round, so the slop appears in one direction and
+reads as a wobbly arm rather than a worn bearing.
+
+`thrust_washer` is **not a bearing**, and a test asserts the docstring
+says so. A real thrust bearing is a bought part; this is what makes the
+joint work without one, by putting the wear somewhere replaceable.
+"Printed bearing" is how a design acquires a reputation for slop.
+
+## Every part, both mechanisms
+
+| | PLA total | **lifted by the shoulder servo** |
+|---|---|---|
+| direct drive | 165 g | **154 g** |
+| parallel linkage | 265 g | **99 g** |
+
+Twelve parts for direct drive, thirteen for the linkage — the rod is the
+linkage in the same way a servo pocket is direct drive, so the registry
+is mechanism-aware rather than letting a part raise for a reason that is
+not an error.
+
 ## What is still not designed
 
-The parts exist. **The assembly does not.**
+**Fasteners are bought, and not yet counted.** The design has the holes;
+nobody has derived a screw schedule from them, and guessing one would be
+a BOM line with no evidence behind it.
 
-Missing: the push rods for the linkage variant, the bearing itself, the
-servo horn adapters, and the fasteners. Those are bought parts and joint
-details, and the horn adapter in particular is the fiddliest piece of a
-printed arm — a 25T spline is not something to model casually.
+A **real thrust bearing** for the pan joint is optional and not in the
+BOM. The washer works; a bearing works better.
 
 **Nothing has been printed.** These are solids that pass geometric
 checks, which is a different claim from parts that fit together. The
-first print will find things no test here can.
+first print will find things no test here can — and the horn adapter,
+resting on estimated dimensions, is where it will start.
 
 ## The toolchain costs 772 MB
 

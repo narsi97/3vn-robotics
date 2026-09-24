@@ -82,6 +82,22 @@ servos:
       shaft_offset_mm: 10.0
       horn_type: 25T
       horn_diameter_mm: 5.9
+      # THE HORN IS BOLTED TO, NOT PRINTED.
+      #
+      # A 25T spline on a 5.9 mm shaft has a 0.74 mm tooth pitch, which
+      # is 1.9 extrusions wide at a 0.4 mm nozzle. The tooth form is
+      # unresolvable at that scale and a printed spline strips on first
+      # load. Every servo ships a metal horn; the adapter bolts to it.
+      #
+      # provenance: ESTIMATED. Horns vary between manufacturers even for
+      # a servo sold as an MG996R, and these are the numbers most likely
+      # to be wrong in this file. MEASURE THE HORN THAT ARRIVES before
+      # printing the adapter.
+      horn_screw_circle_mm: 16.0
+      horn_screw_count: 4
+      horn_screw_hole_mm: 2.2
+      horn_thickness_mm: 2.0
+      horn_provenance: estimated
   sg90:
     voltage: 4.8
     stall_torque_nm: 0.177      # 1.80 kg.cm
@@ -100,6 +116,12 @@ servos:
       shaft_offset_mm: 5.9
       horn_type: SG90
       horn_diameter_mm: 4.6
+      # Same caveat as the MG996R above: measure the horn that arrives.
+      horn_screw_circle_mm: 11.0
+      horn_screw_count: 2
+      horn_screw_hole_mm: 1.8
+      horn_thickness_mm: 1.6
+      horn_provenance: estimated
 
 # Fraction of datasheet figures we allow a joint limit to use.
 # Stall torque is a stall figure: a servo held at stall overheats and

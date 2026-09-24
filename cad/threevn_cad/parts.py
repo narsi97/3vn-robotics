@@ -37,6 +37,9 @@ are bought parts and joint details, and claiming them would be claiming
 the arm has been built.
 """
 
+import functools
+import math
+
 from build123d import (
     Align,
     BuildPart,
@@ -47,6 +50,7 @@ from build123d import (
     Mode,
     Plane,
     RectangleRounded,
+    SlotCenterToCenter,
     extrude,
     insert,
 )
@@ -471,8 +475,206 @@ def gripper_finger(cfg, mechanism='direct'):
     return part.part
 
 
-#: Every part the generator can make, by name. Used by the exporter and
-#: by the tests, so a part that is added and not exported is visible.
+# ----------------------------------------------------------------------
+# Assembly parts: what joins the structural parts to each other and to
+# the servos. These are the pieces that decide whether a pile of
+# correct-looking brackets becomes an arm.
+# ----------------------------------------------------------------------
+
+def horn_adapter(cfg, mechanism='direct', servo_name='mg996r'):
+    """
+    Bolts to the servo's supplied METAL horn and presents a flat face.
+
+    THE SPLINE IS NOT PRINTED, and the arithmetic says why. A 25T spline
+    on a 5.9 mm shaft has a 0.74 mm tooth pitch - 1.9 extrusions wide at
+    a 0.4 mm nozzle. The tooth form is unresolvable at that scale, and a
+    printed spline stripped by a servo that delivers 0.9 N.m is not a
+    part, it is a consumable.
+
+    Every hobby servo ships a metal horn with its own screw holes. This
+    sits on that horn, takes its screws, and gives the driven part a
+    flat bolted interface. The metal handles the torque; the plastic
+    only has to locate.
+
+    A recess receives the horn so the adapter sits flat on the servo's
+    boss rather than perching on the horn's rim - the difference between
+    a joint with a defined axis and one that rocks.
+    """
+    fab = prof.fabrication(cfg)
+    servo = prof.servo(cfg, servo_name)
+    wall = fab['min_wall_mm']
+
+    for key in ('horn_screw_circle_mm', 'horn_screw_count',
+                'horn_screw_hole_mm', 'horn_thickness_mm'):
+        if key not in servo:
+            raise KeyError(
+                f'{servo_name} has no {key}. The adapter bolts to the horn, '
+                f'so the horn interface has to be described.')
+
+    circle = servo['horn_screw_circle_mm']
+    outer = circle / 2.0 + fab['m3_head_mm']
+    thickness = servo['horn_thickness_mm'] + 2 * wall
+
+    with BuildPart() as part:
+        Cylinder(radius=outer, height=thickness,
+                 align=(Align.CENTER, Align.CENTER, Align.MIN))
+
+        # Recess for the metal horn, so the adapter seats on the servo
+        # boss and not on the horn's edge.
+        Cylinder(radius=circle / 2.0 + wall,
+                 height=servo['horn_thickness_mm'] + fab['hole_clearance_mm'],
+                 align=(Align.CENTER, Align.CENTER, Align.MIN),
+                 mode=Mode.SUBTRACT)
+
+        # Clearance for the shaft and its retaining screw.
+        Cylinder(radius=(servo['horn_diameter_mm']
+                         + 2 * fab['hole_clearance_mm']) / 2.0,
+                 height=thickness * 3,
+                 align=(Align.CENTER, Align.CENTER, Align.CENTER),
+                 mode=Mode.SUBTRACT)
+
+        # The horn's own screws, on its own circle.
+        count = int(servo['horn_screw_count'])
+        for index in range(count):
+            angle = 2.0 * math.pi * index / count
+            with Locations((circle / 2.0 * math.cos(angle),
+                            circle / 2.0 * math.sin(angle), 0)):
+                Cylinder(radius=(servo['horn_screw_hole_mm']
+                                 + fab['hole_clearance_mm']) / 2.0,
+                         height=thickness * 3,
+                         align=(Align.CENTER, Align.CENTER, Align.CENTER),
+                         mode=Mode.SUBTRACT)
+
+        # M3 holes for the driven part, deliberately off the horn's
+        # circle so the two sets of screws do not collide.
+        driven = outer - fab['m3_head_mm'] / 2.0
+        for index in range(2):
+            angle = math.pi * index + math.pi / 4.0
+            with Locations((driven * math.cos(angle),
+                            driven * math.sin(angle), 0)):
+                Cylinder(radius=(fab['m3_hole_mm']
+                                 + fab['hole_clearance_mm']) / 2.0,
+                         height=thickness * 3,
+                         align=(Align.CENTER, Align.CENTER, Align.CENTER),
+                         mode=Mode.SUBTRACT)
+
+    return part.part
+
+
+def push_rod(cfg, mechanism='direct'):
+    """
+    The rod that carries the elbow drive up to the forearm. LINKAGE ONLY.
+
+    Its length is not free. A parallel linkage works because the rod and
+    the link it parallels form a PARALLELOGRAM: equal and parallel
+    sides, so the forearm holds its angle as the shoulder moves. That
+    makes the rod the same length as the upper arm, taken from the same
+    profile entry the URDF reads.
+
+    Get the length wrong and the mechanism still moves - it just stops
+    being a parallelogram, the forearm angle drifts with shoulder angle,
+    and the arm's kinematics quietly stop matching any model of it.
+
+    Printed flat and loaded in tension and compression along its length,
+    which is the direction FDM layers are weakest in. It is deliberately
+    thick for its job.
+    """
+    if mechanism != 'linkage':
+        raise ValueError(
+            'push_rod exists only for the linkage mechanism; direct drive '
+            'puts a servo at the joint instead')
+
+    fab = prof.fabrication(cfg)
+    upper = prof.link_mm(cfg, 'upper_arm_link')
+    wall = fab['min_wall_mm']
+
+    length = upper['z']            # the parallelogram side
+    bore = (fab['m3_hole_mm'] + fab['hole_clearance_mm']) / 2.0
+    width = bore * 2 + 2 * wall
+    thickness = max(wall * 2, 4.0)
+
+    with BuildPart() as part:
+        with BuildSketch(Plane.XY):
+            SlotCenterToCenter(length, width)
+        extrude(amount=thickness)
+        for x in (-length / 2.0, length / 2.0):
+            with Locations((x, 0)):
+                Cylinder(radius=bore, height=thickness * 3,
+                         align=(Align.CENTER, Align.CENTER, Align.CENTER),
+                         mode=Mode.SUBTRACT)
+
+    return part.part
+
+
+def pivot_bushing(cfg, mechanism='direct'):
+    """
+    A sleeve between an M3 screw and a printed hole.
+
+    Printed plastic running directly on a steel screw wears, and it wears
+    into an oval rather than staying round - so the joint develops slop
+    in one direction only, which reads as a wobbly arm rather than as a
+    worn bearing. A sacrificial sleeve is a part anyone can reprint.
+
+    Sized so the screw slides and the outside is an interference fit in
+    the pivot bore: the bushing is meant to stay put and let the screw
+    turn.
+    """
+    fab = prof.fabrication(cfg)
+    wall = fab['min_wall_mm']
+
+    bore = fab['m3_hole_mm'] + fab['hole_clearance_mm']
+    # NO clearance on the outside - this one is pressed in.
+    outer = fab['m3_hole_mm'] + fab['hole_clearance_mm'] + 2 * wall
+
+    with BuildPart() as part:
+        Cylinder(radius=outer / 2.0, height=wall * 4,
+                 align=(Align.CENTER, Align.CENTER, Align.MIN))
+        Cylinder(radius=bore / 2.0, height=wall * 12,
+                 align=(Align.CENTER, Align.CENTER, Align.CENTER),
+                 mode=Mode.SUBTRACT)
+        # A flange, so it cannot push all the way through the bore.
+        Cylinder(radius=outer / 2.0 + wall, height=wall,
+                 align=(Align.CENTER, Align.CENTER, Align.MIN))
+        Cylinder(radius=bore / 2.0, height=wall * 4,
+                 align=(Align.CENTER, Align.CENTER, Align.MIN),
+                 mode=Mode.SUBTRACT)
+
+    return part.part
+
+
+def thrust_washer(cfg, mechanism='direct'):
+    """
+    The flat washer the turret spins on, at the pan joint.
+
+    NOT A BEARING. A real thrust bearing is a bought part and the BOM
+    should carry one; this is what makes the joint work without it -
+    a sacrificial disc between two printed faces, so the wear happens
+    somewhere replaceable rather than on the base.
+
+    Printed flat, which puts the layer lines perpendicular to the load
+    and is the one orientation FDM is good at.
+    """
+    fab = prof.fabrication(cfg)
+    turret = prof.link_mm(cfg, 'shoulder_link')
+    wall = fab['min_wall_mm']
+
+    if turret['type'] != 'cylinder':
+        raise ValueError('shoulder_link is expected to be a cylinder')
+
+    outer = turret['radius'] + 2 * wall
+    inner = turret['radius'] + fab['hole_clearance_mm']
+
+    with BuildPart() as part:
+        Cylinder(radius=outer, height=wall,
+                 align=(Align.CENTER, Align.CENTER, Align.MIN))
+        Cylinder(radius=inner, height=wall * 3,
+                 align=(Align.CENTER, Align.CENTER, Align.CENTER),
+                 mode=Mode.SUBTRACT)
+
+    return part.part
+
+
+#: Parts every arm needs, whatever the mechanism.
 PARTS = {
     'base_plate': base_plate,
     'shoulder_turret': shoulder_turret,
@@ -482,6 +684,31 @@ PARTS = {
     'wrist_bracket': wrist_bracket,
     'gripper_base': gripper_base,
     'gripper_finger': gripper_finger,
+    'horn_adapter_mg996r': functools.partial(horn_adapter,
+                                             servo_name='mg996r'),
+    'horn_adapter_sg90': functools.partial(horn_adapter,
+                                           servo_name='sg90'),
+    'pivot_bushing': pivot_bushing,
+    'thrust_washer': thrust_washer,
+}
+
+#: Parts that exist only for one mechanism.
+#:
+#: The push rod is the linkage, in the same way the servo pocket is
+#: direct drive. Listing it as a normal part and letting it raise for
+#: the other mechanism would make "generate everything" fail for a
+#: reason that is not an error.
+MECHANISM_ONLY = {
+    'linkage': {'push_rod': push_rod},
+    'direct': {},
 }
 
 MECHANISMS = ('direct', 'linkage')
+
+
+def parts_for(mechanism):
+    """Return every part a given mechanism needs, by name."""
+    if mechanism not in MECHANISMS:
+        raise ValueError(
+            f"mechanism must be one of {MECHANISMS}, not {mechanism!r}")
+    return {**PARTS, **MECHANISM_ONLY[mechanism]}

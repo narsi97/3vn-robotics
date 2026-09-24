@@ -36,14 +36,15 @@ def built(cfg):
     """Every part for every mechanism, built once."""
     out = {}
     for mechanism in parts_mod.MECHANISMS:
-        for name, builder in parts_mod.PARTS.items():
+        for name, builder in parts_mod.parts_for(mechanism).items():
             out[(mechanism, name)] = builder(cfg, mechanism=mechanism)
     return out
 
 
 def every_part():
-    """Parametrize over (mechanism, part)."""
-    return [(m, n) for m in parts_mod.MECHANISMS for n in parts_mod.PARTS]
+    """Parametrize over (mechanism, part), including mechanism-only ones."""
+    return [(m, n) for m in parts_mod.MECHANISMS
+            for n in parts_mod.parts_for(m)]
 
 
 # -- is it even a solid -------------------------------------------------
@@ -133,7 +134,7 @@ def test_the_whole_arm_is_printable_in_one_sitting(built):
     """
     for mechanism in parts_mod.MECHANISMS:
         total = sum(built[(mechanism, name)].volume
-                    for name in parts_mod.PARTS) / 1000.0 * 1.24
+                    for name in parts_mod.parts_for(mechanism)) / 1000.0 * 1.24
         # Two fingers, not one.
         total += built[(mechanism, 'gripper_finger')].volume / 1000.0 * 1.24
         assert total < 400.0, (
@@ -314,7 +315,7 @@ def test_the_shoulder_servo_can_lift_the_arm_it_has_to_lift(cfg, built):
 
     for mechanism in parts_mod.MECHANISMS:
         by_part = {n: built[(mechanism, n)].volume / 1000.0 * 1.24 / 1000.0
-                   for n in parts_mod.PARTS}
+                   for n in parts_mod.parts_for(mechanism)}
         arm = sum(by_part.get(p, 0.0) for p in LIFTED_PARTS)
         arm += 2 * by_part.get('gripper_finger', 0.0)
         arm += sum(servos[s] for s in LIFTED_SERVOS[mechanism])
@@ -345,7 +346,7 @@ def test_the_linkage_lifts_materially_less_than_direct_drive(cfg, built):
         results[mechanism] = [
             {'part': name,
              'mass_g': built[(mechanism, name)].volume / 1000.0 * 1.24}
-            for name in parts_mod.PARTS
+            for name in parts_mod.parts_for(mechanism)
         ]
     summary = compare(cfg, results)
 

@@ -42,8 +42,13 @@ base, turret, shoulder bracket, both beams, wrist and gripper —
 generated from `threevn_arm_v1.yaml` by `cad/`, for BOTH candidate
 mechanisms. See [cad.md](cad.md).
 
-Still missing: the ASSEMBLY. Push rods for the linkage, the bearing,
-servo horn adapters and fasteners. Nothing has been printed.
+The ASSEMBLY parts now exist too: horn adapters, the linkage push rod,
+pivot bushings and a thrust washer. The 25T spline is deliberately NOT
+printed - 1.9 extrusions per tooth - so the adapter bolts to the metal
+horn each servo ships with.
+
+Still missing: a derived screw schedule, and an optional real thrust
+bearing. Nothing has been printed.
 
 The decision now has its number: direct drive lifts 154 g at the
 shoulder, a linkage lifts 99 g, and the linkage costs 96 g more PLA.

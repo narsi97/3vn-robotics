@@ -47,7 +47,7 @@ def generate(cfg, mechanism, out_dir):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     written = []
-    for name, builder in sorted(parts_mod.PARTS.items()):
+    for name, builder in sorted(parts_mod.parts_for(mechanism).items()):
         solid = builder(cfg, mechanism=mechanism)
         stl = out_dir / f'{name}.stl'
         step = out_dir / f'{name}.step'
@@ -97,7 +97,10 @@ def compare(cfg, results):
     out = {}
     for mechanism, rows in results.items():
         by_part = {row['part']: row['mass_g'] for row in rows}
-        printed = sum(by_part.values()) + by_part.get('gripper_finger', 0.0)
+        # Two fingers and four bushings, not one of each.
+        printed = sum(by_part.values())
+        printed += by_part.get('gripper_finger', 0.0)
+        printed += 3 * by_part.get('pivot_bushing', 0.0)
         lifted = sum(by_part.get(p, 0.0) for p in LIFTED_PARTS)
         lifted += 2 * by_part.get('gripper_finger', 0.0)
         lifted += sum(servos[s] for s in LIFTED_SERVOS[mechanism])
