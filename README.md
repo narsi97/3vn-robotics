@@ -288,6 +288,21 @@ make registry-status && make serve
 make fused-odom && make heading
 ```
 
+- **Printable CAD**, generated from the same YAML the simulation reads,
+  for both candidate arm mechanisms. Every part prints without support;
+  168 checks cover geometry, fit, printability and stack-up.
+
+```bash
+make cad          # STL + STEP + PRINTING.md + assembly.step
+make cad-test
+```
+
+Generating it changed the robot: the pan servo is 42.9 mm tall and the
+base was 30 mm, so the base could not hold the part it exists to hold.
+The simulation never noticed, because a URDF box does not have to hold
+anything. **Nothing has been printed yet** — see
+[docs/cad.md](docs/cad.md).
+
 **Still outstanding**: Nav2 needs a range sensor the BOM does not have
 (an RPLIDAR is ~$100 against a $45–55 robot), and everything physical —
 there is no printable CAD and no robot has been built. See
