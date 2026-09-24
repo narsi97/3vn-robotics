@@ -146,6 +146,12 @@ fabrication:
   # Steepest unsupported overhang. Past this an FDM part needs support,
   # which on small brackets means a surface nobody can clean up.
   max_overhang_deg: 45.0
+  # How far an FDM machine will bridge a flat ceiling unsupported. A
+  # horizontal face over a narrow cavity is BRIDGED, not supported, and
+  # counting it as needing support flags every hollow part in the design
+  # - which is how a printability check gets ignored. 20 mm is
+  # conservative for PLA with a part cooling fan.
+  max_bridge_mm: 20.0
   m3_hole_mm: 3.0
   m3_head_mm: 5.5
   m3_nut_across_flats_mm: 5.5
@@ -157,7 +163,18 @@ limit_derate:
 
 links:
   base_link:
-    geometry: {type: box, x: 0.100, y: 0.100, z: 0.030}
+    # 45 mm tall, NOT 30, and the CAD is why.
+    #
+    # The pan servo stands in here with its shaft up. An MG996R is
+    # 42.9 mm tall, so a 30 mm base could not contain the part it
+    # exists to hold - it was short by 14.4 mm once wall thickness and
+    # pocket clearance were counted. The simulation never noticed,
+    # because a URDF box does not have to hold anything.
+    #
+    # This is the first time generating the CAD changed the ROBOT
+    # rather than just describing it. Raising it also moves
+    # shoulder_pan_joint's origin, below.
+    geometry: {type: box, x: 0.100, y: 0.100, z: 0.045}
     mass: 0.250
     provenance: estimated
   shoulder_link:
@@ -195,7 +212,10 @@ joints:
     servo: mg996r
     parent: base_link
     child: shoulder_link
-    origin: {xyz: [0.0, 0.0, 0.030], rpy: [0.0, 0.0, 0.0]}
+    # Follows base_link's height: the turret sits on top of the base,
+    # so raising the base raises this. Keeping 0.030 here would put the
+    # shoulder inside the base.
+    origin: {xyz: [0.0, 0.0, 0.045], rpy: [0.0, 0.0, 0.0]}
     axis: [0, 0, 1]
     limit: {lower_deg: -90.0, upper_deg: 90.0, effort: 0.922, velocity: 3.0}
     initial_position_deg: 0.0

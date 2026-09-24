@@ -47,8 +47,17 @@ pivot bushings and a thrust washer. The 25T spline is deliberately NOT
 printed - 1.9 extrusions per tooth - so the adapter bolts to the metal
 horn each servo ships with.
 
-Still missing: a derived screw schedule, and an optional real thrust
-bearing. Nothing has been printed.
+Every part now prints WITHOUT SUPPORT, enforced by a test, and
+`make cad` emits a generated PRINTING.md with orientations, quantities
+and a fastener count derived from the holes.
+
+Enforcing printability changed the ROBOT: the pan servo is 42.9 mm tall
+and the base was 30 mm, so base_link is now 45 mm and shoulder_pan's
+origin moved with it. The simulation never noticed, because a URDF box
+does not have to hold anything.
+
+Still missing: an optional real thrust bearing. Nothing has been
+printed.
 
 The decision now has its number: direct drive lifts 154 g at the
 shoulder, a linkage lifts 99 g, and the linkage costs 96 g more PLA.

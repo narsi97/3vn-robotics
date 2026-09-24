@@ -55,6 +55,7 @@ from build123d import (
     insert,
 )
 
+from threevn_cad import fits
 from threevn_cad import profile as prof
 
 
@@ -134,8 +135,7 @@ def shoulder_bracket(cfg, mechanism='direct'):
                 with Locations(Plane.XY.offset(height)):
                     with Locations((offset, 0)):
                         Cylinder(
-                            radius=(fab['m3_hole_mm']
-                                    + fab['hole_clearance_mm']) / 2.0,
+                            radius=fits.screw_bore_radius(cfg),
                             height=height * 3,
                             align=(Align.CENTER, Align.CENTER, Align.CENTER),
                             mode=Mode.SUBTRACT)
@@ -146,8 +146,7 @@ def shoulder_bracket(cfg, mechanism='direct'):
             with Locations(Plane.YZ.offset(depth)):
                 with Locations((0, height / 2.0)):
                     Cylinder(
-                        radius=(fab['m3_hole_mm']
-                                + fab['hole_clearance_mm']) / 2.0,
+                        radius=fits.screw_bore_radius(cfg),
                         height=depth * 3,
                         align=(Align.CENTER, Align.CENTER, Align.CENTER),
                         mode=Mode.SUBTRACT)
@@ -157,8 +156,7 @@ def shoulder_bracket(cfg, mechanism='direct'):
             with Locations(Plane.YZ.offset(depth)):
                 with Locations((depth * 0.30, height / 2.0)):
                     Cylinder(
-                        radius=(fab['m3_hole_mm']
-                                + fab['hole_clearance_mm']) / 2.0,
+                        radius=fits.screw_bore_radius(cfg),
                         height=depth * 3,
                         align=(Align.CENTER, Align.CENTER, Align.CENTER),
                         mode=Mode.SUBTRACT)
@@ -202,7 +200,9 @@ def _beam(cfg, link_name, mechanism, distal_servo=None):
             f'a rectangular beam and would silently ignore a radius')
 
     thickness, width, length = link['x'], link['y'], link['z']
-    bore = (fab['m3_hole_mm'] + fab['hole_clearance_mm']) / 2.0
+    # BUSHED. Sized to the bushing, not the screw - see fits.py for the
+    # 2.4 mm interference that taught this.
+    bore = fits.pivot_bore_radius(cfg, bushed=True)
 
     with BuildPart() as part:
         Box(thickness, width, length,
@@ -267,10 +267,16 @@ def base_plate(cfg, mechanism='direct'):
     bottom, which is the entire point of a linkage elsewhere. So the pan
     servo sits here either way.
 
-    The raised boss around the shaft is the bearing seat. Running the
-    turret directly on a servo horn puts the arm's whole overturning
-    moment through the servo's output gear, which is how a hobby servo
-    develops slop after an afternoon.
+    ORDER OF OPERATIONS IS LOAD BEARING HERE. The servo pocket is cut
+    LAST, after every additive feature, so nothing can fill it back in.
+    The bearing column was originally added afterwards and did exactly
+    that - the part gained 66 g and quietly lost the cavity the servo
+    goes in, while still passing every geometric check.
+
+    The column itself is a TUBE around the servo, not a post through it:
+    the arm's overturning moment is carried by the ring, and the servo
+    occupies the middle. A solid column would need the space the servo
+    needs.
     """
     fab = prof.fabrication(cfg)
     base = prof.link_mm(cfg, 'base_link')
@@ -287,43 +293,65 @@ def base_plate(cfg, mechanism='direct'):
 
         # HOLLOW. A solid block this size prints at 343 g of PLA - more
         # than four times the entire moving arm - for stiffness a
-        # bench-mounted base does not need. A shell with a floor is
-        # stiff enough and prints in a fraction of the time.
+        # bench-mounted base does not need.
         with Locations((0, 0, wall)):
             Box(base['x'] - 2 * wall, base['y'] - 2 * wall,
                 base['z'] - wall,
                 align=(Align.CENTER, Align.CENTER, Align.MIN),
                 mode=Mode.SUBTRACT)
 
-        # The pan servo lies on its side, shaft up, in a pocket that
-        # opens downward so the horn reaches the turret above.
-        with Locations((0, 0, wall)):
-            insert(_servo_pocket(servo, fab), mode=Mode.SUBTRACT)
+        # A tube up to the top, carrying the bearing seat. Without it
+        # the seat is a disc spanning the hollow on a 1.2 mm rim, with
+        # the whole arm's moment through it - which the printability
+        # check found as 301 mm2 of unsupported ceiling. A face needing
+        # support is usually a face with nothing under it.
+        Cylinder(radius=fits.bearing_seat_outer_radius(cfg),
+                 height=base['z'],
+                 align=(Align.CENTER, Align.CENTER, Align.MIN))
 
-        # Bearing seat: an annular boss the turret sits on, concentric
-        # with the shaft.
-        seat = prof.link_mm(cfg, 'shoulder_link')
-        outer = seat['radius'] + 2 * wall
+        # The seat proper, standing above the top face.
         with Locations((0, 0, base['z'])):
-            Cylinder(radius=outer, height=wall * 2,
+            Cylinder(radius=fits.bearing_seat_outer_radius(cfg),
+                     height=wall * 2,
                      align=(Align.CENTER, Align.CENTER, Align.MIN))
-        with Locations((0, 0, base['z'])):
-            Cylinder(radius=seat['radius'] + fab['hole_clearance_mm'],
-                     height=wall * 4,
+
+        # Bore the tube out so it is a ring rather than a post, and the
+        # servo has somewhere to be.
+        #
+        # FROM THE FLOOR UP, not through everything. Cutting the full
+        # height removed the base's own floor and left an 836 mm2
+        # downward ledge at the floor line - which the printability
+        # check flagged, and which was really the floor having a hole
+        # punched in it.
+        #
+        # Wide enough for the servo's DIAGONAL: the body is 41.3 x 20.3,
+        # so its corners sweep a 23.0 mm radius and a bore sized to the
+        # seat's 22.35 mm would foul them.
+        servo_diagonal = math.hypot(
+            servo['length_mm'] + 2 * fab['servo_pocket_clearance_mm'],
+            servo['width_mm'] + 2 * fab['servo_pocket_clearance_mm']) / 2.0
+        with Locations((0, 0, wall)):
+            Cylinder(radius=max(fits.bearing_seat_inner_radius(cfg),
+                                servo_diagonal),
+                     height=base['z'] * 2,
                      align=(Align.CENTER, Align.CENTER, Align.MIN),
                      mode=Mode.SUBTRACT)
 
-        # Bolt-down holes at the corners, so the arm can be fixed to a
-        # bench. An arm that can slide is an arm that will.
+        # Bolt-down holes at the corners: an arm that can slide is an
+        # arm that will.
         inset = min(base['x'], base['y']) * 0.5 - fab['m3_head_mm']
         for sx in (-1, 1):
             for sy in (-1, 1):
                 with Locations((sx * inset, sy * inset, 0)):
-                    Cylinder(radius=(fab['m3_hole_mm']
-                                     + fab['hole_clearance_mm']) / 2.0,
+                    Cylinder(radius=fits.screw_bore_radius(cfg),
                              height=base['z'] * 3,
                              align=(Align.CENTER, Align.CENTER, Align.CENTER),
                              mode=Mode.SUBTRACT)
+
+        # THE SERVO POCKET, LAST. Whatever else was added, the servo
+        # still fits.
+        with Locations((0, 0, wall)):
+            insert(_servo_pocket(servo, fab), mode=Mode.SUBTRACT)
 
     return part.part
 
@@ -363,8 +391,10 @@ def shoulder_turret(cfg, mechanism='direct'):
             with Locations((0, offset, wall)):
                 insert(_servo_pocket(servo, fab), mode=Mode.SUBTRACT)
 
-        # The bore that drops over the base's bearing seat.
-        Cylinder(radius=turret['radius'] + fab['hole_clearance_mm'],
+        # The bore that drops over the base's bearing seat. Derived
+        # from the SEAT, not from the turret's nominal radius - that
+        # gave a 4.1 mm interference.
+        Cylinder(radius=fits.turret_bore_radius(cfg),
                  height=wall * 3,
                  align=(Align.CENTER, Align.CENTER, Align.MIN),
                  mode=Mode.SUBTRACT)
@@ -403,8 +433,7 @@ def wrist_bracket(cfg, mechanism='direct'):
         # Pivot bore to the forearm.
         with Locations(Plane.XZ.offset(-radius)):
             with Locations((0, wall / 2.0)):
-                Cylinder(radius=(fab['m3_hole_mm']
-                                 + fab['hole_clearance_mm']) / 2.0,
+                Cylinder(radius=fits.screw_bore_radius(cfg),
                          height=radius * 3,
                          align=(Align.CENTER, Align.CENTER, Align.CENTER),
                          mode=Mode.SUBTRACT)
@@ -552,8 +581,7 @@ def horn_adapter(cfg, mechanism='direct', servo_name='mg996r'):
             angle = math.pi * index + math.pi / 4.0
             with Locations((driven * math.cos(angle),
                             driven * math.sin(angle), 0)):
-                Cylinder(radius=(fab['m3_hole_mm']
-                                 + fab['hole_clearance_mm']) / 2.0,
+                Cylinder(radius=fits.screw_bore_radius(cfg),
                          height=thickness * 3,
                          align=(Align.CENTER, Align.CENTER, Align.CENTER),
                          mode=Mode.SUBTRACT)
@@ -589,7 +617,9 @@ def push_rod(cfg, mechanism='direct'):
     wall = fab['min_wall_mm']
 
     length = upper['z']            # the parallelogram side
-    bore = (fab['m3_hole_mm'] + fab['hole_clearance_mm']) / 2.0
+    # The rod ends are BUSHED like every other pivot, so they take
+    # the bushing rather than the screw.
+    bore = fits.pivot_bore_radius(cfg, bushed=True)
     width = bore * 2 + 2 * wall
     thickness = max(wall * 2, 4.0)
 
@@ -622,20 +652,16 @@ def pivot_bushing(cfg, mechanism='direct'):
     fab = prof.fabrication(cfg)
     wall = fab['min_wall_mm']
 
-    bore = fab['m3_hole_mm'] + fab['hole_clearance_mm']
-    # NO clearance on the outside - this one is pressed in.
-    outer = fab['m3_hole_mm'] + fab['hole_clearance_mm'] + 2 * wall
-
     with BuildPart() as part:
-        Cylinder(radius=outer / 2.0, height=wall * 4,
+        Cylinder(radius=fits.bushing_outer_radius(cfg), height=wall * 4,
                  align=(Align.CENTER, Align.CENTER, Align.MIN))
-        Cylinder(radius=bore / 2.0, height=wall * 12,
+        Cylinder(radius=fits.bushing_inner_radius(cfg), height=wall * 12,
                  align=(Align.CENTER, Align.CENTER, Align.CENTER),
                  mode=Mode.SUBTRACT)
         # A flange, so it cannot push all the way through the bore.
-        Cylinder(radius=outer / 2.0 + wall, height=wall,
+        Cylinder(radius=fits.bushing_flange_radius(cfg), height=wall,
                  align=(Align.CENTER, Align.CENTER, Align.MIN))
-        Cylinder(radius=bore / 2.0, height=wall * 4,
+        Cylinder(radius=fits.bushing_inner_radius(cfg), height=wall * 4,
                  align=(Align.CENTER, Align.CENTER, Align.MIN),
                  mode=Mode.SUBTRACT)
 
@@ -661,13 +687,10 @@ def thrust_washer(cfg, mechanism='direct'):
     if turret['type'] != 'cylinder':
         raise ValueError('shoulder_link is expected to be a cylinder')
 
-    outer = turret['radius'] + 2 * wall
-    inner = turret['radius'] + fab['hole_clearance_mm']
-
     with BuildPart() as part:
-        Cylinder(radius=outer, height=wall,
+        Cylinder(radius=fits.washer_outer_radius(cfg), height=wall,
                  align=(Align.CENTER, Align.CENTER, Align.MIN))
-        Cylinder(radius=inner, height=wall * 3,
+        Cylinder(radius=fits.washer_bore_radius(cfg), height=wall * 3,
                  align=(Align.CENTER, Align.CENTER, Align.CENTER),
                  mode=Mode.SUBTRACT)
 

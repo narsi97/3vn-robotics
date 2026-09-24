@@ -236,19 +236,90 @@ linkage in the same way a servo pocket is direct drive, so the registry
 is mechanism-aware rather than letting a part raise for a reason that is
 not an error.
 
+## Every part prints without support
+
+`max_overhang_deg` sat in the profile unused while the CAD was written,
+which made it a number describing an intention rather than a constraint.
+Enforcing it changed the design twice.
+
+The checker was **wrong twice before it was right**, and both mistakes
+produced reassuring output:
+
+1. The comparison was inverted, so it skipped exactly the steep
+   downward faces that *are* overhangs — and reported **zero**
+   unsupported area for every part in the design.
+2. It measured the bridge across a cavity's **length** rather than its
+   width, flagging both arm beams. A slicer bridges the narrow
+   direction; a 107 mm cavity that spans 15 mm is trivial.
+
+A printability check that says "all clear" while doing nothing is worse
+than no check, which is why the corrected version has its own tests for
+a horizontal ceiling, a vertical wall and the bridge direction.
+
+With it working, two real design faults surfaced:
+
+- **The bearing seat was a disc over a cavity**, carried on a 1.2 mm
+  rim, with the whole arm's overturning moment through it. It now has a
+  tube under it. *A face that needs support is usually a face with
+  nothing under it.*
+- **The central bore punched through the base's own floor**, leaving an
+  836 mm² ledge. It now stops at the floor — and is widened to clear the
+  servo's diagonal, since a 41 × 20 mm body sweeps a 23 mm radius.
+
+**0 of 13 parts need support**, and a test holds it there.
+
+## The CAD changed the robot
+
+The pan servo stands in the base with its shaft up. An MG996R is
+**42.9 mm** tall. The base was **30 mm**.
+
+Counting wall thickness and pocket clearance, it was short by **14.4 mm**
+— the base could not contain the part it exists to hold. The simulation
+never noticed, because a URDF box does not have to hold anything.
+
+`base_link` is now 45 mm, and `shoulder_pan_joint`'s origin moved with
+it. Three kinematics tests that carried hand-computed heights were
+updated: the tool now sits at 0.300 m instead of 0.285 m at the home
+pose. They stay hand-computed, because an independent cross-check is
+worth more than one that re-derives the same number.
+
+**This is the first time generating the CAD changed the robot rather
+than describing it** — and it is the clearest argument for doing the CAD
+at all.
+
+## Printing
+
+`make cad` writes `PRINTING.md` beside the parts, generated for the same
+reason the parts are: a guide written by hand goes stale the first time a
+part changes thickness, silently, because nothing compares the two.
+
+It carries the slicer settings from the profile, the per-part
+orientation, the **quantities** (2 fingers, 4 bushings — a part file says
+nothing about how many are needed), and the fastener count.
+
+The fastener count is derived from the holes, and is deliberately **not**
+a shopping list. A hole through a hollow part appears twice, two coaxial
+holes in two parts are one screw, hole depth is not screw length, and
+nobody has decided between nuts, heat-set inserts and self-tapping
+screws. A confident schedule from half the information would be worse
+than saying "buy an M3 assortment".
+
 ## What is still not designed
 
-**Fasteners are bought, and not yet counted.** The design has the holes;
-nobody has derived a screw schedule from them, and guessing one would be
-a BOM line with no evidence behind it.
+**Nothing has been printed.** These parts pass geometric, fit and
+printability checks, which is a different claim from parts that fit
+together.
 
-A **real thrust bearing** for the pan joint is optional and not in the
-BOM. The washer works; a bearing works better.
+Two things a geometric check cannot verify, and both are cheap to test
+first: the **press fit** of a bushing and the **clearance** of the
+thrust washer. Print one of each before committing to a full set.
 
-**Nothing has been printed.** These are solids that pass geometric
-checks, which is a different claim from parts that fit together. The
-first print will find things no test here can — and the horn adapter,
-resting on estimated dimensions, is where it will start.
+The **horn adapter** rests on `horn_provenance: estimated` dimensions
+and is where the first print will find trouble. Measure the horn that
+arrives.
+
+An optional real **thrust bearing** for the pan joint is still not in
+the BOM. The washer works; a bearing works better.
 
 ## The toolchain costs 772 MB
 

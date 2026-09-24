@@ -26,9 +26,9 @@ supplier. Buying servos in multi-packs moves the arm figure toward $20.
 |---|---|---|---|---|
 | MG996R metal-gear servo | 3 | $3–6 | $9–18 | base, shoulder, elbow |
 | SG90 / MG90S micro servo | 1 | $2–3 | $2–3 | wrist or gripper |
-| PLA filament | 165 g direct / 265 g linkage | $20/kg | $3–5 | **measured from the generated geometry**, not projected. Includes the assembly parts. The linkage exceeds the old 250 g estimate; see docs/cad.md |
+| PLA filament | **184 g** direct / **284 g** linkage | $20/kg | $4–6 | **measured from the generated geometry**, including correct quantities (2 fingers, 4 bushings). The linkage exceeds the old 250 g estimate; see docs/cad.md |
 | Servo horns | — | — | $0 | **Supplied with the servos.** The 25T spline is not printable (0.74 mm tooth pitch, 1.9 extrusions per tooth), so the printed adapter bolts to the metal horn |
-| M3 screws, nuts, washers | not yet counted | — | ~$5 | The design has the holes; no screw schedule has been derived from them, and guessing one would be a BOM line with no evidence |
+| M3 assortment | see PRINTING.md | — | ~$5 | The holes are now **counted from the geometry** (11 M3 clearance, 12 bushed pivots, 6 horn screws for the direct arm). That is a face count, not a shopping list — a through-hole appears twice and two coaxial holes are one screw — so buy an assortment |
 | M3 hardware, bearings, zip ties | — | — | ~$5 | |
 | | | | **~$21–31** | |
 

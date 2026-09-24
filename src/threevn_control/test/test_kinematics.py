@@ -120,14 +120,14 @@ def test_tool0_at_home_matches_hand_arithmetic(urdf):
     """
     At the reference configuration the arm is straight up.
 
-    0.030 (shoulder_pan origin) + 0.020 (shoulder_lift) + 0.110 (upper
-    arm) + 0.095 (forearm) + 0.030 (tool0) = 0.285 m, which is what a
+    0.045 (shoulder_pan origin) + 0.020 (shoulder_lift) + 0.110 (upper
+    arm) + 0.095 (forearm) + 0.030 (tool0) = 0.300 m, which is what a
     running robot_state_publisher reported in Phase 1.
     """
     x, y, z = tool_position(urdf, {})
     assert x == pytest.approx(0.0, abs=1e-9)
     assert y == pytest.approx(0.0, abs=1e-9)
-    assert z == pytest.approx(0.285, abs=1e-9)
+    assert z == pytest.approx(0.300, abs=1e-9)
 
 
 def test_tool0_with_shoulder_lift_at_90_degrees(urdf):
@@ -135,14 +135,14 @@ def test_tool0_with_shoulder_lift_at_90_degrees(urdf):
     Lifting the shoulder 90 degrees swings the arm to horizontal.
 
     The chain beyond shoulder_lift (0.110 + 0.095 + 0.030 = 0.235) rotates
-    from +Z to +X, leaving 0.030 + 0.020 = 0.050 of height below the
+    from +Z to +X, leaving 0.045 + 0.020 = 0.065 of height below the
     joint. Verified against TF in Phase 1 as [0.235, 0.000, 0.050].
     """
     x, y, z = tool_position(
         urdf, {'shoulder_lift_joint': math.pi / 2})
     assert x == pytest.approx(0.235, abs=1e-9)
     assert y == pytest.approx(0.0, abs=1e-9)
-    assert z == pytest.approx(0.050, abs=1e-9)
+    assert z == pytest.approx(0.065, abs=1e-9)
 
 
 def test_shoulder_pan_rotates_the_whole_arm_about_z(urdf):
@@ -158,7 +158,7 @@ def test_shoulder_pan_rotates_the_whole_arm_about_z(urdf):
     })
     assert x == pytest.approx(0.0, abs=1e-9)
     assert y == pytest.approx(0.235, abs=1e-9)
-    assert z == pytest.approx(0.050, abs=1e-9)
+    assert z == pytest.approx(0.065, abs=1e-9)
 
 
 def test_reach_is_bounded_by_the_link_lengths(config, urdf):
@@ -170,7 +170,7 @@ def test_reach_is_bounded_by_the_link_lengths(config, urdf):
     every pose.
     """
     links = config['links']
-    max_reach = (0.030 + 0.020
+    max_reach = (0.045 + 0.020
                  + links['upper_arm_link']['geometry']['z']
                  + links['forearm_link']['geometry']['z']
                  + links['wrist_link']['geometry']['length']

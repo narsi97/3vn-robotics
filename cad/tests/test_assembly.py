@@ -160,8 +160,12 @@ def test_the_push_rod_pivots_are_a_link_length_apart(cfg):
     from build123d import GeomType
 
     expected = prof.link_mm(cfg, 'upper_arm_link')['z']
-    fab = prof.fabrication(cfg)
-    bore_radius = (fab['m3_hole_mm'] + fab['hole_clearance_mm']) / 2.0
+    from threevn_cad import fits
+
+    # The rod ends are BUSHED, like every other pivot. Computing the
+    # expected radius here from the screw size instead of asking fits.py
+    # is the same mistake the parts made.
+    bore_radius = fits.pivot_bore_radius(cfg, bushed=True)
 
     rod = parts_mod.push_rod(cfg, mechanism='linkage')
     # ONLY the bores. The slot's outer end caps are cylindrical too, and
