@@ -1,25 +1,28 @@
 <?xml version="1.0"?>
 <?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
 <package format="3">
-  <name>threevn_ml</name>
+  <name>threevn_mlops</name>
   <version>0.13.0</version>
   <description>
-    Learning the target's position, and checking whether it was worth it.
+    Getting a model onto a robot, and getting it off again.
 
-    The task already has a closed-form solution: Phase 12 deprojects a
-    colour blob and lands within 30 mm, measured. This package exists to
-    answer whether a model fitted to data does better, and to make the
-    answer falsifiable - same test set, same metric, baseline reported
-    alongside every model rather than left implied.
+    A model is not a file. It is a file, the data that produced it, the
+    metrics that justify it, and a contract with the code that will run
+    it. This package stores all four together, refuses to promote a
+    model that fails any of them, and can put the previous one back in
+    one command.
 
-    ARCHITECTURAL RULE: never depends on Gazebo. It reads a dataset
-    directory, which a simulated robot and a real one both produce.
+    ARCHITECTURAL RULE: never depends on Gazebo. What it serves runs on
+    the robot.
   </description>
   <maintainer email="61094479+narsi97@users.noreply.github.com">3VN Systems</maintainer>
   <license>Apache-2.0</license>
 
-  <exec_depend>threevn_data</exec_depend>
+  <exec_depend>threevn_ml</exec_depend>
   <exec_depend>threevn_perception</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>python3-numpy</exec_depend>
 
   <test_depend>ament_copyright</test_depend>

@@ -216,6 +216,25 @@ train: build
 	$(RUN) "$(GITENV) ros2 run threevn_ml train"
 
 
+# The model registry. Versions are content-addressed and immutable;
+# promotion runs the gates and rollback is the same operation backwards.
+registry-register: build
+	$(RUN) "ros2 run threevn_mlops registry register"
+
+registry-promote: build
+	$(RUN) "ros2 run threevn_mlops registry promote $(VERSION)"
+
+registry-status: build
+	$(RUN) "ros2 run threevn_mlops registry status"
+
+registry-rollback: build
+	$(RUN) "ros2 run threevn_mlops registry rollback"
+
+serve: build
+	@echo '  needs a running: make mm-sim WORLD=bench_with_target'
+	$(RUN_TTY) "ros2 run threevn_mlops serve"
+
+
 robot: build stop
 	@$(RUN) "test -e $(ESP32_PORT)" 2>/dev/null || { \
 	  echo ""; \

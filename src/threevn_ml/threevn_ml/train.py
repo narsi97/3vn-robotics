@@ -205,10 +205,32 @@ def main(argv=None):
     artifact = {
         'schema_version': 1,
         'model': ridge.to_dict(),
+        # WHICH metrics entry the stored model corresponds to, named
+        # rather than inferred. The registry first guessed it by taking
+        # the alphabetically last key, which picked 'ridge geometry' over
+        # 'ridge + shape' because '+' sorts before 'g' - so it reported
+        # 46.5 mm for a model that scores 10.5 mm. Sorting is not a proxy
+        # for which model was saved.
+        'selected': 'ridge + shape',
         'ablation': {label: fitted[label][1] for label in fitted},
         'baseline': baseline.to_dict(),
         'features': names,
         'metrics': results,
+        # The training feature distribution, so serving can tell whether
+        # what it is seeing resembles what the model was fitted on. A
+        # model cannot report that it is being asked the wrong question
+        # unless something recorded what the right one looked like.
+        'feature_stats': {
+            'names': names,
+            'mean': features[np.ix_(parts['train'],
+                                    picked)].mean(axis=0).tolist(),
+            'std': features[np.ix_(parts['train'],
+                                   picked)].std(axis=0).tolist(),
+            'min': features[np.ix_(parts['train'],
+                                   picked)].min(axis=0).tolist(),
+            'max': features[np.ix_(parts['train'],
+                                   picked)].max(axis=0).tolist(),
+        },
         'split': {'kind': 'episode', 'seed': args.seed,
                   **{k: int(len(v)) for k, v in parts.items()}},
         # The dataset is identified by its manifest, not by its path. A

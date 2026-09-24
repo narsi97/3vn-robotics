@@ -21,7 +21,7 @@ One system that evolves. Not twelve disconnected tutorials.
 | 12 | Camera + perception | **done** (simulation) |
 | 13 | Data pipeline | **done** (simulation) |
 | 14 | Machine learning | **done** (simulation) |
-| 15 | MLOps | next |
+| 15 | MLOps | **done** (simulation) |
 
 ## Packages that do not exist yet
 
@@ -34,7 +34,6 @@ phase that first needs it.
 | `threevn_interfaces` | 2 | custom msgs/srvs/actions — none needed yet; `control_msgs` and `sensor_msgs` cover Phase 1 |
 | `threevn_telemetry` | 6 | OpenTelemetry emission |
 | `threevn_navigation` | 11 | Nav2 integration - still outstanding; the composed robot drives and manipulates but does not yet plan or map |
-| `threevn_mlops` | 15 | registry, deployment, monitoring |
 
 ## Mechanical design: not started
 

@@ -162,7 +162,7 @@ Full audit: [`THIRD_PARTY.md`](THIRD_PARTY.md) ·
 
 ## Status
 
-**Phases 0–14 complete** (Phase 5 in software; no arm has been built yet).
+**All 15 phases complete** (in simulation) (Phase 5 in software; no arm has been built yet).
 
 - The robot description expands for all three hardware targets.
 - The arm spawns in Gazebo Harmonic, with all three controllers active
@@ -273,8 +273,17 @@ make dataset && make dataset-describe
 make train
 ```
 
-Phase 15 is MLOps. Nav2 is still outstanding from Phase 11 — see
-[docs/roadmap.md](docs/roadmap.md).
+- A model registry whose promotion gates refuse a model that loses to
+  the geometry or regresses against what is running, with one-command
+  rollback and drift monitoring.
+
+```bash
+make registry-status && make serve
+```
+
+**Still outstanding**: Nav2 from Phase 11, and everything physical —
+there is no printable CAD and no robot has been built. See
+[docs/roadmap.md](docs/roadmap.md) and [docs/hardware.md](docs/hardware.md).
 
 See [`docs/roadmap.md`](docs/roadmap.md) for the 15-phase plan and
 [`docs/risks.md`](docs/risks.md) for what is known to be fragile.

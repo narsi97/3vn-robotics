@@ -1,6 +1,6 @@
 from setuptools import find_packages, setup
 
-package_name = 'threevn_perception'
+package_name = 'threevn_mlops'
 
 setup(
     name=package_name,
@@ -18,11 +18,12 @@ setup(
     zip_safe=True,
     maintainer='3VN Systems',
     maintainer_email='61094479+narsi97@users.noreply.github.com',
-    description='Camera detection for the 3VN robot.',
+    description='Model registry, promotion gates and serving for the 3VN robot.',
     license='Apache-2.0',
     entry_points={
         'console_scripts': [
-            'find_target = threevn_perception.find_target:main',
+            'registry = threevn_mlops.cli:main',
+            'serve = threevn_mlops.serve:main',
         ],
     },
 )
