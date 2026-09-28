@@ -1,0 +1,162 @@
+# RViz view for the whole mobile manipulator.
+#
+# view_arm.rviz exists to inspect a description: it is fixed to
+# base_footprint, so the robot sits still and you look at its joints.
+# That is the wrong frame the moment the robot can drive -- the world
+# would slide underneath a stationary robot and odometry would be
+# invisible, which is the one thing worth watching on a mobile base.
+#
+# So this config is fixed to `odom` and the robot moves across the grid.
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+    Property Tree Widget:
+      Expanded:
+        - /RobotModel1
+        - /Odometry1
+      Splitter Ratio: 0.5
+    Tree Height: 500
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Displays:
+    # 1 m cells, not the arm view's 10 cm: this robot travels metres.
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+      Cell Size: 1
+      Plane Cell Count: 12
+      Color: 80; 80; 90
+      Line Style:
+        Value: Lines
+      Reference Frame: <Fixed Frame>
+    - Class: rviz_default_plugins/RobotModel
+      Name: RobotModel
+      Enabled: true
+      # Subscribe to the topic, not a file: robot_state_publisher
+      # publishes the same description the tests and Gazebo consume, so
+      # what you see here is what actually runs.
+      Description Source: Topic
+      Description Topic:
+        Value: /robot_description
+        Depth: 5
+        Durability Policy: Transient Local
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+      Alpha: 1
+      Visual Enabled: true
+      Collision Enabled: false
+      Mass Properties:
+        Inertia: false
+        Mass: false
+      TF Prefix: ""
+      Update Interval: 0
+    # The trail the wheels think they left. Comparing this against where
+    # the robot actually is in Gazebo is the whole Phase 10/11 lesson:
+    # wheel odometry drifts, and on a skid-steer base it drifts most
+    # while turning.
+    - Class: rviz_default_plugins/Odometry
+      Name: Odometry
+      Enabled: true
+      Topic:
+        Value: /base_controller/odom
+        Depth: 100
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+      Keep: 300
+      Position Tolerance: 0.05
+      Angle Tolerance: 0.05
+      Shape:
+        Value: Arrow
+        Alpha: 0.7
+        Color: 120; 200; 255
+        Shaft Length: 0.12
+        Shaft Diameter: 0.02
+        Head Length: 0.06
+        Head Diameter: 0.05
+      Covariance:
+        Value: false
+    # What the robot sees. The perception phase deprojects exactly this
+    # image, so a target that looks off-centre here is off-centre there.
+    - Class: rviz_default_plugins/Image
+      Name: Camera
+      Enabled: true
+      Topic:
+        Value: /camera/image_raw
+        Depth: 5
+        Durability Policy: Volatile
+        History Policy: Keep Last
+        # Best Effort is compatible with the bridge's Reliable publisher
+        # and is the right policy for a stream: a dropped frame is not
+        # worth stalling on.
+        Reliability Policy: Best Effort
+      Max Value: 1
+      Min Value: 0
+      Normalize Range: true
+    # Axes only, no names. This robot has ~25 frames once the arm is
+    # composed on; the labels overlap into an unreadable smear.
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: false
+      Marker Scale: 0.2
+      Show Names: false
+      Show Axes: true
+      Show Arrows: false
+      Update Interval: 0
+      Frame Timeout: 15
+  Enabled: true
+  Global Options:
+    Background Color: 38; 40; 46
+    # odom, published by diff_drive_controller. Not 'map': there is no
+    # map until Nav2 arrives, and naming one that does not exist makes
+    # RViz render nothing at all.
+    Fixed Frame: odom
+    Frame Rate: 30
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+  Views:
+    # A chase camera, not an orbit. Orbiting <Fixed Frame> means orbiting
+    # `odom`, which is nailed to where the robot started -- drive away
+    # and the robot simply leaves the screen. Following base_footprint
+    # keeps the robot centred while the GRID slides past, so motion is
+    # still visible. Found by driving it, not by reading it.
+    Current:
+      Class: rviz_default_plugins/ThirdPersonFollower
+      Name: Current View
+      Distance: 3.0
+      Focal Point:
+        X: 0
+        Y: 0
+        Z: 0
+      Pitch: 0.45
+      Yaw: 3.0
+      Near Clip Distance: 0.01
+      Target Frame: base_footprint
+    # Kept because it is the right view for inspecting the odometry
+    # TRAIL as a whole: fixed to the world, the drift is the picture.
+    Saved:
+      - Class: rviz_default_plugins/Orbit
+        Name: World (see the odom trail)
+        Distance: 6.0
+        Focal Point:
+          X: 0
+          Y: 0
+          Z: 0
+        Pitch: 0.8
+        Yaw: 0.9
+        Near Clip Distance: 0.01
+        Target Frame: odom
+Window Geometry:
+  Displays:
+    collapsed: false
+  Views:
+    collapsed: true
+  Camera:
+    collapsed: false
+  Height: 900
+  Width: 1600
+  QMainWindow State: ""

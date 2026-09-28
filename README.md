@@ -24,11 +24,17 @@ cd 3vn-robotics
 make doctor      # checks Docker, RAM, disk, ports -- with exact fixes
 make setup       # builds the image and the ROS workspace
 make test        # the description test suite (target: under 60s)
-make view        # RViz + joint sliders -> http://localhost:8106/vnc.html
+make play        # the whole robot + RViz -> http://localhost:8106/vnc.html
+make drive       # SECOND terminal: drive it with w/a/s/d
 ```
 
 Everything runs in a container. You need **Docker and nothing else** — no
 ROS, no colcon, no Gazebo, no Python on your machine.
+
+No hardware? **Fourteen of the fifteen phases need none.** See
+[`docs/learning-path.md`](docs/learning-path.md) for the route through
+them and what the simulation will not teach you. If the browser view
+lags, [`docs/viewing.md`](docs/viewing.md) has two faster ways to watch.
 
 > Docker Desktop needs **≥ 6 GB RAM** (Settings → Resources). Below that
 > Gazebo gets OOM-killed in a way that looks like a Gazebo bug.
