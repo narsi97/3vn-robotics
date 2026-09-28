@@ -193,3 +193,262 @@ def tool_position(urdf_xml, joint_positions, target='tool0', base='base_link'):
     """Return just the (x, y, z) of `target` in `base`."""
     return tuple(
         forward_kinematics(urdf_xml, joint_positions, target, base)[:3, 3])
+
+
+# -- inverse kinematics ------------------------------------------------
+#
+# Forward kinematics above is general: it walks whatever chain the URDF
+# describes. The inverse is NOT, and cannot be. A closed form exists only
+# for particular structures, so everything below first checks that this
+# robot is the structure it assumes, and refuses if it is not. A closed
+# form quietly applied to an arm it does not fit returns joint angles
+# that are wrong rather than an error, which is the worst outcome
+# available.
+
+
+class Unreachable(ValueError):
+    """Raised when no joint solution puts the tool at the requested pose."""
+
+
+def joint_limits(urdf_xml):
+    """Return joint name -> (lower, upper) in radians, from the URDF."""
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(urdf_xml)
+    limits = {}
+    for joint in root.iter('joint'):
+        limit = joint.find('limit')
+        name = joint.get('name')
+        if limit is None or name is None:
+            continue
+        lower, upper = limit.get('lower'), limit.get('upper')
+        if lower is not None and upper is not None:
+            limits[name] = (float(lower), float(upper))
+    return limits
+
+
+def arm_geometry(urdf_xml, target='grasp_frame', base='base_link'):
+    """
+    Measure the arm this URDF describes, and check the closed form fits it.
+
+    Returns the four driven joint names, the three link lengths and the
+    shoulder height -- all MEASURED from the URDF at its zero
+    configuration rather than copied from the YAML. Copying them would
+    be a second place the numbers live, and the two would eventually
+    disagree; this way changing a link length changes the IK.
+
+    The structure required is a turntable carrying a planar 3R arm:
+
+        joint 1   revolute about Z      (yaw: which way the arm faces)
+        joints 2-4 revolute about Y     (parallel: all move in one plane)
+
+    with every link offset along +Z at zero, i.e. the arm points straight
+    up in its reference configuration. That is what makes the solution
+    below exact. Anything else raises.
+    """
+    parents = (urdf_xml if isinstance(urdf_xml, dict)
+               else parent_map(urdf_xml))
+
+    chain = []
+    node = target
+    while node != base:
+        if node not in parents:
+            raise ValueError(f'{target!r} does not reach {base!r}')
+        chain.append((node, parents[node]))
+        node = parents[node]['parent']
+    chain.reverse()
+
+    driven = [(link, spec) for link, spec in chain
+              if spec['type'] in ('revolute', 'continuous')]
+    if len(driven) != 4:
+        raise Unreachable(
+            f'closed-form IK needs exactly 4 driven joints between '
+            f'{base!r} and {target!r}; this chain has {len(driven)}')
+
+    def axis_is(spec, wanted):
+        axis = np.array(spec['axis'], dtype=float)
+        norm = np.linalg.norm(axis)
+        if not norm:
+            return False
+        return abs(abs(float(np.dot(axis / norm, wanted))) - 1.0) < 1e-6
+
+    if not axis_is(driven[0][1], np.array([0.0, 0.0, 1.0])):
+        raise Unreachable('first joint must turn about Z for this closed form')
+    for link, spec in driven[1:]:
+        if not axis_is(spec, np.array([0.0, 1.0, 0.0])):
+            raise Unreachable(
+                f"{spec['name']!r} must turn about Y for this closed form")
+
+    zero = {}
+    pos = [np.array(tool_position(parents, zero, target=link, base=base))
+           for link, _ in driven]
+    tip = np.array(tool_position(parents, zero, target=target, base=base))
+
+    def offset(a, b):
+        delta = b - a
+        if abs(delta[0]) > 1e-9 or abs(delta[1]) > 1e-9:
+            raise Unreachable(
+                'links must lie along Z at the zero configuration; '
+                f'found offset {np.round(delta, 5).tolist()}')
+        return float(delta[2])
+
+    shoulder = pos[1]
+    if abs(shoulder[0]) > 1e-9 or abs(shoulder[1]) > 1e-9:
+        raise Unreachable('the shoulder must sit on the yaw axis')
+
+    return {
+        'joints': [spec['name'] for _, spec in driven],
+        'shoulder_z': float(shoulder[2]),
+        'a1': offset(pos[1], pos[2]),
+        'a2': offset(pos[2], pos[3]),
+        'a3': offset(pos[3], tip),
+        'limits': (joint_limits(urdf_xml)
+                   if not isinstance(urdf_xml, dict) else {}),
+    }
+
+
+def inverse_kinematics(urdf_xml, position, pitch=math.pi, elbow='down',
+                       target='grasp_frame', base='base_link',
+                       geometry=None, respect_limits=True):
+    """
+    Return joint angles putting `target` at `position` with the given pitch.
+
+    Four joints, four constraints: three of position and one of
+    orientation. `pitch` is the direction the last link points, measured
+    from straight up, so pi means straight DOWN -- a top-down grasp,
+    which is the useful default for picking things off a table.
+
+    `elbow` selects between the two solutions that reach the same point
+    ('up' or 'down'); both are returned by the algebra and only the
+    limits distinguish them, so when one violates a limit the other is
+    tried before giving up.
+
+    Raises Unreachable, with the distance and the arm's actual reach,
+    rather than returning a nearby pose that silently misses.
+    """
+    geom = geometry or arm_geometry(urdf_xml, target=target, base=base)
+    a1, a2, a3 = geom['a1'], geom['a2'], geom['a3']
+    names = geom['joints']
+
+    x, y, z = (float(v) for v in position)
+
+    # 1. Yaw is decoupled: the whole planar arm swings to face the point.
+    yaw = math.atan2(y, x)
+
+    # 2. Work in that plane. r is distance from the yaw axis, h is height
+    #    above the shoulder pivot.
+    r = math.hypot(x, y)
+    h = z - geom['shoulder_z']
+
+    # 3. Subtract the last link, whose direction `pitch` fixes. What is
+    #    left is where the wrist has to be, which is a plain 2R problem.
+    rw = r - a3 * math.sin(pitch)
+    hw = h - a3 * math.cos(pitch)
+
+    span = math.hypot(rw, hw)
+    if span > a1 + a2 + 1e-9 or span < abs(a1 - a2) - 1e-9:
+        raise Unreachable(
+            f'wrist would need to sit {span * 1000:.0f} mm from the shoulder; '
+            f'this arm spans {abs(a1 - a2) * 1000:.0f}-{(a1 + a2) * 1000:.0f} mm '
+            f'(reach to the tool is {(a1 + a2 + a3) * 1000:.0f} mm)')
+
+    cos_elbow = (span * span - a1 * a1 - a2 * a2) / (2.0 * a1 * a2)
+    cos_elbow = max(-1.0, min(1.0, cos_elbow))
+    magnitude = math.acos(cos_elbow)
+
+    orders = [magnitude, -magnitude]
+    if elbow == 'up':
+        orders.reverse()
+
+    failures = []
+    for bend in orders:
+        lift = (math.atan2(rw, hw)
+                - math.atan2(a2 * math.sin(bend), a1 + a2 * math.cos(bend)))
+        wrist = pitch - lift - bend
+        solution = dict(zip(names, (yaw, lift, bend, wrist)))
+        if not respect_limits:
+            return solution
+        outside = _outside_limits(solution, geom['limits'])
+        if not outside:
+            return solution
+        failures.append(outside)
+
+    raise Unreachable(
+        'the point is within reach but every solution violates a joint '
+        'limit: ' + '; '.join(failures))
+
+
+def _outside_limits(solution, limits):
+    """Return a description of the first limit violated, or '' if none."""
+    for name, value in solution.items():
+        bounds = limits.get(name)
+        if bounds is None:
+            continue
+        lower, upper = bounds
+        if not (lower - 1e-6 <= value <= upper + 1e-6):
+            return (f'{name} needs {math.degrees(value):+.1f} deg, '
+                    f'limit [{math.degrees(lower):+.1f}, '
+                    f'{math.degrees(upper):+.1f}]')
+    return ''
+
+
+def reachable(urdf_xml, position, pitch=math.pi, geometry=None, **kwargs):
+    """Return True when `inverse_kinematics` can place the tool there."""
+    try:
+        inverse_kinematics(urdf_xml, position, pitch=pitch,
+                           geometry=geometry, **kwargs)
+        return True
+    except Unreachable:
+        return False
+
+
+#: Approach angles tried when choosing one, steepest first. 180 is
+#: straight down; 60 is a shallow, almost-horizontal reach.
+PITCH_CANDIDATES = tuple(math.radians(d) for d in range(180, 49, -2))
+
+
+def feasible_pitch_range(urdf_xml, position, geometry=None,
+                         candidates=PITCH_CANDIDATES, **kwargs):
+    """
+    Return (lowest, highest) approach pitch that reaches `position`, or None.
+
+    Pitch is the one orientation this arm has to spare, and fixing it in
+    advance throws that away. Measured on the default arm, a cube resting
+    on the ground can be reached across a 54 mm span of radius -- but at
+    any SINGLE pitch the span collapses to about 6 mm. Choosing the pitch
+    to suit the object, rather than the object to suit the pitch, is the
+    difference between a usable workspace and a razor's edge.
+    """
+    found = [p for p in candidates
+             if reachable(urdf_xml, position, pitch=p,
+                          geometry=geometry, **kwargs)]
+    if not found:
+        return None
+    return (min(found), max(found))
+
+
+def choose_pitch(urdf_xml, position, geometry=None, prefer='middle',
+                 candidates=PITCH_CANDIDATES, **kwargs):
+    """
+    Return one approach pitch for `position`, or None if there is none.
+
+    `prefer='middle'` takes the centre of the feasible range, which is
+    the choice that tolerates the most error in where the object
+    actually is -- and the object's position is an estimate, so that
+    margin is the thing being bought. `prefer='steepest'` takes the most
+    top-down instead, for reaching into something.
+    """
+    found = sorted(p for p in candidates
+                   if reachable(urdf_xml, position, pitch=p,
+                                geometry=geometry, **kwargs))
+    if not found:
+        return None
+    if prefer == 'steepest':
+        return found[-1]
+    # The MEDIAN of the feasible angles, not the midpoint of their range.
+    # The feasible set is not always an interval -- the two elbow
+    # branches can leave a gap -- so the midpoint may be a pitch that
+    # does not solve at all. Returning a candidate that was actually
+    # tested cannot have that failure, which this did have: it handed
+    # back 118 degrees from a 102-134 range and the IK then refused it.
+    return found[len(found) // 2]
