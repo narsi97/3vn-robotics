@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Fast DDS with the shared-memory transport turned OFF, UDP only.
+
+  WHY: Fast DDS's SHM transport keeps a lock file per "port" under
+  /dev/shm. When a participant is SIGKILLed -- which is exactly what
+  `make stop` does, and what Ctrl-C on a launch file often ends up doing
+  -- the lock can survive it. Every later participant that hashes to the
+  same port then fails to start with:
+
+      RTPS_TRANSPORT_SHM Error] Failed init_port fastrtps_port7000:
+      open_and_lock_file failed -> Function open_port_internal
+
+  The damage is out of all proportion to the cause. The node does not
+  crash; it comes up unable to discover anything, so `ros2 topic list`
+  returns nothing, a scenario sits in connect() until it times out, and
+  the whole ROS graph looks broken while the simulator is running fine.
+  It reads as "ROS is broken", which sends you looking in the wrong place.
+
+  COST: SHM is faster than UDP for large messages. Everything here is on
+  one host over loopback, and the largest topic is a 640x480 camera image
+  at about 8 Hz -- a few MB/s, which loopback UDP carries without
+  noticing. Reliability and ordering are unchanged; this selects a
+  transport, not a QoS.
+
+  This is a DEVELOPMENT container setting. The robot runtime image does
+  not use it.
+-->
+<dds xmlns="http://www.eprosima.com/XMLSchemas/fastRTPS_Profiles">
+  <profiles>
+    <transport_descriptors>
+      <transport_descriptor>
+        <transport_id>udp_only</transport_id>
+        <type>UDPv4</type>
+      </transport_descriptor>
+    </transport_descriptors>
+
+    <participant profile_name="udp_only_participant" is_default_profile="true">
+      <rtps>
+        <userTransports>
+          <transport_id>udp_only</transport_id>
+        </userTransports>
+        <!-- false, or Fast DDS adds SHM back alongside ours. -->
+        <useBuiltinTransports>false</useBuiltinTransports>
+      </rtps>
+    </participant>
+  </profiles>
+</dds>

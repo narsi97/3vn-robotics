@@ -111,7 +111,16 @@ def generate_launch_description():
         return Node(
             package='controller_manager',
             executable='spawner',
-            arguments=[name, '--controller-manager', '/controller_manager'],
+            # --switch-timeout, because the default 5 s is a WALL-clock
+            # budget for work done inside the controller_manager's
+            # update loop -- and that loop lives in a simulator already
+            # short of CPU. Under any other load the switch misses its
+            # window, one spawner dies, and the robot comes up missing a
+            # controller: no /joint_states, so RViz shows a robot with no
+            # joint positions and every client waits forever for state
+            # that is never published.
+            arguments=[name, '--controller-manager', '/controller_manager',
+                       '--switch-timeout', '30'],
             output='screen',
         )
 

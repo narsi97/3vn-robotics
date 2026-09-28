@@ -138,9 +138,15 @@ ARG UID=10001
 # RViz2 needs a real X server with OpenGL 3.3+. Xvfb + Mesa llvmpipe
 # gives GL 4.5, which is why this works where XQuartz (indirect GLX,
 # capped near 1.4) does not -- see ros2/rviz#929 and ADR-0002.
+# foxglove_bridge is the escape hatch from CPU rendering entirely: it
+# serves the ROS graph over a WebSocket so a NATIVE viewer on the host
+# draws the robot on the host's GPU. No framebuffer crosses the boundary,
+# only messages -- so it is both smoother to look at AND cheaper to run
+# than RViz-over-VNC, which competes with the physics for the same CPU.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-${ROS_DISTRO}-rviz2 \
       ros-${ROS_DISTRO}-joint-state-publisher-gui \
+      ros-${ROS_DISTRO}-foxglove-bridge \
       xvfb x11vnc novnc websockify supervisor fluxbox \
       mesa-utils curl vim less bash-completion \
  && rm -rf /var/lib/apt/lists/* \
@@ -155,10 +161,17 @@ RUN groupadd -g ${UID} dev \
  && chown -R ${UID}:${UID} /ws
 
 COPY docker/supervisord.conf /etc/supervisor/supervisord.conf
+COPY docker/fastdds-udp-only.xml /etc/threevn/fastdds.xml
 USER ${UID}
 WORKDIR /ws
+# THREEVN_SCREEN is the virtual desktop size, read by supervisord.
+# Set here rather than hardcoded in supervisord.conf so compose can
+# lower it without a rebuild: every pixel is encoded, shipped and
+# decoded on every frame, so a smaller desktop is the bluntest fix for
+# a laggy view.
 ENV HOME=/home/dev \
-    DISPLAY=:1
+    DISPLAY=:1 \
+    THREEVN_SCREEN=1600x900
 
 # ------------------------------------------------------------- builder --
 FROM simdeps AS builder

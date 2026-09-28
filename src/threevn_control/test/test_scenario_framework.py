@@ -81,7 +81,7 @@ def test_failing_check_fails_the_scenario(monkeypatch):
 
         def run(self):
             self.step('claim something untrue', lambda: None,
-                      lambda: False, settle=0)
+                      lambda: False, settle=0, timeout=0)
 
     result = S(FakeRobot()).execute()
     assert not result.passed
@@ -120,7 +120,8 @@ def test_scenario_stops_at_the_first_failure(monkeypatch):
         name = 'halt'
 
         def run(self):
-            self.step('fail here', lambda: None, lambda: False, settle=0)
+            self.step('fail here', lambda: None, lambda: False,
+                      settle=0, timeout=0)
             self.step('never runs', lambda: reached.append(1), settle=0)
 
     result = S(FakeRobot()).execute()
@@ -137,7 +138,8 @@ def test_step_raises_scenario_failed_when_called_directly(monkeypatch):
         name = 'raise'
 
         def run(self):
-            self.step('nope', lambda: None, lambda: False, settle=0)
+            self.step('nope', lambda: None, lambda: False,
+                      settle=0, timeout=0)
 
     with pytest.raises(ScenarioFailed):
         S(FakeRobot()).run()

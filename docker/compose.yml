@@ -24,6 +24,18 @@ services:
       # 8083/8085/8087/8100/8102/8104 belong to the other 3VN products.
       - "127.0.0.1:8106:8080"          # noVNC
       - "127.0.0.1:8107:8107"          # dashboard
+      # Raw VNC, for a NATIVE viewer. noVNC decodes the framebuffer in
+      # JavaScript and repaints a canvas; a native client does neither,
+      # which is most of the difference when RViz is already only
+      # managing ~20 fps on llvmpipe. 5906 rather than the default 5900
+      # so enabling macOS Screen Sharing later cannot collide with it.
+      #
+      # 127.0.0.1 is load-bearing: x11vnc runs with -nopw, so anything
+      # that can reach this port has the desktop. Never 0.0.0.0.
+      - "127.0.0.1:5906:5901"          # VNC (native, password)
+      # foxglove_bridge. A native viewer on the host connects here and
+      # renders on the host GPU, so nothing is rasterised in-container.
+      - "127.0.0.1:8765:8765"          # Foxglove WebSocket
     environment:
       ROS_DOMAIN_ID: "42"
       # Jazzy's replacement for the deprecated ROS_LOCALHOST_ONLY. Keeps
@@ -31,7 +43,15 @@ services:
       # network don't silently join each other's graph.
       ROS_AUTOMATIC_DISCOVERY_RANGE: LOCALHOST
       RMW_IMPLEMENTATION: rmw_fastrtps_cpp
+      # Turns OFF the shared-memory transport. See the XML for what
+      # a stale /dev/shm lock does to an otherwise healthy graph.
+      FASTRTPS_DEFAULT_PROFILES_FILE: /etc/threevn/fastdds.xml
       DISPLAY: ":1"
+      # Lower this if the remote view lags: THREEVN_SCREEN=1280x720 make down up
+      THREEVN_SCREEN: "${THREEVN_SCREEN:-1600x900}"
+      # Not a secret: 5906 is bound to 127.0.0.1. It exists only because
+      # native VNC clients refuse a server offering no authentication.
+      THREEVN_VNC_PASSWORD: "${THREEVN_VNC_PASSWORD:-threevn}"
       LIBGL_ALWAYS_SOFTWARE: "1"
       GALLIUM_DRIVER: llvmpipe
     volumes:
