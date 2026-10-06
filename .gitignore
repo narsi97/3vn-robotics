@@ -49,3 +49,6 @@ cad/out/
 # Third-party robot descriptions, fetched by scripts/fetch_so101.sh.
 # Apache-2.0 upstream; not vendored because this repo carries no binary blobs.
 vendor/
+
+# Generated course site (make site). Built on deploy, never committed.
+site/

@@ -44,7 +44,7 @@ RVIZ    ?= 1
 .PHONY: help doctor setup up down shell build test test-sim lint urdf \
         view mock sim robot stop scenario dash acceptance clean nuke test-ros \
         cad cad-test cad-masses play drive vnc foxglove workspace grasp \
-        so101 so101-fetch
+        so101 so101-fetch site site-serve
 
 help:
 	@echo ""
@@ -65,6 +65,7 @@ help:
 	@echo "  make workspace Where the gripper can reach (PITCH=90 for side-on)"
 	@echo "  make grasp     Grasp the cube and prove it (needs WORLD=grasp_bench)"
 	@echo "  make so101     SPIKE: run our stack against TheRobotStudio SO-101"
+	@echo "  make site      Render the docs into a static course site"
 	@echo "  make view      RViz + joint sliders            -> $(NOVNC)"
 	@echo "  make play      WHOLE ROBOT + RViz, watchable   -> $(NOVNC)"
 	@echo "  make drive     Teleop: drive it from the keyboard (2nd terminal)"
@@ -163,6 +164,20 @@ endif
 
 urdf: build
 	$(RUN) "ros2 run xacro xacro $(SHARE)/urdf/$(URDF_ENTRY) params_file:=$(SHARE)/config/$(URDF_PROFILE).yaml target:=$(TARGET)"
+
+# The course site. Rendered in a throwaway python image rather than the
+# dev container, which has no markdown and does not need one.
+site:
+	@docker run --rm -v "$(PWD)":/src -w /src \
+	  -e THREEVN_GIT_COMMIT=$(GIT_COMMIT) python:3.12-alpine sh -lc \
+	  "pip install --quiet --no-cache-dir markdown==3.7 && \
+	   python3 scripts/build_site.py --root /src --out /src/site --clean"
+
+site-serve: site
+	@echo ""
+	@echo "  course site -> http://localhost:8109/"
+	@docker run --rm -p 127.0.0.1:8109:80 \
+	  -v "$(PWD)/site":/usr/share/nginx/html:ro nginx:alpine
 
 # A spike: somebody else's robot, our controllers. See the launch file.
 so101-fetch:
