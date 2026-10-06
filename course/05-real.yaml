@@ -4,8 +4,10 @@ kind: tier
 title: Make it real
 price: "$5"
 summary: >
-  Firmware, a server, and the ability to find out what a robot did when
-  you were not watching.
+  Firmware you can test on a laptop, limits that are actually enforced,
+  a deployment, and the ability to find out what a robot did when you
+  were not watching.
+
 lessons:
   - id: esp32-is-a-driver
     title: The microcontroller is a dumb driver
@@ -21,32 +23,114 @@ lessons:
       ceiling on an ESP32 make it unusable for a loop that needs 50–100 Hz.
 
       So the host runs the control loop and the ESP32 is a servo driver
-      behind a small framed binary protocol. The transport is private to
-      two functions, `read()` and `write()`, which means it can change
-      later without touching anything above it.
+      behind a small framed binary protocol. The division is the familiar
+      one — put the thinking where the resources are, and keep the device
+      at the edge simple enough to reason about.
 
-      The safety logic is compiled and tested natively, on your machine,
-      against a fake transport. The alternative is testing an emergency
-      stop by flashing it onto a powered arm.
+      Note what this buys. The transport is private to two functions,
+      `read()` and `write()`, so USB today and something else tomorrow is
+      a change nothing above the seam notices. You have drawn this
+      boundary before, around a database driver or an HTTP client.
 
-  - id: deploy-and-watch
-    title: Deploying, and finding out what happened
-    objective: Ship the robot image and get telemetry back from it.
+  - id: protocol-on-a-laptop
+    title: A wire protocol you can test on your laptop
+    objective: Test framing, checksums and failure handling with no hardware.
+    commands: |
+      make test
+    checkpoint: >
+      The firmware's logic tests pass natively, including the cases where
+      the transport fails mid-message.
+    doc: firmware.md
+    body: |
+      Serial protocols fail in specific, boring ways: a byte is dropped, a
+      message is truncated, the device stops draining, two messages run
+      together. Every one of those is testable without a device.
+
+      The firmware logic here is compiled and run natively against a fake
+      transport. There is a test named for a device that stops draining,
+      and one for a read that fails partway. They run in the same suite as
+      everything else, in milliseconds.
+
+      The alternative is the reason this matters: testing an emergency
+      stop by flashing it onto a powered arm and hoping. Hardware is the
+      worst available test environment — slow, destructive, and
+      unavailable when you most want to iterate.
+
+  - id: where-safety-lives
+    title: Where safety actually lives
+    objective: Find out that the limits you declared are not enforced.
+    commands: |
+      make scenario NAME=safety_limit
+    checkpoint: >
+      You can state which layer rejects an out-of-range command, and
+      which layers happily pass it along.
+    doc: safety.md
+    body: |
+      The URDF declares a limit on every joint. The controller
+      configuration declares min and max on every command interface. It
+      is natural to assume something enforces them.
+
+      Measured here: commanding a joint to 180 degrees against a 90 degree
+      limit drives it to 180 under the mock backend. Neither the
+      description nor the controller stopped it. Gazebo only *looks* safe
+      because its physics joint has a hard stop — which is a property of
+      the simulator, not of your software.
+
+      So validation lives above the seam, where it applies to mock, to
+      Gazebo and to the real arm alike. That is defence in depth, not a
+      safety system: a real safety system is a circuit that removes power,
+      and no amount of Python substitutes for it.
+
+      The transferable habit is the one you already have about input
+      validation. Do not assume a lower layer checks a constraint because
+      the constraint is written down near it. Find out.
+
+  - id: ship-the-robot-image
+    title: Shipping to a machine that is not your laptop
+    objective: Build and verify the image that would actually go on a robot.
+    commands: |
+      make runtime
+      make runtime-verify
+    checkpoint: >
+      The runtime image starts the stack, and contains no simulator.
+    doc: deployment.md
+    body: |
+      A robot is a deployment target with awkward properties: it may be on
+      a flaky network, it cannot be scaled horizontally, and restarting it
+      has physical consequences.
+
+      Most of what you know still applies. Immutable images, pinned
+      versions, a rollback that is a pointer move rather than a rebuild.
+      What changes is the cost of being wrong — a bad web deploy serves
+      errors, a bad robot deploy moves something.
+
+      `runtime-verify` is the habit worth copying: it does not trust the
+      claim that the image is clean, it checks. The simulator is absent
+      and the stack still starts. Both halves matter, because an image
+      that is clean and broken has only solved the easy half.
+
+  - id: what-happened-when-you-were-away
+    title: Finding out what happened when you were not watching
+    objective: Get traces, metrics and logs off a robot and into one place.
     commands: |
       make dash
     checkpoint: >
-      The dashboard reports the running target, profile and git commit.
+      The dashboard reports the running target, profile and git commit —
+      so you know exactly what was running.
     doc: monitoring.md
     body: |
-      A robot that only tells you things when you are watching is a robot
-      you cannot debug.
+      A robot that only tells you things while you are watching is a robot
+      you cannot debug. The failures you care about happen at 2am, once,
+      and are not reproducible.
 
       Traces matter more here than in a web service. A single trace
       spanning perception, planning, action and hardware is how you answer
-      "why did it do that" — and metrics alone cannot show you that chain.
+      "why did it do that", and metrics alone cannot show you that chain.
+      The exercise worth doing is the full one: an unexpected behaviour,
+      traced to a span, to a log line, to a deployed version, to a commit.
 
-      Two properties are worth stealing. The collector buffers locally, so
-      the robot keeps working when the network does not; basic movement
-      must never depend on the internet. And simulation and hardware emit
-      through the same path, so the dashboard you learn in simulation is
-      the one you use on the real machine.
+      Two properties are worth stealing wholesale. The collector buffers
+      locally, so the robot keeps working when the network does not —
+      basic movement must never depend on the internet. And simulation and
+      hardware emit through the same path, so the dashboard you learned in
+      simulation is the one you use on the real machine.

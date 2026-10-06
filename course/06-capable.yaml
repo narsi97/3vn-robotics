@@ -4,15 +4,17 @@ kind: tier
 title: Make it capable
 price: "$5"
 summary: >
-  A robot that drives, sees, records what it saw, learns from it, and
-  ships the model like software.
+  A robot that drives, knows roughly where it is, reaches for things,
+  sees them, records what it saw, learns from it, and ships the model
+  like software.
+
 lessons:
   - id: it-drives
     title: Odometry lies, and by how much
     objective: Measure the gap between where the wheels think it is and where it is.
     commands: |
+      make base-sim
       make base-drive
-      make heading
     checkpoint: >
       You have a number for the drift, measured against ground truth
       rather than assumed.
@@ -20,27 +22,126 @@ lessons:
     body: |
       Wheel odometry is dead reckoning: count wheel turns, integrate,
       believe the answer. It is wrong immediately and increasingly, and a
-      skid-steer base is worse because turning scrubs the wheels sideways.
+      skid-steer base is worse because turning scrubs the wheels sideways
+      rather than rolling them.
 
       What matters is not that it drifts but that you measured it. The
-      simulator gives you ground truth for free, which is the one place
-      you can grade your own estimator honestly.
+      simulator gives you ground truth for free, and that is the one place
+      you can grade your own estimator honestly. Commanded-versus-achieved
+      is printed rather than hidden, because that gap is what the
+      calibration constant exists to absorb.
 
-      A caution, learned here the expensive way. The first heading metric
-      averaged error over a path with turns in both directions, so the
-      errors cancelled and wheel odometry looked *better* than a gyro. The
-      metric was wrong, not the gyro. When a measurement stops
-      discriminating between two things you know differ, suspect the
-      measurement.
+      A caution about your own measurements, learned here the expensive
+      way. An early version of this harness reported a number from a hand
+      run once, which made the documented figure unreproducible. Printing
+      it from a script you can re-run is the difference between a
+      measurement and a memory.
+
+  - id: two-wrong-answers
+    title: Two wrong answers, one better one
+    objective: Fuse a gyro with wheel odometry, and prove it helped.
+    commands: |
+      make heading
+      make fused-odom
+    checkpoint: >
+      Per-leg heading error is lower with the gyro than without it.
+    doc: navigation.md
+    body: |
+      The wheels are bad at heading because they scrub. The gyro is good
+      at heading over seconds and bad over minutes, because integrating a
+      biased rate accumulates. Neither is right; together they are better.
+
+      The bias is estimated while stationary — and *stationary* is judged
+      by the wheels, which is the nice part: each sensor covers the
+      other's weakness. The wheels cannot tell you heading but can tell
+      you that you are not moving; the gyro cannot tell you that you are
+      not moving but can tell you heading.
+
+      Now the lesson that cost real time. The first metric averaged
+      heading error over a path that turned both ways, so the errors
+      cancelled and wheel odometry scored *better* than the fused
+      estimate. The gyro was fine. The metric was wrong — it had stopped
+      discriminating between two things known to differ, which is the
+      signal that a measurement is broken rather than the system. It was
+      replaced with per-leg absolute error.
+
+  - id: composing-robots
+    title: Composing two robots into one
+    objective: Put the arm on the base without rewriting either.
+    commands: |
+      make play
+      make mm-verify
+    checkpoint: >
+      The composed robot drives and moves its arm, and the tipping margin
+      is computed rather than guessed.
+    doc: mobile-manipulator.md
+    body: |
+      Two descriptions become one. The arm keeps its own file, the base
+      keeps its own file, and the composition is a third that mounts one
+      on the other. No file is edited to make this work.
+
+      The detail that will catch you is naming. Composing prefixes the
+      arm's joints, so `shoulder_pan_joint` becomes
+      `arm_shoulder_pan_joint`. Any code that hardcoded the old name now
+      drives nothing — and it fails *silently*, because a trajectory with
+      unrecognised joint names is simply rejected rather than throwing
+      something informative.
+
+      The fix is to ask rather than assume: the controller will tell you
+      which joints it drives. That one change made this stack work
+      unmodified against an arm from an entirely different project.
+
+      Composition also changes physics. A tall arm on a small base tips,
+      and the margin depends on masses that, for fifteen phases here, were
+      estimates — the base 2.3x too heavy, the shoulder 40% too light.
+      Every margin computed before that was measured against a robot
+      nobody had designed.
+
+  - id: solve-the-arm
+    title: Solve the kinematics, and find out what the arm cannot do
+    objective: Turn a position into joint angles, exactly, and learn the limits.
+    commands: |
+      make workspace
+      make workspace PITCH=90
+    checkpoint: >
+      You can state where the gripper can and cannot be placed, and why.
+    doc: manipulation.md
+    body: |
+      Forward kinematics is multiplying transforms. The inverse — given a
+      point, find the angles — has an exact closed form when the arm has
+      the right structure, and this one does: a turntable carrying a
+      planar three-link arm. No solver, no iteration, no convergence.
+
+      Two things here are worth more than the algebra.
+
+      First, the geometry is *measured from the description* rather than
+      copied into the code, so changing a link length changes the maths.
+      Second, the solver checks that the robot matches the structure it
+      assumes, and refuses if it does not. A closed form applied to the
+      wrong arm does not fail — it returns confident, wrong angles. That
+      guard has since refused a real foreign arm with a true reason, which
+      is the only way you find out a guard works.
+
+      Then it told us things nobody wanted to hear. This arm cannot grasp
+      from directly above anywhere useful, because its elbow bends
+      essentially one way. At table height its reachable band is barely
+      20 mm wide. And at full extension it sags 6 degrees short of
+      commanded, missing by 43 mm, because a heavy arm on hobby servos
+      cannot hold itself at arm's length.
+
+      None of that was visible before the kinematics existed. Solving the
+      maths is what made the hardware's limits measurable instead of
+      suspected.
 
   - id: it-sees
     title: A camera, and the geometry behind it
-    objective: Turn pixels into a position in metres.
+    objective: Turn pixels into a position in metres, and measure the error.
     commands: |
       make play WORLD=bench_with_target
       make perception
+      make perception-verify
     checkpoint: >
-      The detector reports the target's position, and you can check it
+      The detector reports a position, and you have its error distribution
       against ground truth.
     doc: perception.md
     body: |
@@ -48,43 +149,72 @@ lessons:
       pinhole model and the camera's intrinsics, and that is where the
       errors live.
 
-      This is also where the frame convention from Stage 2 earns its
-      place. The optical frame rotation is why the answer comes out in the
-      right axes without anyone thinking about it.
+      This is where the frame convention from Stage 2 earns its place: the
+      optical frame rotation is why the answer comes out in the right axes
+      without anyone thinking about it.
 
-      Measure the error rather than eyeballing the overlay. The geometric
-      estimate here is biased, consistently, and the bias has a physical
-      cause: seen at an angle a cube shows two faces, so its silhouette is
-      wider than one edge and the assumed width is wrong. You cannot see
-      that in a picture; you can see it in a distribution.
+      Measure the distribution, not one frame. The geometric estimate here
+      is biased — consistently, with a physical cause. The estimate
+      assumes the object's width is one cube edge, but seen at an angle a
+      cube shows two faces and its silhouette is wider. The implied width
+      ranges between one edge and the diagonal of two, exactly as geometry
+      predicts. You cannot see that in an overlay; you can see it in a
+      histogram.
 
-  - id: data-then-models
+  - id: datasets
     title: Datasets, splits, and the leak you did not look for
     objective: Build a dataset whose test set means something.
     commands: |
       make dataset EPISODES=40
       make dataset-describe
-      make train
     checkpoint: >
-      The model beats the closed-form baseline, judged on the same test
-      set by the same function.
-    doc: machine-learning.md
+      The dataset has a manifest tying it to a commit, and the split is
+      by episode rather than by frame.
+    doc: data-pipeline.md
     body: |
       Splitting frames at random is the obvious mistake. Consecutive
       frames of one episode are near-duplicates, so a random split puts
-      near-copies of training rows into test and reports an accuracy you
-      will never see again. Split by episode.
+      near-copies of training rows into the test set and reports an
+      accuracy you will never see again. Split by episode.
 
+      The manifest matters as much as the data. A dataset that cannot say
+      which commit and which configuration produced it cannot be debugged
+      later, and "later" is when you need it.
+
+      One more trap, found here. A leakage check compared label distances
+      between splits, and it worked — until the dataset grew, at which
+      point every pair of episodes had similar labels and the metric
+      stopped discriminating. It was silently passing. A check that cannot
+      fail is not a check, and the fix was to measure similarity in image
+      space instead.
+
+  - id: beats-geometry
+    title: When a model beats geometry, and why
+    objective: Fit a model, and prove it beats the closed form honestly.
+    commands: |
+      make train
+    checkpoint: >
+      The model and the geometric baseline are scored in the same run, on
+      the same test set, by the same function.
+    doc: machine-learning.md
+    body: |
       The task already had a closed-form solution, which is what makes
-      this honest: the baseline is evaluated in the same run, on the same
-      test set, by the same function. "The model beat the geometry" is not
-      a claim until both numbers come out of one place.
+      this honest. The baseline is evaluated in the same run, on the same
+      split, by the same function. "The model beat the geometry" is not a
+      claim until both numbers come out of one place.
 
-      The model is linear, solved in closed form, with no epochs and no
-      learning rate — because the mapping is known to be linear in the
-      right features, and anything iterative would be ceremony that can
-      also be tuned into looking good. A network would at best rediscover
-      the same mapping while adding capacity to memorise 480 samples.
+      The model is linear and solved in closed form — no epochs, no
+      learning rate, nothing to tune into looking good. That is a choice
+      with a reason: the mapping is known to be linear in the right
+      features, so a network could at best rediscover it while adding
+      capacity to memorise a few hundred samples.
+
+      The interesting result is *why* it wins. Geometric features alone
+      cut the error by half. Adding features describing the blob's shape
+      cut it by ten times — because shape is what encodes the viewing
+      angle, and viewing angle is what the closed form was wrong about.
+      The model did not beat the geometry by being cleverer. It beat it by
+      being given the thing the geometry was missing.
 
   - id: mlops
     title: Shipping a model like software
@@ -96,18 +226,22 @@ lessons:
       make registry-rollback
     checkpoint: >
       Production points at a specific immutable version, and you can move
-      it back.
+      it back in one command.
     doc: mlops.md
     body: |
       Everything you know about deploying software applies, with one
       addition: the artefact has an accuracy, and accuracy decays.
 
-      Versions are content-addressed and immutable; production is a
-      pointer; history is append-only. Promotion runs gates — does it
-      validate, does it beat the baseline, has it regressed, do its
-      features match what is being served, does it know what data and
-      commit produced it. A model that cannot answer the last question
-      cannot be debugged later.
+      Versions are content-addressed and immutable, production is a
+      pointer, history is append-only. Promotion runs gates — does it
+      validate, does it beat the baseline, has it regressed against the
+      incumbent, do its features match what is actually being served, and
+      can it say which data and which commit produced it.
 
-      Rollback is a pointer move, which is the entire reason for the
-      indirection.
+      That fourth gate is the one people skip and then learn about. A
+      model trained on features in one order and served features in
+      another produces plausible nonsense, silently, forever.
+
+      Rollback is a pointer move. That is the entire reason for the
+      indirection, and it is the same reason your deployments are
+      symlinks rather than copies.
