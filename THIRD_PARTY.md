@@ -147,7 +147,7 @@ entering this repository or a paid course built on it.
 | Author | The Robot Studio / Hugging Face (LeRobot) |
 | Source | https://github.com/TheRobotStudio/SO-ARM100 |
 | Licence | Apache-2.0 — commercial use permitted |
-| Status | Not used for v1. Viable future hardware profile. |
+| Status | **Spiked, and it ran.** Fetched on demand into `vendor/`, gitignored. |
 
 Licence-clean and technically better: bus servos with real position
 feedback via magnetic encoders, rather than open-loop hobby servos. But
@@ -155,9 +155,23 @@ six Feetech STS3215 servos put the bill of materials around $120–150
 against this project's ~$30 target, and bus servos change the ESP32
 firmware story substantially.
 
-Revisit if the budget constraint is ever relaxed. Nothing in the software
-architecture prevents it — a new profile YAML and a new
-`hardware_interface` plugin is the whole change.
+**The claim this section used to make — "a new profile YAML and a new
+`hardware_interface` plugin is the whole change" — has now been tested,
+and it was close to right.** The SO-101 was spawned in Gazebo under this
+project's own controllers, using its URDF exactly as upstream ships it.
+Joint discovery, `/joint_states`, limits, TF, `move_joints()` and the
+gripper action all worked unchanged. One constant did not: `POSES` is a
+dict of four-element lists, so `move_to_named()` raises on a 5-DOF arm.
+See [docs/so101-spike.md](docs/so101-spike.md).
+
+A plugin does not even need writing: `so_arm_100_hardware` on the ROS
+index is an Apache-2.0 `ros2_control` SystemInterface released for Jazzy.
+
+Apache-2.0 obligations — attribution, preserving notices, stating changes
+— are met by `scripts/fetch_so101.sh`, which pulls the files unmodified
+and writes a NOTICE beside them; 3VN's additions live in a separate
+wrapper rather than as edits. Not committed here because the description
+needs 13 STL meshes and this repository carries no binary blobs.
 
 ---
 

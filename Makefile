@@ -43,7 +43,8 @@ RVIZ    ?= 1
 .DEFAULT_GOAL := help
 .PHONY: help doctor setup up down shell build test test-sim lint urdf \
         view mock sim robot stop scenario dash acceptance clean nuke test-ros \
-        cad cad-test cad-masses play drive vnc foxglove workspace grasp
+        cad cad-test cad-masses play drive vnc foxglove workspace grasp \
+        so101 so101-fetch
 
 help:
 	@echo ""
@@ -63,6 +64,7 @@ help:
 	@echo "  make urdf      Expand the xacro and print the URDF"
 	@echo "  make workspace Where the gripper can reach (PITCH=90 for side-on)"
 	@echo "  make grasp     Grasp the cube and prove it (needs WORLD=grasp_bench)"
+	@echo "  make so101     SPIKE: run our stack against TheRobotStudio SO-101"
 	@echo "  make view      RViz + joint sliders            -> $(NOVNC)"
 	@echo "  make play      WHOLE ROBOT + RViz, watchable   -> $(NOVNC)"
 	@echo "  make drive     Teleop: drive it from the keyboard (2nd terminal)"
@@ -161,6 +163,13 @@ endif
 
 urdf: build
 	$(RUN) "ros2 run xacro xacro $(SHARE)/urdf/$(URDF_ENTRY) params_file:=$(SHARE)/config/$(URDF_PROFILE).yaml target:=$(TARGET)"
+
+# A spike: somebody else's robot, our controllers. See the launch file.
+so101-fetch:
+	@./scripts/fetch_so101.sh
+
+so101: build stop
+	$(RUN_TTY) "ros2 launch threevn_sim so101_sim.launch.py"
 
 # Needs a running: make play WORLD=grasp_bench
 grasp: build

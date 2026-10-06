@@ -45,3 +45,7 @@ datasets/*
 # regenerate with `make cad`. Committing it would create a second
 # copy of the truth that goes stale when the profile changes.
 cad/out/
+
+# Third-party robot descriptions, fetched by scripts/fetch_so101.sh.
+# Apache-2.0 upstream; not vendored because this repo carries no binary blobs.
+vendor/
