@@ -11,3 +11,5 @@
 !course
 !VERSION
 !scripts/build_site.py
+# Lessons name Make targets; the build checks each one exists.
+!Makefile

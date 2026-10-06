@@ -15,6 +15,10 @@ COPY docs ./docs
 COPY VERSION ./
 COPY course ./course
 COPY scripts/build_site.py ./scripts/
+# Not to run anything: the curriculum is validated against it, so a
+# lesson naming a Make target that does not exist fails this build and
+# the course already being served stays up.
+COPY Makefile ./
 # Passed in because .git is not copied into the build context: the
 # footer states which commit the site was built from, and "unknown" in
 # a published footer is worse than no footer.

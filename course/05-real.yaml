@@ -3,134 +3,978 @@ number: 5
 kind: tier
 title: Make it real
 price: "$5"
-summary: >
-  Firmware you can test on a laptop, limits that are actually enforced,
-  a deployment, and the ability to find out what a robot did when you
-  were not watching.
+summary: >-
+  Firmware you can test on a laptop, safety that is layered and honest
+  about its limits, parts generated from the same numbers as the
+  simulation, a deployment you can roll back with a pull, and a robot that
+  tells the truth about itself when you are not watching.
+
+outcomes:
+  - Put the control loop on the host and the microcontroller at the edge, and justify the split with numbers.
+  - Test a binary wire protocol and a firmware's failure behaviour natively, with no device attached.
+  - Name every layer that enforces a joint limit, what each one survives, and why none of them is a safety system.
+  - Generate printable parts from the robot profile, and let the CAD correct the simulation rather than the reverse.
+  - Make a mechanical decision with a number attached, and write a bill of materials that does not flatter the robot.
+  - Roll a robot back with a pull, separate "alive" from "ready", and get metrics out from behind a home router.
+
+prerequisites:
+  - Tier 4 complete.
+  - No hardware. Everything here runs on a laptop; where a step would need a device, the lesson says so.
+  - Nothing extra to install for the CAD lessons — the geometry kernel is already in the dev image, and is most of the reason it is 6 GB.
 
 lessons:
   - id: esp32-is-a-driver
     title: The microcontroller is a dumb driver
-    objective: Understand why the control loop stays on the host.
-    commands: |
-      make robot    # fails until firmware exists; read the failure
-    checkpoint: >
-      You can explain why micro-ROS is not on the control path here.
-    doc: firmware.md
+    minutes: 25
+    objective: Understand why the control loop stays on the host, and where the ESP32's job ends.
     body: |
       The obvious design puts ROS on the microcontroller. This project
-      measured that option and rejected it: reports of a 1–2 Hz publish
-      ceiling on an ESP32 make it unusable for a loop that needs 50–100 Hz.
+      looked at that option and rejected it before writing a line of
+      firmware: there are reports of a **1–2 Hz** publish ceiling for
+      micro-ROS on an ESP32, and a servo control loop needs **50–100 Hz**.
+      Two orders of magnitude is not a tuning problem.
 
-      So the host runs the control loop and the ESP32 is a servo driver
-      behind a small framed binary protocol. The division is the familiar
-      one — put the thinking where the resources are, and keep the device
-      at the edge simple enough to reason about.
+      So the host runs the control loop, at 50 Hz, and the ESP32 is a servo
+      driver behind a small framed binary protocol. The division is a
+      familiar one: put the thinking where the resources and the debugger
+      are, and keep the device at the edge simple enough to reason about.
+      Debugging a microcontroller with 4 MB of flash and no debugger is
+      enormously slower than running a test on a laptop.
 
-      Note what this buys. The transport is private to two functions,
-      `read()` and `write()`, so USB today and something else tomorrow is
-      a change nothing above the seam notices. You have drawn this
-      boundary before, around a database driver or an HTTP client.
+      What the firmware does: generate PWM, clamp joint limits, watch a
+      heartbeat, hold a latching emergency stop, and report its version and
+      health. What it does **not** do: kinematics, trajectories, planning.
+      Move any of those onto the device and the "not coupled to the ESP32"
+      property is gone.
+
+      The transport is private to two functions in the hardware plugin,
+      `read()` and `write()`. USB serial today, TCP tomorrow — a change
+      nothing above the seam notices. You have drawn this boundary before,
+      around a database driver or an HTTP client.
+
+      One practical wall, worth knowing before you buy anything: **Docker
+      Desktop on macOS cannot forward a USB device into a container.** The
+      intended shape is a small Linux computer next to the arm — a Raspberry
+      Pi, say — where it can.
+    steps:
+      - do: Try to start the real-hardware target, and read how it fails.
+        run: make robot
+        expect: >-
+          "No device at /dev/ttyUSB0 inside the container", with what to do
+          about it. It refuses before launching, instead of crashing in a way
+          that reads like a bug.
+      - do: Look at how small the device side is.
+        run: wc -l firmware/esp32/src/main.cpp firmware/esp32/include/*.hpp
+      - do: Confirm the decision-making code includes no Arduino headers at all.
+        run: grep -n "#include" firmware/esp32/include/controller.hpp
+    checkpoint: >-
+      You can explain, with numbers, why micro-ROS is not on the control
+      path, and list what the firmware does and does not do.
+    pitfalls:
+      - symptom: The ESP32 resets at random when the arm moves, and it looks like a firmware bug.
+        cause: >-
+          Servos powered from the ESP32's USB rail. Four metal-gear servos
+          can draw several amps at stall and brown out the controller.
+        fix: A separate 5 V supply for the servos, with a common ground.
+      - symptom: The serial port exists on your Mac and not in the container.
+        cause: Docker Desktop on macOS cannot pass USB devices through.
+        fix: >-
+          Run the stack on a Linux host or single-board computer next to the
+          arm, or use a VM with USB passthrough. A TCP bridge is declared in
+          the config but not implemented — the plugin refuses it rather than
+          pretending.
+    concepts:
+      - term: Host-side control loop
+        meaning: >-
+          Running the controllers on a computer next to the robot, with the
+          microcontroller only driving servos — so the loop has CPU, memory
+          and a debugger.
+      - term: micro-ROS
+        meaning: >-
+          ROS 2 for microcontrollers. Deliberately not on this project's
+          control path, because of its reported publish-rate ceiling.
+    quiz:
+      - q: Why is a 1–2 Hz ceiling disqualifying, rather than something to optimise?
+        a: >-
+          A servo loop needs 50–100 Hz. Being off by a factor of fifty is an
+          architecture problem; no tuning closes it.
+      - q: Why must kinematics stay off the device?
+        a: >-
+          Move it onto the ESP32 and the application depends on that device's
+          code. The seam only holds if the device is interchangeable — a dumb
+          driver behind a protocol.
+    exercise:
+      task: >-
+        Pick one item from the firmware's "does not do" list and argue for
+        moving it onto the device. Then find the strongest reason, in this
+        project's docs, that it stays where it is.
+    read:
+      - firmware.md
+      - hardware.md
+      - decisions/0003-hardware-seam.md
 
   - id: protocol-on-a-laptop
     title: A wire protocol you can test on your laptop
-    objective: Test framing, checksums and failure handling with no hardware.
-    commands: |
-      make test
-    checkpoint: >
-      The firmware's logic tests pass natively, including the cases where
-      the transport fails mid-message.
-    doc: firmware.md
+    minutes: 35
+    objective: Test framing, checksums and failure handling with no hardware attached.
     body: |
       Serial protocols fail in specific, boring ways: a byte is dropped, a
-      message is truncated, the device stops draining, two messages run
-      together. Every one of those is testable without a device.
+      message is cut short, garbage arrives before the first frame, two
+      frames arrive in one read, the device stops draining. Every one of
+      those is testable without a device.
 
-      The firmware logic here is compiled and run natively against a fake
-      transport. There is a test named for a device that stops draining,
-      and one for a read that fails partway. They run in the same suite as
-      everything else, in milliseconds.
+      The protocol here is small and conventional: framed, versioned,
+      little-endian, with a CRC-16/CCITT-FALSE checksum. Positions travel as
+      signed integer micro-units of each joint's own SI unit — the same
+      conversion for every joint, so there is no per-joint scale table to
+      get wrong.
 
-      The alternative is the reason this matters: testing an emergency
-      stop by flashing it onto a powered arm and hoping. Hardware is the
-      worst available test environment — slow, destructive, and
-      unavailable when you most want to iterate.
+      **It is written once.** The firmware's build adds the hardware
+      plugin's include directory, so the device and the host compile the
+      *same* header. Framing, field order and units cannot drift, because
+      there is only one definition. A protocol written twice drifts — and
+      the drift shows up as an arm moving to the wrong place, not as a
+      compile error.
+
+      Twenty tests cover it: round-trips, the published CRC test vector,
+      corrupted payloads and lengths, unknown versions, frames split across
+      reads, recovery after garbage, and 200,000 bytes of pure noise.
+
+      One property is worth understanding rather than memorising. **A
+      truncated frame costs you the next frame too.** The parser is left
+      mid-payload, waiting for bytes, until the checksum fails. It cannot
+      shortcut by scanning for the start marker inside the payload, because
+      payload bytes can legitimately contain the marker — and resyncing on
+      data would be worse. The loss is bounded at one frame, 20 ms at 50 Hz,
+      and a test asserts it stays bounded rather than wedging the link.
+
+      The alternative is the reason this matters: testing an emergency stop
+      by flashing it onto a powered arm and hoping. Hardware is the worst
+      available test environment — slow, destructive, and unavailable when
+      you most want to iterate.
+    steps:
+      - do: See that the firmware compiles the host's protocol header.
+        run: grep -n "include" firmware/esp32/platformio.ini
+        expect: An `-I` pointing into `src/threevn_hardware/include`.
+      - do: List the protocol tests.
+        run: grep -n "^TEST(" src/threevn_hardware/test/test_protocol.cpp
+      - do: Read the truncation test, and the comment that explains its bound.
+        run: grep -n -B3 -A30 "ATruncationDoesNotWedgeTheLinkPermanently" src/threevn_hardware/test/test_protocol.cpp
+      - do: Run them. They are part of the fast suite.
+        run: make test
+    checkpoint: >-
+      The protocol tests pass natively, including the ones where the
+      transport fails mid-message, and you can explain why a truncation
+      costs exactly one extra frame.
+    pitfalls:
+      - symptom: A serial terminal on the ESP32's main port shows garbage.
+        cause: That port carries binary frames only.
+        fix: >-
+          Diagnostics go to a second UART, on GPIO17 at 115200 baud, through
+          a USB-serial adapter. A stray `print` on the main port would
+          corrupt the protocol.
+    concepts:
+      - term: Framing
+        meaning: >-
+          Wrapping each message with a start marker, length and checksum, so
+          a receiver can find message boundaries in a byte stream.
+      - term: CRC
+        meaning: >-
+          A cyclic redundancy check — a checksum that detects corrupted
+          bytes. Tested here against the published reference vector.
+      - term: Resynchronisation
+        meaning: >-
+          A parser recovering a correct frame boundary after garbage or a
+          truncated frame.
+    quiz:
+      - q: Why does a truncated frame cost the next frame as well?
+        a: >-
+          The parser is stranded mid-payload, consuming the next frame's
+          bytes as payload, until the checksum fails. It cannot scan for the
+          start marker inside a payload, because payload bytes may contain it.
+      - q: What does compiling one header into both firmware and host prevent?
+        a: >-
+          Drift between two definitions of the protocol — which would show up
+          as wrong motion rather than a build error.
+    exercise:
+      task: >-
+        Write, on paper, a test for "two valid frames with one garbage byte
+        between them, delivered in a single read". Then check whether the
+        existing tests already cover that case between them.
+      hint: >-
+        Look at `ResyncsAfterLeadingGarbage` and
+        `ReadsBackToBackFramesFromOneRead`. Does either cover garbage
+        *between* frames?
+    read:
+      - firmware.md
+      - versioning.md
+
+  - id: decide-how-it-fails
+    title: Decide how it fails before it fails
+    minutes: 30
+    objective: Specify — and test natively — what the firmware does when things go wrong.
+    body: |
+      Every decision the firmware makes lives in two headers that include no
+      Arduino code, allocate no memory and read no clock — time arrives as
+      a parameter. That makes them compile on a laptop, and it is why
+      nineteen behaviours of this firmware are tested with no ESP32
+      attached. What is left on the device is "read bytes, write PWM".
+
+      The behaviours are worth reading as a specification, because each is
+      a decision about failure:
+
+      - **Nothing moves at boot.** Servos are not energised until the host
+        sends an enabled command. A device that powers up its motors at boot
+        moves before anything has told it where to go.
+      - **A lost heartbeat holds position.** 250 ms of silence — about twelve
+        missed frames at 50 Hz — trips a timeout. The firmware then *holds*
+        rather than releasing, because releasing drops the arm under
+        gravity, and on a desk that means the gripper swinging into
+        whatever is in front of it.
+      - **The emergency stop latches.** It cuts torque immediately, and it
+        stays latched when the stop command stops arriving. An e-stop that
+        releases because the link dropped is not an e-stop. Only an
+        explicit "clear fault" — not also asserting stop — releases it.
+      - **Clamping is reported.** If the firmware overrides a command, it
+        says so. Silent disagreement between commanded and actual is what
+        makes a robot baffling to debug.
+
+      The firmware's joint limits are **compiled in**, deliberately
+      duplicating the robot profile. A limit the host can set is a limit
+      the host can get wrong, and this is the only layer that still works
+      when the host has crashed. The cost of duplication is drift — so a
+      test parses the profile and fails the build if the two disagree.
+
+      And one real limitation, stated plainly: **hobby servos report
+      nothing.** The device reports its *target* as the measured position,
+      so a stalled or stripped servo looks perfectly healthy from the host.
+      That is the strongest argument for servos with feedback, when the
+      budget allows.
+    steps:
+      - do: List the firmware behaviours under test.
+        run: grep -n "^TEST(Firmware" src/threevn_hardware/test/test_firmware_logic.cpp
+      - do: Find the heartbeat timeout, and do the frame arithmetic.
+        run: grep -n "kHeartbeatTimeoutMs" firmware/esp32/include/controller.hpp
+        expect: '`250` — at 50 Hz, a frame every 20 ms, so about twelve missed frames.'
+      - do: Read the test that keeps the compiled-in limits honest.
+        run: grep -n -A30 "MatchTheRobotProfileTheyDuplicate" src/threevn_hardware/test/test_firmware_logic.cpp
+      - do: >-
+          Change `shoulder_pan_joint`'s `upper_deg` in the profile to `100.0`,
+          run the suite, and watch the firmware notice. Then revert.
+        run: |
+          make test
+          git checkout src/threevn_robot_description/config/threevn_arm_v1.yaml
+        expect: '`FirmwareLimits.MatchTheRobotProfileTheyDuplicate` fails.'
+    checkpoint: >-
+      You can state the four failure behaviours from memory, and you watched
+      the duplicated limits catch a profile change.
+    pitfalls:
+      - symptom: A servo has stripped, and the host shows it at exactly the commanded angle.
+        cause: >-
+          Hobby servos have no position feedback. The device reports its
+          target as measured.
+        fix: >-
+          Nothing in software fixes this. Feedback servos do, at roughly four
+          times the price — see the next lessons.
+    concepts:
+      - term: Heartbeat
+        meaning: >-
+          A regular message proving the other side is alive. Here, every
+          command frame is one; silence beyond 250 ms trips a timeout.
+      - term: Latching e-stop
+        meaning: >-
+          An emergency stop that stays engaged until explicitly cleared, and
+          does not release when its signal disappears.
+      - term: Safe failure state
+        meaning: >-
+          What a system does when something fails — here, hold position
+          rather than release, because releasing drops the arm.
+    quiz:
+      - q: Why hold position on heartbeat loss rather than cut torque?
+        a: >-
+          Cutting torque drops the arm under gravity into whatever is near
+          it. Holding is the safer failure, and the operator still has the
+          power switch.
+      - q: The firmware duplicates the joint limits. Why is that duplication the safety property rather than a smell?
+        a: >-
+          It is the only limit that survives the host crashing or sending
+          nonsense. The drift risk is handled by a test that compares the two.
+    exercise:
+      task: >-
+        Write the next firmware behaviour test you would add, as a name in
+        the same style as the existing ones and a three-line description.
+        What failure does it decide in advance?
+    read:
+      - firmware.md
+      - safety.md
 
   - id: where-safety-lives
     title: Where safety actually lives
-    objective: Find out that the limits you declared are not enforced.
-    commands: |
-      make scenario NAME=safety_limit
-    checkpoint: >
-      You can state which layer rejects an out-of-range command, and
-      which layers happily pass it along.
-    doc: safety.md
+    minutes: 35
+    objective: Name every layer that enforces a limit, what each one survives, and why none is a safety system.
     body: |
-      The URDF declares a limit on every joint. The controller
-      configuration declares min and max on every command interface. It
-      is natural to assume something enforces them.
+      The description declares a limit on every joint. The controller
+      configuration declares a minimum and maximum on every command. It is
+      natural to assume something enforces them.
 
-      Measured here: commanding a joint to 180 degrees against a 90 degree
-      limit drives it to 180 under the mock backend. Neither the
-      description nor the controller stopped it. Gazebo only *looks* safe
-      because its physics joint has a hard stop — which is a property of
-      the simulator, not of your software.
+      **Measured early in this project: nothing did.** Commanding
+      `shoulder_pan_joint` to 180° against a 90° limit drove it to 180° under
+      the mock. Gazebo only *looked* safe because its physics joint has a
+      hard stop — a property of the simulator, not of the software. The first
+      limit-checking scenario passed in simulation and failed on the mock,
+      against identical robot software. It had been testing the simulator.
 
-      So validation lives above the seam, where it applies to mock, to
-      Gazebo and to the real arm alike. That is defence in depth, not a
-      safety system: a real safety system is a circuit that removes power,
-      and no amount of Python substitutes for it.
+      Three layers now clamp, and each covers a failure the others cannot:
+
+      | layer | how it behaves | survives |
+      |---|---|---|
+      | the robot client | **rejects** before sending, naming the joint | a programmer's mistake, loudly |
+      | the controller manager | **clamps** every command, below the seam | any caller, even one bypassing the client |
+      | the firmware | **clamps**, with compiled-in limits | the host crashing |
+
+      They are not redundant. The client *tells you* — a mistake surfaces
+      where the intent was expressed. The controller manager *prevents it*,
+      silently — and remember that **a clamped goal still reports
+      `SUCCEEDED`**, which is exactly why the loud layer is still wanted.
+      The firmware is the only one still standing when the computer above
+      it is not.
+
+      And none of them is a safety system. Software cannot stop a servo that
+      has failed, a brownout, a stripped gear or a collision. The most
+      trustworthy limit is a **physical hard stop** the mechanism cannot
+      exceed — and that layer is marked "not designed yet". The real
+      emergency stop is a switch in the servo power line, and it does not
+      exist yet either. Until it does: **keep the power switch within reach
+      before you power on.**
 
       The transferable habit is the one you already have about input
-      validation. Do not assume a lower layer checks a constraint because
+      validation: do not assume a lower layer enforces a constraint because
       the constraint is written down near it. Find out.
+    steps:
+      - do: Start the mock and run the safety scenario against it.
+        run: |
+          make mock
+          make scenario NAME=safety_limit
+        expect: '`PASS` — on the mock, where only software can make it pass.'
+      - do: >-
+          In another terminal, send a 180° goal directly to the action server,
+          bypassing the client, and read where the joint ends up.
+        run: |
+          make shell
+          ros2 action send_goal /arm_controller/follow_joint_trajectory \
+            control_msgs/action/FollowJointTrajectory \
+            "{trajectory: {joint_names: [shoulder_pan_joint, shoulder_lift_joint, elbow_joint, wrist_joint], points: [{positions: [3.14159, 0.0, 0.0, 0.0], time_from_start: {sec: 2}}]}}"
+          ros2 topic echo /joint_states --once
+        expect: '`SUCCEEDED` — and `shoulder_pan_joint` at about 1.5708, not 3.14.'
+      - do: Read the layer table, including the rows marked as not done.
+        run: grep -n -A12 "## Layers, in order of trustworthiness" docs/safety.md
+    checkpoint: >-
+      You watched a goal be clamped and still report `SUCCEEDED`, and you can
+      say which layer catches which failure.
+    pitfalls:
+      - symptom: A limit test passes in Gazebo and fails on the mock.
+        cause: The test is relying on the simulator's physical joint stop, not on any software.
+        fix: Run limit tests on the mock, where nothing physical can stand in for enforcement.
+      - symptom: Every goal reports success, and the arm is not where it was told to be.
+        cause: A clamp below the seam changed the motion and reported success anyway.
+        fix: Validate above the seam as well, loudly, so a bad goal fails where it was written.
+    concepts:
+      - term: Defence in depth
+        meaning: >-
+          Several independent layers enforcing one constraint, each covering
+          a failure the others cannot.
+      - term: Command validation
+        meaning: >-
+          Rejecting an out-of-range request before it is acted on. Useful;
+          not a safety system.
+      - term: Hard stop
+        meaning: >-
+          A physical feature of the mechanism that prevents motion beyond a
+          limit — the most trustworthy limit there is.
+    quiz:
+      - q: Which layer still enforces limits if the host computer crashes?
+        a: The firmware, with its compiled-in limits.
+      - q: The controller manager already clamps everything. Why keep the client-side check?
+        a: >-
+          The clamp is silent and the goal still reports `SUCCEEDED`. The
+          client rejects loudly, naming the joint, at the point the mistake
+          was made.
+      - q: Why is none of these a safety system?
+        a: >-
+          All three are software, and depend on software running correctly.
+          A failed servo, a brownout or a collision consults none of them.
+          Safety is the power switch and the hard stop.
+    exercise:
+      task: >-
+        `docs/safety.md` has a layer marked "not designed yet". Describe how
+        you would add it to the CAD, and what test would prove it exists
+        before anything is printed.
+    read:
+      - safety.md
+      - firmware.md
 
-  - id: ship-the-robot-image
-    title: Shipping to a machine that is not your laptop
-    objective: Build and verify the image that would actually go on a robot.
-    commands: |
-      make runtime
-      make runtime-verify
-    checkpoint: >
-      The runtime image starts the stack, and contains no simulator.
-    doc: deployment.md
+  - id: cad-from-the-same-yaml
+    title: Parts generated from the same numbers
+    minutes: 40
+    objective: Generate printable parts from the robot profile, and let the CAD correct the model.
     body: |
-      A robot is a deployment target with awkward properties: it may be on
-      a flaky network, it cannot be scaled horizontally, and restarting it
-      has physical consequences.
+      The profile already holds every length, and the simulation reads it
+      directly. Drawing the parts by hand in a CAD program would make the
+      printed arm and the simulated arm two independent statements about one
+      robot — and they would disagree within a week, silently, because
+      neither knows about the other.
 
-      Most of what you know still applies. Immutable images, pinned
-      versions, a rollback that is a pointer move rather than a rebuild.
-      What changes is the cost of being wrong — a bad web deploy serves
-      errors, a bad robot deploy moves something.
+      So the parts are **generated** from the profile, with a parametric CAD
+      library. Two tests keep that honest: the printed beam must equal the
+      profile's link length, and scaling the profile must scale the part —
+      otherwise a generator that ignored its input would pass everything.
 
-      `runtime-verify` is the habit worth copying: it does not trust the
-      claim that the image is clean, it checks. The simulator is absent
-      and the stack still starts. Both halves matter, because an image
-      that is clean and broken has only solved the easy half.
+      Then the printability tests — each the cheap version of a mistake that
+      otherwise costs a print: the part is a closed solid; it fits a 220 mm
+      bed; no hole is smaller than the nozzle; M3 holes carry the clearance
+      an FDM printer needs; every part prints without support.
+
+      One caught a real bug at once. The first servo bracket was sized to
+      the servo's **body**, 40.7 mm. The mounting screws sit **49.5 mm**
+      apart, outside the body — so both holes fell outside the material and
+      cut nothing. The part exported fine and looked right.
+
+      And then **the CAD changed the robot.** The pan servo stands in the
+      base, and an MG996R is **42.9 mm** tall. The base was **30 mm**. It could
+      not contain the part it existed to hold. The simulation never noticed,
+      because a URDF box does not have to hold anything. The base is now
+      45 mm, the shoulder joint moved up with it, and three hand-computed
+      test heights were updated.
+
+      Some mistakes only show in the whole assembly. The first turret held
+      the lift servo upright, like the pan servo below it — which would have
+      put the lift axis about 44 mm up instead of the 20 mm the description
+      says. No single measurement was wrong; the part was simply the wrong
+      shape. `make cad` now writes the whole arm, placed at its joint
+      origins, as one file — and checks every pair of parts for collisions.
+    steps:
+      - do: Generate every part, for both candidate mechanisms.
+        run: make cad
+        expect: STL and STEP files under `cad/out/`, plus a generated `PRINTING.md`.
+      - do: Run the geometry and printability tests.
+        run: make cad-test
+      - do: Read the generated print guide — orientations, quantities, fasteners.
+        run: less cad/out/direct/PRINTING.md
+      - do: >-
+          Open `cad/out/direct/assembly.step` in any STEP viewer (FreeCAD is
+          free) and look at the whole arm at its home pose.
+    checkpoint: >-
+      The parts generate, `make cad-test` passes, and you have looked at the
+      assembled arm and can find the two parts closest to colliding.
+    pitfalls:
+      - symptom: '`make cad` fails because `$CAD_PYTHON` is empty or `build123d` is missing.'
+        cause: >-
+          Your dev image predates the `cad` Dockerfile stage. The CAD library
+          lives in its own virtual environment inside the image, because it
+          needs newer Python packages than the system ones ROS depends on.
+        fix: Rebuild the image with `make setup`.
+      - symptom: Every check passes and the assembled arm is the wrong shape.
+        cause: Checks test one number at a time; a part can satisfy all of them and still be oriented wrongly.
+        fix: Look at the assembly. It is the cheapest review the design gets before filament is spent.
+    concepts:
+      - term: Parametric CAD
+        meaning: >-
+          Geometry generated by code from parameters — here, the robot
+          profile — rather than drawn by hand.
+      - term: Support-free printing
+        meaning: >-
+          A part designed so no overhang needs temporary support material.
+          Enforced here by a test.
+      - term: Print clearance
+        meaning: >-
+          Extra size added to holes and fits because an FDM printer prints
+          holes undersized. A nominal 3.0 mm hole will not take an M3 screw.
+    quiz:
+      - q: Why is "the generator reads the profile" not enough on its own?
+        a: >-
+          It must be shown that changing the profile changes the part. A
+          generator that ignored its input could still produce one correct
+          part and pass a single-value check.
+      - q: How did generating the CAD change the simulated robot?
+        a: >-
+          The base had to grow from 30 to 45 mm to contain the pan servo,
+          which moved the shoulder joint up — in the profile, so the
+          simulation followed.
+    exercise:
+      task: >-
+        Find the test that checks where the lift axis sits relative to the
+        joint origin. Explain in two sentences why no test on the turret's
+        own dimensions could have caught the upright-servo mistake.
+      hint: Look in `cad/tests/` for a test mentioning the lift axis.
+    read:
+      - cad.md
+
+  - id: decide-with-numbers
+    title: A decision with a number attached
+    minutes: 35
+    objective: Make a mechanical decision with measured evidence, and price the robot honestly.
+    body: |
+      Two mechanisms were possible for this arm. **Direct drive** puts a
+      servo at each joint — simple, but the servos' mass rides out on the
+      arm. A **parallel linkage** keeps servos at the base and drives distal
+      joints through rods — much better mass distribution, and the clever
+      part of many hobby arm designs.
+
+      The decision was deliberately left unmade until it had a number.
+      Because the CAD takes the mechanism as a parameter, both were generated
+      from the same profile:
+
+      | | PLA | lifted at the shoulder |
+      |---|---|---|
+      | **direct drive** (chosen) | 168 g | 140 g |
+      | parallel linkage | 264 g | 85 g |
+
+      The linkage lifts 39% less at the joint with the least margin. That is
+      real. It was not enough, because a linkage is a **closed kinematic
+      chain**, which a URDF cannot express. Every test, every kinematics
+      check, every tipping margin and every machine-learning label in this
+      project rests on the simulation being faithful to the robot. A
+      mechanism that forces the model into an approximation costs more than
+      the grams it saves. It also needs 96 g more plastic.
+
+      The decision then settled the masses. For fifteen phases every link
+      mass had been a guess. Generated geometry gave **computed** values, and
+      they were wrong in both directions: the base 2.3× too heavy, the
+      shoulder 40% too light. That is worse than being uniformly wrong — a
+      margin computed from them could have been optimistic or pessimistic
+      and nobody could tell which. `computed` is kept distinct from
+      `measured`: plastic density is nominal, fasteners are not counted, and
+      **nothing has been weighed**.
+
+      And the price is stated twice, on purpose. **About $30 for the moving
+      arm.** **About $45–55 for a system that works**, once you add the
+      controller, the servo driver and a power supply that will not brown it
+      out. Quoting the first and implying the second would be a
+      misrepresentation. Two upgrades are priced in, not hidden: a $2 gyro
+      that turns out to be essential on the mobile base, and a $100 lidar
+      that navigation would need — which would roughly triple the robot's
+      cost, and is therefore a product decision, not a software one.
+    steps:
+      - do: Compare declared and computed masses, link by link.
+        run: make cad-masses
+        expect: Each link's declared mass beside its computed one — matching, now that the profile has been updated.
+      - do: Count how the profile's numbers are sourced.
+        run: |
+          grep -o "provenance: [a-z]*" src/threevn_robot_description/config/threevn_arm_v1.yaml | sort | uniq -c
+      - do: Read the two-figure bill of materials.
+        run: less docs/bom-hardware.md
+    checkpoint: >-
+      You can state why direct drive won despite lifting more, and give both
+      prices for the robot without being asked which.
+    pitfalls:
+      - symptom: A tipping margin, or any derived safety number, looks comfortable.
+        cause: It was computed from estimated masses.
+        fix: Check the provenance of every input. A margin is only as good as its least-measured number.
+    concepts:
+      - term: Closed kinematic chain
+        meaning: >-
+          A mechanism whose links form a loop, like a parallel linkage. A URDF
+          tree cannot represent it exactly.
+      - term: Bill of materials (BOM)
+        meaning: >-
+          Every part and its cost. Here stated twice — the moving arm, and
+          the complete working system.
+    quiz:
+      - q: The linkage lifts 39% less. Why was that not enough?
+        a: >-
+          Because URDF cannot express its closed chain, the simulation would
+          become an approximation of the robot — and every test, kinematics
+          check, margin and label depends on it being faithful.
+      - q: Why keep `computed` separate from `measured`?
+        a: >-
+          Computed masses use nominal plastic density and datasheet servo
+          masses and ignore fasteners. Calling them measured would claim a
+          precision nobody has, and nothing has been weighed.
+    exercise:
+      task: >-
+        Price the complete working system from `docs/bom-hardware.md` at
+        current prices where you live. Then price the version with feedback
+        servos instead. What would you have to believe about the course's
+        students to choose the second?
+    read:
+      - cad.md
+      - bom-hardware.md
+      - so101-spike.md
+
+  - id: roll-back-with-a-pull
+    title: Deploy, and roll back with a pull
+    minutes: 30
+    objective: Ship the robot image by digest, and make rollback something that cannot fail to build.
+    body: |
+      A robot is a deployment target with awkward properties. It may be on a
+      flaky home network. It cannot be scaled horizontally. Restarting it
+      has physical consequences. A bad web deploy serves errors; a bad robot
+      deploy moves something.
+
+      Most of what you know still applies, and the most important piece is
+      the oldest: **if the only way back is a successful build, you do not
+      have a rollback — you have a hope.** Every push to `main` publishes the
+      robot image under an immutable `sha-` tag, for both architectures, so
+      the same image runs on a mini PC or a Raspberry Pi next to the arm.
+      Rolling back is pulling an older tag and starting it. Nothing is
+      rebuilt, so the version you return to is the version that was tested.
+
+      Deployment is deliberately asymmetric. The **robot** pulls a published
+      image, because it is remote and rollback has to be a pull. The small
+      **fleet view** on the shared server is built there, from a checkout,
+      like every other product on that box — a second deployment model there
+      would buy nothing.
+
+      And nothing reaches into the robot. Robots sit behind home routers
+      where inbound connections do not work — but the real reason is that a
+      robot must never wait on a server. Each robot **pushes** a small report
+      every ten seconds, one way. This was demonstrated rather than asserted:
+      killing the fleet service mid-run left the robot reporting ready and
+      its scenarios passing, while its reporter logged a single, throttled
+      warning. Losing the network degrades what you can see. It must never
+      degrade what the robot can do.
+    steps:
+      - do: Build the robot image if you have not, and read what it says about itself.
+        run: |
+          make runtime
+          docker inspect --format '{{json .Config.Labels}}' threevn-robotics-runtime:local
+        expect: Source, licence, revision, creation time and title — answerable without starting it.
+      - do: Read the rollback procedure. It is four commands.
+        run: grep -n -A10 "### Rolling back is a pull" docs/deployment.md
+      - do: >-
+          Rehearse it locally: tag your current image as "previous", build a
+          change, then roll back to "previous" without building anything.
+        run: |
+          docker tag threevn-robotics-runtime:local threevn-robotics-runtime:previous
+          docker run --rm threevn-robotics-runtime:previous bash -lc 'echo "$THREEVN_GIT_COMMIT"'
+    checkpoint: >-
+      You can name the exact commit an image was built from without running
+      it, and roll back to a previous image without a build.
+    pitfalls:
+      - symptom: A deploy failed halfway and the robot is down.
+        cause: The old container was stopped before the new image had finished downloading.
+        fix: Pull first, then replace. A failed pull leaves the old version running.
+      - symptom: The robot "rolled back" but is behaving like the broken version.
+        cause: Rolled back to a moving tag, like `latest`, that someone had already moved.
+        fix: Roll back to an immutable `sha-` tag, or a digest.
+    concepts:
+      - term: Immutable tag
+        meaning: >-
+          An image tag that is never moved once pushed — here `sha-<commit>`.
+          Safe to roll back to.
+      - term: Pull-based rollback
+        meaning: >-
+          Returning to a previous version by pulling an image that already
+          exists, never by rebuilding.
+      - term: Push telemetry
+        meaning: >-
+          The robot sending reports outwards on its own schedule, so it never
+          waits on, or is reachable from, a server.
+    quiz:
+      - q: Why must rollback never depend on a build?
+        a: >-
+          The moment you need a rollback is the moment something is broken,
+          possibly the build itself. And a rebuilt image is not the image
+          that was tested.
+      - q: Why does the robot push, rather than the server pulling from it?
+        a: >-
+          Robots are behind home routers that block inbound connections — and
+          more fundamentally, a robot must never wait on a server.
+    exercise:
+      task: >-
+        Write the rollback runbook for your own robot in five lines or fewer:
+        how you find the last good version, how you bring it back, and how
+        you know it worked. Which line depends on something that does not
+        exist yet?
+    read:
+      - deployment.md
+      - architecture.md
+
+  - id: alive-is-not-ready
+    title: Alive is not the same as ready
+    minutes: 35
+    objective: Separate liveness from readiness, and make a dashboard that cannot report stale state as current.
+    body: |
+      The dashboard runs **on the robot**, not on a server — a dashboard that
+      needs the internet to tell you the arm is fine is a dashboard that lies
+      during an outage. It answers two questions that sound the same and are
+      not:
+
+      - **`/healthz` — is this process alive?** It answers 200 even when the
+        arm has been unplugged for an hour.
+      - **`/readyz` — is the robot usable?** Joint state arriving *and* the
+        controllers that move it active. Otherwise **503, with reasons**.
+
+      Conflating them breaks in both directions. An orchestrator watching a
+      combined check would restart a perfectly healthy dashboard every time
+      you switched the arm off. A monitor watching only liveness stays green
+      through a total robot outage. Deploy gates, alerts and humans watch
+      `/readyz`.
+
+      Two bugs were found by killing a running robot and watching the
+      screen, and they had the same shape: **the dashboard kept reporting
+      the last thing it knew as though it were current.** After the
+      controller process died, all three controllers still showed `active`.
+      After that was fixed, the hardware still showed `active`.
+
+      The cause is worth remembering anywhere you poll a service: in ROS 2's
+      Python client, **`service_is_ready()` keeps returning `True` after the
+      server is gone.** The poll keeps firing, never completes, and the
+      previous answer survives forever. So every piece of state now carries a
+      timestamp and **ages out** — six seconds for controller data — and stale
+      values are shown as stale and never counted as active.
+
+      Readiness had *looked* correct through the first bug, only because
+      joint state happened to go stale at the same moment. Relying on that
+      would have been relying on a coincidence.
+
+      The version block comes from the environment, injected at build or
+      deploy time — never read from a local checkout, because a deployed
+      robot has none. Anything unknown says `unknown`, in amber, and is
+      logged at startup. A robot that cannot say which commit it runs cannot
+      be debugged.
+    steps:
+      - do: Start the mock, then the dashboard in a second terminal.
+        run: |
+          make mock
+          make dash
+      - do: Open **http://localhost:8107/**, then ask the two questions from a third terminal.
+        run: |
+          curl -s -o /dev/null -w "healthz %{http_code}\n" http://127.0.0.1:8107/healthz
+          curl -s -w "\n" http://127.0.0.1:8107/readyz
+          curl -s http://127.0.0.1:8107/api/version
+        expect: '`healthz 200`, a ready verdict, and a version block with your commit.'
+      - do: >-
+          Now stop the mock with Ctrl-C in its terminal, wait ten seconds, and
+          ask again.
+        run: |
+          curl -s -o /dev/null -w "healthz %{http_code}\n" http://127.0.0.1:8107/healthz
+          curl -s -w "\n%{http_code}\n" http://127.0.0.1:8107/readyz
+        expect: '`healthz 200` still — and `/readyz` now 503, with reasons naming what went stale.'
+    checkpoint: >-
+      You watched liveness stay 200 while readiness went to 503 with
+      reasons, within seconds of the robot going away.
+    pitfalls:
+      - symptom: The dashboard shows controllers `active` for a stack you have killed.
+        cause: '`service_is_ready()` returns `True` after the server is gone, so the last answer is never replaced.'
+        fix: Timestamp every piece of polled state and age it out.
+      - symptom: '`make dash` dies at once with `OSError: [Errno 98] Address already in use`.'
+        cause: >-
+          A dashboard from an earlier run still holds port 8107 — `make play`
+          starts one too, and killing a launch with `-9` orphans its children.
+        fix: >-
+          `make stop`, which now kills every executable this workspace built.
+          Found while verifying this lesson.
+      - symptom: The version block says `unknown`.
+        cause: The commit was not injected into the environment at build or deploy time.
+        fix: '`make dash` passes it from your checkout; the runtime image bakes it in at build.'
+    concepts:
+      - term: Liveness
+        meaning: >-
+          Whether a process is able to respond at all. Says nothing about
+          whether the thing it manages works.
+      - term: Readiness
+        meaning: >-
+          Whether the system can do its job right now — here, joint state
+          arriving and controllers active. What deploy gates and alerts watch.
+      - term: Staleness
+        meaning: >-
+          Data older than it should be. Shown, flagged, and never counted as
+          current.
+    quiz:
+      - q: Which endpoint should a deploy gate wait on, and why not the other?
+        a: >-
+          `/readyz`. Liveness only proves a process answered; the robot could
+          be unplugged.
+      - q: Why did readiness look correct during the stale-controller bug?
+        a: >-
+          Joint state went stale at the same moment, which failed readiness
+          for a different reason. A coincidence, not a design.
+    exercise:
+      task: >-
+        Find another place in this project where a service is polled, and
+        check whether its result can go stale in the same way. If it can,
+        what would you timestamp?
+      hint: Search for `service_is_ready` across `src/`.
+    read:
+      - dashboard.md
+      - architecture.md
 
   - id: what-happened-when-you-were-away
-    title: Finding out what happened when you were not watching
-    objective: Get traces, metrics and logs off a robot and into one place.
-    commands: |
-      make dash
-    checkpoint: >
-      The dashboard reports the running target, profile and git commit —
-      so you know exactly what was running.
-    doc: monitoring.md
+    title: Metrics from a robot behind a home router
+    minutes: 35
+    objective: Get metrics off a robot into one place, and avoid the traps that make a working pipeline show nothing.
     body: |
       A robot that only tells you things while you are watching is a robot
-      you cannot debug. The failures you care about happen at 2am, once,
-      and are not reproducible.
+      you cannot debug. The failures that matter happen at 2 a.m., once, and
+      do not reproduce.
 
-      Traces matter more here than in a web service. A single trace
-      spanning perception, planning, action and hardware is how you answer
-      "why did it do that", and metrics alone cannot show you that chain.
-      The exercise worth doing is the full one: an unexpected behaviour,
-      traced to a span, to a log line, to a deployed version, to a commit.
+      Robots **push** metrics; nothing scrapes them, for the reasons the
+      deployment lesson gave. They use OTLP, the OpenTelemetry protocol,
+      chosen for one property: instrument once, and the backend becomes
+      swappable by editing a collector config. The robot builds OTLP's JSON
+      form with the standard library. The official SDK was measured and
+      declined — about 20 MB and a dozen packages, on an image that had just
+      been cut to a third of its size.
 
-      Two properties are worth stealing wholesale. The collector buffers
-      locally, so the robot keeps working when the network does not —
-      basic movement must never depend on the internet. And simulation and
-      hardware emit through the same path, so the dashboard you learned in
-      simulation is the one you use on the real machine.
+      **The honest cost: no traces.** Tracing is what the SDK is genuinely
+      good at, and a trace across perception, planning and action is exactly
+      what you would want to answer "why did it do that". When that is
+      needed, the dependency will have earned itself. Metrics did not need
+      it.
+
+      Three traps, all hit here. **Names are translated.** The collector
+      rewrites `threevn.robot.ready` into a Prometheus-style name with a
+      suffix derived from its unit and type. The first dashboard queried the
+      original names and every panel was empty — a working pipeline behind a
+      dashboard showing nothing. **Units are load-bearing**: a count of
+      controllers declared with unit `1` arrived with a `_ratio` suffix,
+      which is simply wrong. **Labels can vanish**: without one setting, the
+      robot's id, commit and version are dropped, and every robot looks the
+      same. And Grafana's datasource must declare an explicit id, or a
+      provisioned dashboard points at one that does not exist.
+
+      The stack runs on its own small server, because monitoring that dies
+      with the host it monitors tells you nothing when you need it.
+      Grafana is reachable only through an SSH tunnel: no public login page,
+      nothing to brute force. The collector's memory limiter is first in its
+      pipeline, so under load it refuses data rather than being killed.
+
+      There is no alerting yet, on purpose. Alerts belong once there is a
+      robot whose normal behaviour is known. Alerting on a system with no
+      baseline mostly produces noise, and an alarm that cries wolf gets
+      switched off. When it comes, it will watch readiness, not liveness.
+    steps:
+      - do: Bring the monitoring stack up locally.
+        run: |
+          cd monitoring && docker compose up -d && cd ..
+          docker compose -f monitoring/compose.yml ps
+        expect: >-
+          Three containers up, VictoriaMetrics `healthy`. The collector has
+          no health status on purpose — its image has no shell to run a check
+          with — so ask it from a neighbour:
+          `docker compose -f monitoring/compose.yml exec victoriametrics wget
+          -qO- http://collector:13133/` answers `"Server available"`.
+      - do: >-
+          With `make mock` running, start a dashboard that pushes to it. From
+          inside the container, your machine is `host.docker.internal`.
+        run: |
+          make shell
+          THREEVN_OTLP_ENDPOINT=http://host.docker.internal:4318/v1/metrics THREEVN_OTLP_INTERVAL=5 ros2 launch threevn_dashboard dashboard.launch.py
+        expect: '`exporting metrics to http://host.docker.internal:4318/v1/metrics every 5s` in the log.'
+      - do: >-
+          After half a minute, open **http://localhost:3000** and sign in as
+          `admin` / `admin` (local only — a real box sets
+          `GRAFANA_ADMIN_PASSWORD`). Open **3VN Robotics → Robot health**,
+          and use Explore to query `threevn_robot_ready_ratio`.
+        expect: >-
+          A value of 1, labelled with the robot's id and software version —
+          and a `git_commit` label of `unknown`, because you started this
+          dashboard by hand rather than through `make dash`, which passes the
+          commit in. The version-block lesson, visible in a time series. None
+          of the names the robot emitted are stored in their original form.
+      - do: Read where the collector puts its memory limiter, and the setting that keeps the labels.
+        run: grep -n -E "memory_limiter|resource_to_telemetry_conversion|processors:" monitoring/collector/config.yaml
+      - do: Take it down when you are done.
+        run: docker compose -f monitoring/compose.yml down
+    checkpoint: >-
+      You found the robot's readiness metric in Grafana under its translated
+      name, with the robot's identity attached as labels — and can say why
+      its commit label is honest about not knowing.
+    pitfalls:
+      - symptom: Every Grafana panel is empty, and the collector reports no errors.
+        cause: The dashboard queries the OpenTelemetry names; the stored names were translated.
+        fix: Query the translated names — `threevn_robot_ready_ratio`, `threevn_robot_uptime_seconds`.
+      - symptom: Every robot looks identical in Grafana.
+        cause: Resource attributes were dropped on the way to storage.
+        fix: Enable `resource_to_telemetry_conversion` in the collector's exporter.
+      - symptom: A provisioned dashboard fails to load with no useful message.
+        cause: The datasource has no explicit uid, so Grafana generated a random one.
+        fix: Declare the uid in the datasource provisioning file.
+    concepts:
+      - term: OTLP
+        meaning: >-
+          The OpenTelemetry protocol for sending metrics, logs and traces.
+          Instrument once; change backends in the collector.
+      - term: Metric name translation
+        meaning: >-
+          The collector rewriting OpenTelemetry names into Prometheus
+          conventions, adding suffixes from unit and type.
+      - term: Memory limiter
+        meaning: >-
+          A collector stage that refuses data under memory pressure rather
+          than growing until the process is killed.
+    quiz:
+      - q: The pipeline works and the dashboard is empty. What is the most likely cause here?
+        a: The dashboard queries untranslated names.
+      - q: Why no alerting yet?
+        a: >-
+          With no baseline of normal behaviour, alerts are mostly noise, and
+          noisy alerts get ignored — taking the real ones with them.
+      - q: Why decline the OpenTelemetry SDK, and what did that cost?
+        a: >-
+          About 20 MB and a dozen packages on a deliberately small robot
+          image. It cost traces and auto-instrumentation, which are exactly
+          what the SDK is good at.
+    exercise:
+      task: >-
+        Write the one alert rule you would add first, as a query over the
+        translated metric names, with a threshold and a duration. Then write
+        down what "normal" would have to look like for a week before you
+        would trust it.
+    read:
+      - monitoring.md
+      - dashboard.md
+
+project:
+  title: A first-power-on runbook
+  minutes: 90
+  brief: |
+    One day the arm will be assembled on a desk, and someone will plug it
+    in for the first time. Write the runbook for that day — then rehearse
+    every step that can be rehearsed against the mock.
+
+    A runbook is only useful if each step can be checked. Every line you
+    write must name the command, test or document that verifies it.
+  tasks:
+    - do: >-
+        **Before power.** List what must be green first, and how to check it:
+        the fast suite, the firmware's native tests, the runtime image's
+        verification, the firmware's compiled-in limits matching the profile.
+    - do: >-
+        **Wiring.** From `docs/safety.md` and `docs/bom-hardware.md`: the
+        servo supply, the common ground, why not the USB rail, and where the
+        power switch must be.
+    - do: >-
+        **First power.** What should happen at boot, and what it means if
+        something moves. Use the firmware behaviours lesson.
+    - do: >-
+        **First motion.** The smallest, slowest command you would send first,
+        and to which joint. Why that one?
+    - do: >-
+        **What to watch.** Readiness, the clamping status flag, and the
+        version block — and what each would tell you.
+    - do: >-
+        **Abort and rollback.** The physical abort, and the software one,
+        with the exact image you would roll back to.
+    - do: Rehearse the readiness part for real.
+      run: |
+        make mock
+        make dash
+  done_when:
+    - Every step names the command, test or document that verifies it.
+    - You rehearsed readiness against the mock, and saw `/readyz` go from 200 to 503 when you stopped it.
+    - Someone else could follow it without asking you anything.
+    - It says plainly which steps cannot be rehearsed without hardware.
+  hints:
+    - title: The first motion
+      body: >-
+        Pick the joint whose failure would hurt least and whose limit is
+        furthest from anything — and command a few degrees, slowly, with your
+        hand near the switch. Nothing about the first motion should be
+        interesting.
+  read:
+    - safety.md
+    - firmware.md
+    - dashboard.md
+    - hardware.md

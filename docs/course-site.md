@@ -8,27 +8,65 @@ make site-serve    # and look at it: http://localhost:8109/
 ## What it is
 
 A course, not a manual. Six stages: the first three free, then three
-tiers at $5 each. Each lesson states what you will be able to do, what
-to run, why it is built that way, and how you will know it worked.
+tiers at $5 each. Every stage opens with what you will be able to do by
+the end, and closes with a **project** that has a definition of done.
 
-The curriculum is DATA, in `course/*.yaml` — stage, price, lessons, each
-with an objective, commands, a checkpoint and a body. Adding a lesson is
-adding a block to a YAML file; the generator knows nothing about any
-particular lesson. That is the same reasoning that puts the robot's
-dimensions in YAML rather than in the xacro.
+Every lesson has the same shape, so a student learns where to look:
+
+| part | YAML key | what it is |
+|---|---|---|
+| objective | `objective` | one sentence: what you will be able to do |
+| why | `body` | the reasoning, usually through something that went wrong here first |
+| do it | `steps` | numbered; each a `do`, an optional `run`, an optional `expect` |
+| checkpoint | `checkpoint` | how you know it worked |
+| when it goes wrong | `pitfalls` | `symptom` → `cause` → `fix` |
+| terms | `concepts` | `term` + `meaning`; collected into the glossary page |
+| check yourself | `quiz` | `q` + `a`; answers fold away in `<details>`, which needs no script |
+| stretch | `exercise` | a `task`, with an optional `hint` and `answer` |
+| going deeper | `read` | docs in `docs/`, linked by their rendered page |
+
+Plus `minutes`, so stage and course durations are **summed, never
+typed** — the same rule as the robot's inertia tensors.
+
+The curriculum is DATA, in `course/*.yaml`. Adding a lesson is adding a
+block to a YAML file; the generator knows nothing about any particular
+lesson. That is the same reasoning that puts the robot's dimensions in
+YAML rather than in the xacro.
+
+### It is validated before it is rendered
+
+```bash
+make course-check
+```
+
+A lesson that tells a student to run `make foo` when the Makefile has
+no `foo`, or links a doc that has been renamed, is a broken lesson that
+looks finished. So before rendering, the generator checks:
+
+- every stage, lesson and project has the fields its page renders
+- every `make <target>` in a step, a pitfall's fix or inline code exists
+  in the Makefile — prose is not checked, only code
+- every doc a lesson links or reads exists in `docs/`
+- lesson ids and glossary terms are unique, and stages are numbered in
+  file order
+
+Every problem is reported at once, not the first. A failure stops
+`make site`, the CI `course` job, and the deploy build — so a broken
+curriculum never replaces the one already being served. The checker was
+mutation-tested when it was written: four planted faults, four named
+errors.
 
 The project's documentation is still rendered, underneath, as reference
-that lessons link into. What changed is which one leads: the course is
-the front page and the docs are the appendix, rather than the other way
-round.
+that lessons link into. The course is the front page and the docs are
+the appendix, rather than the other way round.
 
 Tiers are **shown, not enforced**. The lock badge and the price are
 visible; nothing checks them. There are no accounts and no payment, so
 anyone with the link reads everything.
 
 It also publishes the parts that do not work. The index says so in a
-banner. A course that only shows the finished half teaches the wrong
-thing about engineering.
+banner, and the grasp lesson ends on an open problem. A course that only
+shows the finished half teaches the wrong thing about engineering.
 
 ## Three constraints, all from where it is served
 
@@ -54,8 +92,10 @@ login, and nothing behind it is secret.
 ## Deploying it
 
 > The secret path is **not in this repository and must not be**. This
-> repo is public. Delivery Manager's path was kept out of git for the
-> same reason — see `3vnsystems-infrastructure/ARCHITECTURE.md`.
+> repository is private today, but it was public and may be again, and
+> anything committed stays in its history. Delivery Manager's path was
+> kept out of git for the same reason — see
+> `3vnsystems-infrastructure/ARCHITECTURE.md`.
 
 That file also says, and it is load bearing:
 

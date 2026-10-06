@@ -3,86 +3,820 @@ number: 4
 kind: tier
 title: Make it trustworthy
 price: "$5"
-summary: >
-  The layers that let you change a robot's code on a Friday: real test
-  tiers, an image that ships, and a pipeline that catches what you miss.
+summary: >-
+  The layers that let you change a robot's code on a Friday: tests sorted
+  by what they can catch, tests that cannot pass by accident, a suite that
+  stays fast on purpose, an image that carries no simulator, a pipeline
+  that runs what you run, releases that carry evidence, and a deploy gate
+  for a machine with motors.
+
+outcomes:
+  - Place any given bug in the cheapest test layer that can catch it.
+  - Write tests that cannot pass by accident — self-checking matchers, independent oracles, controls, and inputs that must change outputs.
+  - Keep a suite inside its time budget structurally, and notice the day it stops being inside it.
+  - Test interface contracts against a real ROS graph with no physics.
+  - Build a robot image about a quarter the size of the development image, and verify what it does not contain.
+  - Run CI that executes exactly what you run locally, on two architectures.
+  - Cut a release whose tag, version and image provably agree, and gate a deploy that can move motors.
+
+prerequisites:
+  - Stage 3 complete — you have run `make test`, `make mock` and `make sim`.
+  - A GitHub account for the CI lessons, and your own copy of the repository to push to.
 
 lessons:
   - id: test-layers
-    title: Four kinds of test, and what each is for
-    objective: Know which layer should catch a given bug, and why.
-    commands: |
-      make test        # fast, no simulator
-      make test-ros    # integration, mock target
-      make test-sim    # Gazebo, slow
-    checkpoint: >
-      All three are green, and you can say which one would have caught a
-      given regression.
-    doc: testing.md
+    title: Four layers of test, and what each is for
+    minutes: 30
+    objective: Know which layer should catch a given bug, and why that layer and not another.
     body: |
-      The pyramid you already use survives contact with robotics, but the
-      layers mean different things.
+      The test pyramid you already use survives contact with robotics, but
+      the layers mean different things. Each one earns its place by what it
+      can catch that the layer below cannot:
 
-      The fast layer touches no simulator: geometry, limits, naming,
-      structure. The integration layer runs the real control stack against
-      a mock, so it exercises topics, actions and services without
-      physics. The simulation layer runs scenarios in Gazebo, where
-      contact and gravity are real and results vary. Each is slower and
-      less deterministic than the last, which is exactly the order you
-      want to find things in.
+      | layer | needs | catches | takes |
+      |---|---|---|---|
+      | `make test` | nothing | config, structure, kinematics, inertia, the seam, protocol and firmware logic | under a minute |
+      | `make test-ros` | a ROS graph, mock hardware | node startup, interface contracts, limit enforcement, transforms | a couple of minutes |
+      | `make test-sim` | Gazebo | spawning, controllers under physics, real-time factor, scenarios | a few minutes |
+      | `make acceptance` | Gazebo and the dashboard | the whole sequence, with a report naming the build | a minute or two, plus setup |
 
-      Scenarios here are tests and demos at once, deliberately. Written
-      once for both, the demo cannot drift away from the thing that is
-      actually verified — the failure mode where a conference demo works
-      and the test suite tests something else.
+      Each is slower and less deterministic than the last, which is exactly
+      the order you want to find things in. A bug caught in the fast layer
+      costs seconds. The same bug found in simulation costs a launch, a wait,
+      and a squint at a 3D view. Found on hardware, it can cost a part.
 
-      One real bug from this project, as a warning about the layer
-      boundary: a scenario slept 0.3 seconds of *wall* time, then checked
-      a post-condition once. Simulation time runs at about a third of
-      wall time, so it was looking 0.08 simulated seconds after
-      commanding a motion. The arm reached its target exactly — measured
-      error 0.0000 rad — and the test failed anyway.
+      So the working rule is: **push every check down to the cheapest layer
+      that can express it.** Only what genuinely needs physics goes in the
+      simulation layer — and that layer is real-time-factor sensitive, which
+      is why its steps poll rather than sleep.
+
+      It is worth noticing how much ends up in the bottom layer. Geometry,
+      limits, inertia, naming, structure, package boundaries, forward
+      kinematics, readiness logic, the HTTP contract of the dashboard, the
+      wire protocol, and the firmware's safety behaviour all run with no
+      simulator and no hardware. That is deliberate: those tests run in
+      seconds, so they run constantly.
+    steps:
+      - do: Run the fast layer.
+        run: time make test
+      - do: Run the integration layer. It starts a real ROS graph against mock hardware.
+        run: time make test-ros
+      - do: Run the simulation layer. Go and make tea.
+        run: time make test-sim
+      - do: >-
+          Run the acceptance sequence against a running robot, then copy its
+          report out.
+        run: |
+          make sim
+          make acceptance
+          make acceptance-report
+        expect: '`./acceptance.md` in your checkout, naming the commit, the target and every step''s result.'
+    checkpoint: >-
+      All four layers are green on your machine, and you have a time for
+      each.
+    pitfalls:
+      - symptom: '`make test-ros` or `make test-sim` fails on startup with errors about nodes or ports.'
+        cause: A stack from an earlier run is still alive.
+        fix: Both targets run `make stop` first. If you launched something by hand, stop it the same way.
+    concepts:
+      - term: Test layer
+        meaning: >-
+          A tier of tests defined by what it needs to run — nothing, a ROS
+          graph, a simulator, the whole system — and therefore what it can
+          catch and what it costs.
+      - term: Acceptance test
+        meaning: >-
+          An end-to-end run of the whole system against a real target, with a
+          report tying the result to the exact build.
+    quiz:
+      - q: A joint limit in the profile is wrong by 10°. Which layer should catch it?
+        a: >-
+          `make test`. It is a property of the description and needs no
+          running code at all.
+      - q: The launch file stops starting the gripper controller. Which layer?
+        a: >-
+          `make test-ros` — it checks that the documented actions exist on a
+          running graph, and needs no physics to do it.
+      - q: The robot sinks into the floor when it spawns. Which layer?
+        a: >-
+          `make test-sim` for the symptom — though the base's version of this
+          bug was actually caught by a fast test that checked the chassis sat
+          on its wheels, before anyone saw it in Gazebo.
+    exercise:
+      task: >-
+        Take the last three bugs you fixed in your own work. For each, name
+        the cheapest layer that could have caught it, and the layer that
+        actually did. Where they differ, what would the cheaper test have
+        needed?
+    read:
+      - testing.md
+
+  - id: tests-that-cannot-lie
+    title: Tests that cannot pass by accident
+    minutes: 40
+    objective: Recognise and write tests that cannot go green for the wrong reason.
+    body: |
+      A test that passes by accident is worse than no test. It is a green
+      light wired to nothing, and it buys confidence you have not earned.
+      This project uses five patterns against it, each learned the hard way.
+
+      **1. Check the matcher.** The test that stops the robot's package
+      depending on Gazebo uses a regular expression. A regex that matches
+      nothing would pass forever. So a companion test feeds it names it must
+      flag — `ros_gz`, `gz_ros2_control` — and names it must not — `xacro`,
+      `controller_manager`.
+
+      **2. Make the input move the output.** The CAD generator is checked
+      against the profile: scale a link length by 1.5 and the printed beam
+      must scale by 1.5. Without that, a generator that ignored its input
+      entirely would pass every other test.
+
+      **3. Use an independent oracle.** Forward kinematics is computed twice
+      — by this project's own matrix code, and by the standard library that
+      `robot_state_publisher` uses. A test asserts they agree to a
+      millimetre. Code tested only against its own arithmetic is merely
+      self-consistent, including when it is consistently wrong. This test
+      found the camera mount tilted up at the ceiling before any camera
+      existed. For the same reason, a few expected positions in the tests
+      are worked out **by hand** and stay that way: an expected value
+      computed by the code under test checks nothing.
+
+      **4. Run a control.** The grasp verifier also tries to grasp empty
+      air. A detector that says yes to nothing is not a detector.
+
+      **5. Notice when a metric stops discriminating.** Twice here, a summary
+      number quietly stopped measuring anything: a dataset leakage check
+      that passed everything once the data grew, and a heading error that
+      averaged turns in both directions until they cancelled. The signal
+      both times: the metric could no longer tell apart two things known to
+      be different. That means the measurement is broken, not the system.
+    steps:
+      - do: Read the matcher's own test.
+        run: grep -n -B2 -A12 "def test_test_dependencies_are_not_forbidden_by_accident" src/threevn_bringup/test/test_package_dependencies.py
+      - do: Read why the kinematics are checked against a second implementation.
+        run: sed -n 1,60p src/threevn_bringup/test/test_tf_matches_kinematics.py
+      - do: Find the CAD test that makes the generator prove it reads its input.
+        run: grep -rn -A12 "def test_changing_the_profile_changes_the_part" cad/
+      - do: >-
+          Now mutate. In `test_package_dependencies.py`, temporarily replace
+          the pattern in `FORBIDDEN` with `r'(?!)'` — a regex that never
+          matches anything — and run the suite.
+        run: make test
+        expect: >-
+          The real boundary test still passes — it has nothing to object
+          to — and the matcher's own test fails. That is the companion test
+          doing its job.
+      - do: Revert it.
+        run: git checkout src/threevn_bringup/test/test_package_dependencies.py
+    checkpoint: >-
+      You broke a test's matcher and watched a second test catch it, and you
+      can name the five patterns.
+    pitfalls:
+      - symptom: A test has never failed, in its whole life.
+        cause: Possibly it cannot.
+        fix: >-
+          Break the code it guards, once, and watch it go red. If it does
+          not, you have found a test to fix.
+    concepts:
+      - term: Mutation testing
+        meaning: >-
+          Deliberately breaking the code under test to confirm the tests
+          notice. A test that survives a mutation is not testing that code.
+      - term: Control case
+        meaning: >-
+          A run where the expected answer is "no" — grasping empty air, an
+          image with no target — to prove the check can say no.
+      - term: Discriminating metric
+        meaning: >-
+          A measure that gives different answers for situations known to
+          differ. One that stops doing so is broken, whatever it reports.
+    quiz:
+      - q: Why keep hand-computed expected values in a test, rather than computing them with the function being tested?
+        a: >-
+          An expected value computed by the code under test agrees with that
+          code by construction. A hand-computed one is an independent claim
+          that can disagree.
+      - q: A leakage check passes every dataset you give it. Is that good news?
+        a: >-
+          Not necessarily. Feed it a dataset you know leaks. If it still
+          passes, it has stopped discriminating — which is exactly what
+          happened here when the dataset grew.
+    exercise:
+      task: >-
+        Pick a test you own at work that has never failed. Mutate the code
+        it guards in the most plausible way a real bug would, and run it.
+        Did it go red? If not, write down what it would need to check.
+    read:
+      - testing.md
+      - cad.md
+
+  - id: the-budget
+    title: Keeping the suite fast is a feature you maintain
+    minutes: 30
+    objective: Keep a suite inside its time budget structurally, and catch the day it drifts out.
+    body: |
+      A sixty-second budget does not hold itself. It holds because of
+      structural choices — and it breaks the first time someone forgets one.
+
+      **The marker that does not reach.** Simulation tests are marked
+      `slow`, and `make test` passes `-m "not slow"` through colcon. That
+      works for Python packages. But in a CMake-built ROS package, pytest is
+      launched by CTest, which never sees colcon's pytest arguments. The
+      marker is silently ignored, and `make test` would quietly spend two
+      minutes starting a simulator. So the simulation package registers
+      with CTest only the tests that need no simulator, **by name**, and
+      `make test-sim` calls pytest directly with `-m slow`. Explicit beats
+      clever.
+
+      **The fix that made it slow.** When scenario steps changed from
+      sleeping to polling — the right fix, from Stage 3 — the suite went from
+      **35 seconds to 1 minute 22**, past its own budget. The framework's
+      unit tests include four that deliberately assert a false
+      post-condition, to prove a failing step is reported as failing. Under
+      polling, each one now waited out the full 15-second timeout before
+      failing. Correct behaviour, and an expensive test. They now pass
+      `timeout=0`, and the suite is back at about 33 seconds.
+
+      Nobody would have noticed for a while. Every test still passed. The
+      only signal was the clock, which is why the budget is measured every
+      time rather than assumed.
+
+      **The report that lies.** `colcon test-result` reports every result
+      file under `build/`, not only this run's. A failure fixed an hour ago
+      kept being reported, and a green lint run looked red. The targets now
+      clear old results first.
+    steps:
+      - do: Time the suite.
+        run: time make test
+      - do: See which simulation tests CTest is allowed to run, and the comment explaining why.
+        run: sed -n 15,40p src/threevn_sim/CMakeLists.txt
+      - do: Find the four tests that must fail fast.
+        run: grep -n -B3 "timeout=0" src/threevn_control/test/test_scenario_framework.py
+      - do: List the slowest tests in one package.
+        run: |
+          make shell
+          cd /ws/src/threevn_control && python3 -m pytest test -q --durations=5
+        expect: The five slowest tests and their times. None should be more than a second or two.
+    checkpoint: >-
+      You know your suite's time, and you can explain both ways this
+      project's budget was nearly lost.
+    pitfalls:
+      - symptom: The suite slowly gets slower, and every test passes.
+        cause: Something correct but expensive was added — often a timeout being waited out.
+        fix: Run with `--durations` now and then, and treat the budget as a failing test when exceeded.
+    concepts:
+      - term: Test marker
+        meaning: >-
+          A label on a test — here `slow` — used to select or exclude it. Only
+          effective if the runner actually receives the selection.
+      - term: CTest
+        meaning: >-
+          CMake's test runner. In CMake-built ROS packages it launches
+          pytest, and does not pass colcon's pytest arguments through.
+    quiz:
+      - q: Polling is more correct than sleeping. Why did it make the suite slower?
+        a: >-
+          Tests that deliberately assert a false post-condition now waited
+          for the full timeout before failing, where before they failed after
+          one short sleep.
+      - q: Why register simulation tests with CTest by name instead of relying on the `slow` marker?
+        a: >-
+          CTest never receives colcon's `-m "not slow"`, so in a CMake
+          package the marker is ignored. Naming the safe tests explicitly
+          does not depend on an argument arriving.
+    exercise:
+      task: >-
+        Run `--durations=10` across every Python package in `src/`. Find the
+        slowest test in the fast suite and decide whether it belongs there.
+        If it does not, where should it go?
+    read:
+      - testing.md
+
+  - id: integration-without-physics
+    title: Integration tests without physics
+    minutes: 35
+    objective: Test interface contracts and limit enforcement against a real ROS graph, with mock hardware.
+    body: |
+      Between the fast suite and the simulator sits a layer that starts a
+      **real ROS graph** — real launch files, real controllers, the real
+      controller manager — against **mock hardware**. No physics, so it is
+      deterministic. A real graph, so it catches what unit tests cannot: a
+      node that never starts, a topic with the wrong type, an action that
+      does not exist, a transform nobody publishes.
+
+      It checks the interface as documented, literally: the topics,
+      services and actions in the architecture document must exist, with
+      the right types; every actuated joint must appear in `/joint_states`;
+      exactly one of each node must be running.
+
+      And it holds the line on a safety finding. Early on, commanding a
+      joint to 180° against a 90° limit drove it to 180° under the mock.
+      Neither the description's limit nor the controller config's min and
+      max stopped it — Gazebo had only looked safe because its physics joint
+      has a hard stop. Turning on `enforce_command_limits` made the
+      controller manager clamp every command below the seam. Two tests now
+      pin it: an out-of-limit command is clamped, and an in-limit command is
+      **not** — because a clamp that clamps everything would pass the first
+      test alone.
+
+      Note one thing the clamp does not do. **A clamped goal still reports
+      `SUCCEEDED`.** The motion went somewhere you did not ask for, and the
+      status says all is well. That is why Tier 5 adds a loud check above
+      the seam as well as this silent one below it.
+
+      And a warning, found while writing this lesson. **Nothing runs this
+      layer automatically** — not `make test`, not CI. When the CAD work
+      raised the arm's base by 15 mm, the hand-computed tool height in the
+      fast suite was updated; the copy in this layer was not, and it failed,
+      unnoticed, for nearly two weeks, until the course's own verification ran
+      `make test-ros`. A test layer nobody runs is not a safety net. It is
+      a list of things that used to be true.
+    steps:
+      - do: Run the integration layer.
+        run: make test-ros
+      - do: List what it checks.
+        run: grep -n "def test_" src/threevn_bringup/test/test_ros_integration.py src/threevn_bringup/test/test_tf_matches_kinematics.py
+      - do: Find the setting the limit tests pin.
+        run: grep -n -B3 -A3 "enforce_command_limits" src/threevn_bringup/config/controllers.yaml
+      - do: >-
+          Remove it — set it to `false` — and run the layer again. Then put it
+          back.
+        run: |
+          make test-ros
+          git checkout src/threevn_bringup/config/controllers.yaml
+        expect: '`test_out_of_limit_command_is_clamped_below_the_seam` fails; its partner still passes.'
+    checkpoint: >-
+      `make test-ros` is green, and you watched it catch limit enforcement
+      being switched off.
+    pitfalls:
+      - symptom: A test in this layer fails on code nobody touched for weeks.
+        cause: >-
+          The layer only runs when someone types `make test-ros`, so a change
+          elsewhere can break it silently.
+        fix: >-
+          Run it before every merge that touches the robot description or
+          the controllers — or put it in CI, which is this lesson's stretch.
+      - symptom: The integration tests are flaky only on a busy machine.
+        cause: Controller activation has a wall-clock window, and a loaded machine misses it.
+        fix: Run it alone. If it is still flaky, look for a wait that should be a poll.
+    concepts:
+      - term: Integration test
+        meaning: >-
+          A test that runs several real components together — here a ROS
+          graph with real controllers — rather than one in isolation.
+      - term: Interface contract
+        meaning: >-
+          The documented set of topics, services and actions, with their
+          types, that clients are entitled to rely on.
+    quiz:
+      - q: Why test that an in-limit command is NOT clamped?
+        a: >-
+          A clamp that clamped everything — or a robot that never moved —
+          would pass the out-of-limit test on its own. The pair proves the
+          clamp is selective.
+      - q: Why is the mock better than Gazebo for testing limit enforcement?
+        a: >-
+          Gazebo clamps for its own physical reasons, so a limit test there
+          passes whether or not the software enforces anything. The mock has
+          no hard stops, so only the software can make the test pass.
+    exercise:
+      task: >-
+        Put this layer in CI. Add a job to your copy of the workflows that
+        builds the `ci` image, starts the mock robot and runs
+        `pytest -m ros` in `src/threevn_bringup`. Then prove it earns its
+        place: break the hand-computed tool height in
+        `test_tf_matches_kinematics.py` on a branch and watch the job go red.
+      hint: >-
+        `simulation-tests.yml` already runs a slow layer in CI; read how it
+        starts a robot and waits for it before copying the shape.
+    read:
+      - safety.md
+      - architecture.md
 
   - id: images-that-ship
     title: An image that carries no simulator
-    objective: Build the image that would go on a robot, and prove it is clean.
-    commands: |
-      make runtime
-      make runtime-verify
-    checkpoint: >
-      The runtime image runs the stack and contains no Gazebo.
-    doc: docker.md
+    minutes: 35
+    objective: Build the image that would go on a robot, and verify what it does not contain.
     body: |
-      The development image is several gigabytes of ROS, Gazebo, RViz and
-      a virtual display. None of that belongs on a robot.
+      The development image is about 6 GB of ROS, Gazebo, a CAD kernel,
+      RViz and a virtual display. None of that belongs on a robot.
 
-      So the Dockerfile is staged, and the robot image is built from an
-      earlier stage than the one you develop in. `runtime-verify` then
-      checks the claim rather than trusting it: the simulator is absent,
-      and the thing still starts.
+      So the Dockerfile has seven stages, and the robot's image is built
+      from an early one:
 
-      This is the seam from Stage 1 showing up as a build artefact. The
-      architecture said hardware builds need no simulator; this is the
-      image that proves it, and it is small enough to pull over a
-      domestic connection.
+      ```
+      base      ROS 2 and ros2_control. No simulator, no GUI.
+        ├── simdeps   + Gazebo
+        │     ├── ci      + test tools              what CI runs
+        │     │     └── cad   + geometry kernel
+        │     │           └── dev  + RViz, noVNC   what you run    6.13 GB
+        │     └── builder + the robot packages, built
+        └── runtime   base + that build             what ships      1.68 GB
+      ```
 
-  - id: ci-that-catches-you
-    title: A pipeline that catches what you miss
-    objective: See CI fail on something you were sure was fine.
-    commands: |
-      make lint
-    checkpoint: >
-      Lint and tests pass locally, and the same jobs run on every push.
-    doc: cicd.md
+      About a quarter of the size. It was a third before the CAD stage was
+      added under the dev image — and the robot image did not grow at all,
+      because nothing on the robot needs a geometry kernel. That separation
+      is only possible because the packages that run on the robot genuinely
+      do not depend on Gazebo. That is the boundary
+      test from Stage 1, paying out as a build artefact.
+
+      `make runtime-verify` then checks the claim rather than trusting it:
+      no simulator packages, no copyleft tooling from the dev stage, the
+      simulation package not installed, a git commit baked in — and then
+      it **starts the stack**, because an image that is clean and cannot run
+      has only solved the easy half.
+
+      Three details, each of which cost time:
+
+      - **"No simulator" is the honest claim; "no Gazebo code" would not
+        be.** One robot dependency pulls about 8 MB of Gazebo libraries and
+        the generic `gz` tool. `gz sim` is absent; the claim is worded to
+        match.
+      - **The runtime user needs a writable home.** `ros2 launch` creates a
+        log directory before anything else, and without a home it dies in a
+        traceback that never mentions permissions.
+      - **Health checks use `127.0.0.1`, never `localhost`.** Inside a
+        container `localhost` can resolve to the IPv6 address first, and a
+        server bound to IPv4 only then fails a perfectly healthy check.
+
+      No platform is pinned, either. The base image is published natively
+      for both architectures, so it builds natively on an Apple Silicon Mac
+      and on an x86 runner. Pinning one would force emulation on the other.
+    steps:
+      - do: Build the robot image.
+        run: make runtime
+        expect: The image name and its size — about 1.7 GB, a quarter of the dev image.
+      - do: Verify it.
+        run: make runtime-verify
+        expect: '`ok` lines for every absent package, the commit, and a stack that starts with controllers active.'
+      - do: Compare the two images.
+        run: docker images | grep threevn-robotics
+      - do: Read what the image says about itself, without running it.
+        run: docker inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' threevn-robotics-runtime:local
+        expect: The full commit hash it was built from.
+    checkpoint: >-
+      The runtime image starts the control stack, contains no simulator, and
+      can tell you which commit it is.
+    pitfalls:
+      - symptom: The robot image dies at launch inside `get_logger()`, with no mention of permissions.
+        cause: The runtime user has no writable home, and `ros2 launch` writes logs under it before anything else.
+        fix: Create the home directory, and set `ROS_LOG_DIR` explicitly so the location is predictable.
+      - symptom: A health check fails against a service you can reach by hand.
+        cause: '`localhost` resolved to `::1` first, and the server listens on IPv4 only.'
+        fix: Use `127.0.0.1` in health checks.
+    concepts:
+      - term: Multi-stage build
+        meaning: >-
+          One Dockerfile producing several images from shared stages, so the
+          shipped image can stop before the heavy development layers.
+      - term: OCI labels
+        meaning: >-
+          Standard metadata baked into an image — its source, revision and
+          build time — readable with `docker inspect` without running it.
+    quiz:
+      - q: Why does the robot image's size depend on a test written in Stage 1?
+        a: >-
+          The runtime image can skip Gazebo only because the robot's packages
+          do not depend on it — and the dependency test is what keeps that
+          true.
+      - q: Why does `runtime-verify` start the stack instead of only inspecting packages?
+        a: >-
+          Small and clean but unable to run is worse than large and working.
+          Absence of the wrong things is half the claim; the other half is
+          presence of a working robot.
+    exercise:
+      task: >-
+        Run `docker history threevn-robotics-runtime:local` and find the
+        largest layer. Does a robot need what is in it? If not, what would
+        it take to remove it — and what would you have to re-verify?
+    read:
+      - docker.md
+      - deployment.md
+
+  - id: ci-runs-what-you-run
+    title: CI that runs what you run
+    minutes: 40
+    objective: Make CI execute exactly what you run locally, and make it check decisions as well as tests.
     body: |
-      Nothing in this phase is unfamiliar — jobs, caching, artefacts. What
-      is worth your attention is what CI caught here that local runs did
-      not.
+      The principle is one sentence: **CI runs what you run.** It builds the
+      same Dockerfile, to the `ci` stage, and executes the same commands
+      your machine does. A green tick means the thing you ran passed — not
+      that a parallel pipeline happens to agree with it.
 
-      A lint failure was missed because the output was grepped instead of
-      the exit status being checked. A release workflow raced the image
-      build. A version tag was pushed without the version file being
-      bumped, and the project's own consistency check caught it.
+      Two architectures, deliberately. Development happens on Apple Silicon
+      and most servers are x86. Running both is the only way to catch
+      divergence in either direction.
 
-      Each of those is a habit, not a tool. The tool only matters because
-      the habit failed.
+      Beyond "the tests pass", CI asserts three **decisions**, because
+      decisions rot silently:
+
+      1. **No mixed Gazebo installation** — fail if any Gazebo package
+         resolves from the second apt repository, because the failure
+         otherwise appears much later as a segfault.
+      2. **`xacro.load_yaml` still exists** — the single-source design rests
+         on it, and if a future release removed it, this fails with a clear
+         message rather than a confusing expansion error.
+      3. **The seam is intact** — checked on the expanded descriptions as
+         files, not only as a unit test.
+
+      And it uploads the expanded robot descriptions as an artefact, so a
+      reviewer can diff the actual robot a pull request produces rather
+      than reasoning about macros.
+
+      What CI caught here was mostly habits, not code. A lint failure was
+      missed locally because the output was searched for text instead of
+      the exit status being checked. A release workflow raced the image it
+      was meant to publish. A version tag was pushed without the version
+      file being bumped — and the release refused.
+
+      One honest caveat, true of this repository as you read it: CI runs on
+      pushes to `main` and on pull requests. Work on a branch that has never
+      been opened as a pull request **has never been through CI**, however
+      green it is locally.
+    steps:
+      - do: Read the workflow. Find the three decision checks.
+        run: less .github/workflows/ci.yml
+      - do: Run CI's seam check yourself, exactly as CI does, inside the container.
+        run: |
+          make shell
+          S=/ws/install/threevn_robot_description/share/threevn_robot_description
+          for t in mock gz esp32; do
+            ros2 run xacro xacro "$S/urdf/threevn_arm.urdf.xacro" params_file:="$S/config/threevn_arm_v1.yaml" target:=$t > /tmp/$t.urdf
+          done
+          ! grep -q "gz_ros2_control\|<gazebo" /tmp/mock.urdf && echo "mock is clean"
+      - do: >-
+          Push the repository to your own GitHub copy, open a pull request
+          with a deliberately failing test, and watch both architectures go
+          red. Then fix it and watch them go green.
+    checkpoint: >-
+      You have seen CI fail and pass on your own copy, on both
+      architectures, for a change you made.
+    pitfalls:
+      - symptom: Lint "passed" locally and failed in CI.
+        cause: The local check searched the output for a word rather than checking the exit status.
+        fix: Exit codes are the contract. `echo $?`, or `set -e` in scripts.
+      - symptom: A failure appears only on one architecture.
+        cause: A binary dependency, a floating-point difference, or an image layer that differs by platform.
+        fix: That is the reason both run. Reproduce on the failing architecture before guessing.
+    concepts:
+      - term: CI parity
+        meaning: >-
+          CI running the same image and the same commands as a developer's
+          machine, so local green and CI green mean the same thing.
+      - term: Build matrix
+        meaning: >-
+          One job run across several configurations — here amd64 and arm64.
+      - term: Decision check
+        meaning: >-
+          A CI step that asserts an architectural decision still holds, not
+          just that tests pass.
+    quiz:
+      - q: Why check in CI that `xacro.load_yaml` exists, when every test would fail without it anyway?
+        a: >-
+          Every test would fail with a confusing expansion error. The direct
+          check fails with the actual cause, in one line, the first time it
+          happens.
+      - q: Why upload the expanded descriptions as an artefact?
+        a: >-
+          So a reviewer can diff the robot a pull request actually produces,
+          rather than reasoning about what a macro change does.
+    exercise:
+      task: >-
+        Pick a decision from `docs/decisions/` that CI does not yet check.
+        Add a step to your copy of `ci.yml` that fails when the decision is
+        violated, and prove it on a pull request that violates it.
+      hint: >-
+        A good decision check fails in one line with the actual cause. The
+        course curriculum is checked this way: `python3
+        scripts/build_site.py --check` fails a pull request whose lessons
+        point at a Make target or a document that does not exist.
+    read:
+      - cicd.md
+
+  - id: releases-are-evidence
+    title: A release is a tag plus evidence
+    minutes: 30
+    objective: Cut a release whose tag, version file and image provably agree.
+    body: |
+      A robot in the field is running *something*. When it misbehaves, the
+      first question is "what, exactly?" — and a version you cannot trust is
+      worse than none.
+
+      **One source for the version.** `VERSION` is the only place the
+      software version is written. Every package manifest and every
+      `setup.py` must agree with it, and a test fails the build if one does
+      not. That test exists because of a real incident: a running robot
+      reported `software_version: 0.3.0` while all six package manifests said
+      `0.1.0`. Nothing broke, which was the problem — nobody would have
+      noticed the version was lying until they tried to reproduce a fault
+      from it.
+
+      **Three versions, deliberately independent.** Software, firmware and
+      wire protocol change on different schedules. A host updated a dozen
+      times can still be talking to firmware nobody reflashed, and one
+      number would hide exactly that. All three are reported together — by
+      the running robot and in every release.
+
+      **A release cannot ship something untested.** The release workflow
+      refuses to run if the tag and `VERSION` disagree, because every
+      artefact it produced would be mislabelled. And it does not build its
+      own image: it looks up the one the image workflow already built and
+      verified from that commit. If that image is not in the registry, the
+      release fails and says to tag a commit that has been through CI.
+
+      **Digests, not tags.** A tag can be moved; a content digest cannot.
+      The release manifest records the digest for each architecture, and
+      anything that must be reproducible pulls by digest.
+    steps:
+      - do: Find the single source, and check the packages agree with it.
+        run: |
+          cat VERSION
+          grep -h "<version>" src/*/package.xml | sort | uniq -c
+        expect: One version, the same in every package.
+      - do: Read where the release refuses a mismatched tag.
+        run: grep -n -B2 -A16 "The tag and VERSION must agree" .github/workflows/release.yml
+      - do: >-
+          Bump `VERSION` alone — say to `9.9.9` — and run the suite. Then
+          revert.
+        run: |
+          make test
+          git checkout VERSION
+        expect: >-
+          Three failures from one change: every package manifest, every
+          `setup.py`, and the version the running robot would report all
+          disagree with `VERSION` — each named by its own test.
+      - do: See the phase boundaries, which are tags too.
+        run: git tag -l "phase-*"
+    checkpoint: >-
+      You watched the version-consistency test catch a lone `VERSION` bump,
+      and can explain why the release reuses CI's image instead of building
+      its own.
+    pitfalls:
+      - symptom: The release workflow fails immediately after you push a tag.
+        cause: The tag and `VERSION` disagree.
+        fix: Bump `VERSION` and every package together, commit, then tag that commit.
+      - symptom: The release fails saying the image is not in the registry.
+        cause: The tagged commit never went through the image workflow.
+        fix: Tag a commit that has been through CI. That refusal is the feature.
+    concepts:
+      - term: Single source of version
+        meaning: >-
+          One file holds the version; everything else must agree with it,
+          checked by a test.
+      - term: Image digest
+        meaning: >-
+          A content hash identifying an exact image. Unlike a tag, it can
+          never point at something else later.
+      - term: Release manifest
+        meaning: >-
+          A record shipped with a release of every version a deployed robot
+          can be asked about — software, firmware, protocol, commit — and
+          the image digests.
+    quiz:
+      - q: Why keep firmware and protocol versions separate from the software version?
+        a: >-
+          They change on different schedules. One number would hide the case
+          that matters most in the field — a new host talking to old
+          firmware.
+      - q: Why does the release look up CI's image rather than building a fresh one?
+        a: >-
+          A fresh build is a different artefact from the one that was tested.
+          Reusing the verified image means a release can only ship what CI
+          actually checked.
+    exercise:
+      task: >-
+        Write the five fields you would want a robot to report if it woke
+        you at 2 a.m. For each, name where in this project it comes from —
+        or note that nothing provides it yet.
+    read:
+      - versioning.md
+      - cicd.md
+
+  - id: gate-the-motors
+    title: A pipeline for a machine with motors
+    minutes: 25
+    objective: Design a deploy gate for a target that can physically move.
+    body: |
+      Continuous deployment is a virtue for a web service. For a robot it is
+      a hazard. The thing being updated has motors, and someone may be
+      standing next to it. **A robot that moves on every merged pull request
+      is not a pipeline; it is an accident with a schedule.**
+
+      So hardware deployment here is a separate workflow that can only be
+      started by hand, and it has three gates, deliberately redundant:
+
+      1. **You type `DEPLOY`.** A confirmation that a physical arm may move,
+         not a checkbox.
+      2. **A GitHub Environment named `robot` requires a human reviewer**
+         before the deploy job may start. The point is a person deciding,
+         so nothing automated approves it — including the AI tooling that
+         helped write this project.
+      3. **The tag is resolved to a digest before approval.** So a tag moved
+         between "yes" and "deploy" cannot change what lands. What was
+         approved is what ships.
+
+      Then the deploy itself is written to fail safe. It **pulls before it
+      stops** the running container, so a slow or failed download never
+      leaves a robot down. It waits on **readiness**, not liveness —
+      liveness only says a process answered, while readiness says the robot
+      can actually move. You will build both endpoints in Tier 5.
+
+      **It has never run against hardware, because no arm exists.** It fails
+      at the SSH step, with an explanation. That is the correct behaviour: a
+      deploy pipeline that reports success against nothing is worse than one
+      that admits it cannot proceed.
+    steps:
+      - do: Find the three gates in the workflow.
+        run: grep -n -E "DEPLOY|environment:|digest" .github/workflows/hardware-deploy.yml
+      - do: Find the order of operations on the robot — pull, remove the old container, run, wait.
+        run: grep -n -E "docker pull|docker rm|docker run|readyz" .github/workflows/hardware-deploy.yml
+      - do: >-
+          On your own copy, run the workflow from the Actions tab without
+          typing `DEPLOY`, and read how it refuses.
+    checkpoint: >-
+      You can name the three gates, and say what each one protects against
+      that the other two do not.
+    pitfalls:
+      - symptom: A deploy "succeeded" and the robot is not doing anything.
+        cause: The deploy waited on liveness — the process answered — rather than readiness.
+        fix: Gate on readiness. Tier 5 builds the endpoint and explains the difference.
+    concepts:
+      - term: Approval gate
+        meaning: >-
+          A step a deploy cannot pass without a human decision — here, a
+          required reviewer on a GitHub Environment.
+      - term: Pull before stop
+        meaning: >-
+          Downloading the new image before stopping the old container, so a
+          failed download leaves the old version running.
+    quiz:
+      - q: Why resolve the tag to a digest before approval rather than after?
+        a: >-
+          The reviewer approves a specific artefact. If the digest were
+          resolved afterwards, the tag could move in between and something
+          unreviewed would ship.
+      - q: Why is failing at the SSH step, with no robot, the right behaviour?
+        a: >-
+          Reporting success against nothing would teach everyone that a green
+          deploy means nothing. Failing honestly keeps green meaningful.
+    exercise:
+      task: >-
+        Pick the riskiest deploy you are responsible for at work. Write its
+        gate in the same shape: what a human must type, who must approve,
+        what is pinned before approval, and what the deploy waits on before
+        calling itself done.
+    read:
+      - cicd.md
+      - deployment.md
+
+project:
+  title: Bug hunt
+  minutes: 90
+  brief: |
+    Six faults, planted one at a time. For each, **predict** the cheapest
+    layer that will catch it, then plant it, run the layers in order, and
+    record which one actually caught it and how long that took. Revert
+    before the next.
+
+    Then do the part that matters most: find a fault that **nothing**
+    catches, and write the test that would.
+  tasks:
+    - do: >-
+        **Boundary.** Add `<exec_depend>ros_gz_sim</exec_depend>` to
+        `src/threevn_bringup/package.xml`.
+    - do: >-
+        **Version drift.** Change `VERSION` without touching any package.
+    - do: >-
+        **Firmware drift.** Change `shoulder_pan_joint`'s `upper_deg` from
+        `90.0` to `100.0` in `config/threevn_arm_v1.yaml`. The firmware
+        duplicates this limit on purpose; find out what notices.
+    - do: >-
+        **Impossible motor.** Raise `elbow_joint`'s `effort` to `2.0`.
+    - do: >-
+        **Unenforced limits.** Set `enforce_command_limits: false` in
+        `src/threevn_bringup/config/controllers.yaml`.
+    - do: >-
+        **Silent matcher.** Replace the pattern in `FORBIDDEN` in
+        `test_package_dependencies.py` with `r'(?!)'`.
+    - do: >-
+        For each, run `make test` first, then `make test-ros` only if needed,
+        then `make test-sim` only if needed. Revert with `git checkout` after
+        each.
+    - do: >-
+        Now find a seventh fault that passes every layer. Write the test that
+        catches it, and show it failing on the fault and passing without it.
+  done_when:
+    - A table with six rows — fault, predicted layer, actual layer, time to red — every cell filled in.
+    - At least one prediction was wrong, and you can say why.
+    - A seventh fault, uncaught before, now caught by a test you wrote.
+    - '`git status` is clean apart from your new test.'
+  hints:
+    - title: Where to look for an uncaught fault
+      body: >-
+        Look for documented promises with no test behind them — a sentence
+        in `docs/` that says something "must" or "never" happens. Then look
+        for the test. Sometimes it is not there.
+  read:
+    - testing.md
+    - safety.md

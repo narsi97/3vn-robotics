@@ -74,6 +74,23 @@ jobs:
           fi
           echo "fleet image builds, serves, and refuses unauthenticated writes"
 
+  # The course names Make targets and docs in every lesson. One pointing
+  # at a target or a page that has since been renamed is a broken lesson
+  # that looks finished -- so the curriculum is validated, and the whole
+  # site rendered, on every push. Needs no ROS: PyYAML and markdown only.
+  course:
+    name: course curriculum
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate and render the course
+        run: |
+          pip install --quiet pyyaml==6.0.2 markdown==3.7
+          python3 scripts/build_site.py --root . --out /tmp/site --clean
+
   build-and-test:
     name: build + test (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}

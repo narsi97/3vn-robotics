@@ -44,7 +44,7 @@ RVIZ    ?= 1
 .PHONY: help doctor setup up down shell build test test-sim lint urdf \
         view mock sim robot stop scenario dash acceptance clean nuke test-ros \
         cad cad-test cad-masses play drive vnc foxglove workspace grasp \
-        so101 so101-fetch site site-serve
+        so101 so101-fetch site site-serve course-check
 
 help:
 	@echo ""
@@ -66,6 +66,7 @@ help:
 	@echo "  make grasp     Grasp the cube and prove it (needs WORLD=grasp_bench)"
 	@echo "  make so101     SPIKE: run our stack against TheRobotStudio SO-101"
 	@echo "  make site      Render the docs into a static course site"
+	@echo "  make course-check  Validate course/*.yaml without rendering"
 	@echo "  make view      RViz + joint sliders            -> $(NOVNC)"
 	@echo "  make play      WHOLE ROBOT + RViz, watchable   -> $(NOVNC)"
 	@echo "  make drive     Teleop: drive it from the keyboard (2nd terminal)"
@@ -184,12 +185,19 @@ urdf: up
 	@$(RUN) "ros2 run xacro xacro $(SHARE)/urdf/$(URDF_ENTRY) params_file:=$(SHARE)/config/$(URDF_PROFILE).yaml target:=$(TARGET)"
 
 # The course site. Rendered in a throwaway python image rather than the
-# dev container, which has no markdown and does not need one.
+# dev container, which has no markdown and does not need one. The
+# curriculum is validated first, and a lesson pointing at a Make target
+# or a doc that does not exist fails the build.
 site:
 	@docker run --rm -v "$(PWD)":/src -w /src \
 	  -e THREEVN_GIT_COMMIT=$(GIT_COMMIT) python:3.12-alpine sh -lc \
-	  "pip install --quiet --no-cache-dir markdown==3.7 pyyaml==6.0.2 && \
+	  "pip install --quiet --no-cache-dir --root-user-action=ignore --disable-pip-version-check markdown==3.7 pyyaml==6.0.2 && \
 	   python3 scripts/build_site.py --root /src --out /src/site --clean"
+
+course-check:
+	@docker run --rm -v "$(PWD)":/src:ro -w /src python:3.12-alpine sh -lc \
+	  "pip install --quiet --no-cache-dir --root-user-action=ignore --disable-pip-version-check pyyaml==6.0.2 && \
+	   python3 scripts/build_site.py --root /src --check"
 
 site-serve: site
 	@echo ""
