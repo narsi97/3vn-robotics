@@ -77,7 +77,7 @@ grasp with:
 | wrist_roll | — | −157…+163° |
 
 Our elbow bends essentially one way, which is precisely why top-down
-grasping is unavailable anywhere on our arm. The SO-101's is symmetric,
+grasping is unavailable on our arm above its own base. The SO-101's is symmetric,
 and it adds a wrist roll we do not have. Its links are longer too — upper
 arm ~116 mm and forearm ~135 mm against our 110/95 — so the 250–270 mm
 annulus that is our only table-height reach should open up.

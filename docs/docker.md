@@ -1,15 +1,20 @@
 # Docker
 
-One Dockerfile, six stages, two shipping images.
+One Dockerfile, seven stages, two shipping images.
 
 ```
 base      ROS 2 Jazzy + ros2_control. No simulator, no GUI, no build tools.
   ├── simdeps   + Gazebo Harmonic
   │     ├── ci    + pytest, linters, Mesa       what CI runs
-  │     │     └── dev   + RViz, Xvfb, noVNC     what you run       4.96 GB
+  │     │     └── cad   + build123d/OpenCascade, in a venv   (~760 MB)
+  │     │           └── dev   + RViz, Xvfb, noVNC     what you run   6.13 GB
   │     └── builder + a built workspace, robot packages only
-  └── runtime   base + that build               what ships         1.67 GB
+  └── runtime   base + that build               what ships         1.68 GB
 ```
+
+Sizes measured on 2026-10-06. The dev image was 4.96 GB before the
+parametric CAD stage was added under it; the runtime image has not
+grown, because nothing on the robot needs a geometry kernel.
 
 ## The robot image carries no simulator
 
@@ -25,8 +30,8 @@ colcon build --merge-install \
   --packages-up-to threevn_bringup threevn_hardware threevn_dashboard
 ```
 
-`threevn_sim` is simply not built. **4.96 GB → 1.67 GB**, a third of the
-size, and `make runtime-verify` asserts the simulator is absent rather
+`threevn_sim` is simply not built. **6.13 GB → 1.68 GB**, about a
+quarter of the size, and `make runtime-verify` asserts the simulator is absent rather
 than trusting it.
 
 It also settles a licence question. `x11vnc` (GPL-2.0) and `websockify`

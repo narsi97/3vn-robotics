@@ -33,6 +33,7 @@ integration tests, and which did not previously exist.
 """
 
 import math
+import tempfile
 
 from conftest import run as _run
 import numpy as np
@@ -89,9 +90,12 @@ def test_tf_tree_has_a_single_root(robot):
     lookups across the gap fail at runtime with a message that names the
     frames but not the cause.
     """
+    # In a scratch directory: view_frames writes frames_<date>.gv and .pdf
+    # into its working directory even with yaml_only, and `make test-ros`
+    # runs from the package source -- so every run left two files in src/.
     code, out = _run(['timeout', '12', 'ros2', 'run', 'tf2_tools',
                       'view_frames', '--ros-args', '-p', 'yaml_only:=true'],
-                     timeout=25)
+                     timeout=25, cwd=tempfile.mkdtemp())
     # view_frames prints a YAML map of frame -> parent when yaml_only.
     roots = [line.split(':')[0].strip()
              for line in out.splitlines()
@@ -134,7 +138,15 @@ def test_tool0_matches_hand_computed_home_position(robot):
     """
     TF agrees with the value computed by hand from the YAML.
 
-    0.030 + 0.020 + 0.110 + 0.095 + 0.030 = 0.285 m.
+    0.045 + 0.020 + 0.110 + 0.095 + 0.030 = 0.300 m.
+
+    The first term was 0.030 until the CAD showed the base could not hold
+    its own pan servo and it grew to 45 mm. The fast-suite copies of this
+    number were updated then; this one lives in `make test-ros`, which
+    nothing runs automatically, and it stayed wrong until running the
+    course's Tier 4 lessons found it. Kept hand-computed anyway: a value
+    derived by the code under test would agree with that code by
+    construction.
 
     Homes the arm explicitly. The robot fixture is session-scoped and
     shared, so an earlier test in another module may well have left it
@@ -144,7 +156,7 @@ def test_tool0_matches_hand_computed_home_position(robot):
     x, y, z = _tf_translation('base_link', 'tool0')
     assert x == pytest.approx(0.0, abs=1e-3)
     assert y == pytest.approx(0.0, abs=1e-3)
-    assert z == pytest.approx(0.285, abs=1e-3)
+    assert z == pytest.approx(0.300, abs=1e-3)
 
 
 def test_our_kinematics_agrees_with_kdl(robot):

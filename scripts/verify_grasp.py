@@ -54,6 +54,11 @@ POSE_INFO = '/world/{world}/dynamic_pose/info'
 #: Larger than the settling jitter, smaller than the commanded lift.
 LIFT_THRESHOLD_M = 0.02
 
+#: Where the control grasps: the cube's own position swung about the
+#: arm's yaw axis. 35 degrees at 230 mm is about 140 mm clear of a 35 mm
+#: cube, and well inside the pan joint's +/-90.
+CONTROL_SWING_DEG = 35.0
+
 
 def place(world, position):
     """Put the cube back where it started. True if the simulator agreed."""
@@ -80,6 +85,23 @@ def in_arm_frame(robot, world_xyz):
     """Express a world point in the arm's own base frame."""
     base = robot.get_translation('odom', robot.resolve('base_link'))
     return tuple(world_xyz[i] - base[i] for i in range(3))
+
+
+def swung(robot, world_xyz, degrees):
+    """
+    Return `world_xyz` rotated about the arm's yaw axis by `degrees`.
+
+    Same radius, same height, so it is reachable whenever the original
+    is -- the pan joint is all that changes. That is what the CONTROL
+    needs. It used to be the cube's position moved 120 mm sideways, which
+    is 259 mm out at a height where the arm only reaches 230: the solver
+    refused it, the control never ran, and a refused control was counted
+    as "no false positive". Found by running the course's grasp lesson.
+    """
+    base = robot.get_translation('odom', robot.resolve('base_link'))
+    x, y = world_xyz[0] - base[0], world_xyz[1] - base[1]
+    c, s = math.cos(math.radians(degrees)), math.sin(math.radians(degrees))
+    return (base[0] + c * x - s * y, base[1] + s * x + c * y, world_xyz[2])
 
 
 def attempt(robot, world, target_world, label):
@@ -134,11 +156,16 @@ def main(argv=None):
                 f"holding() said {real['held']} but the cube "
                 f"{'moved' if real['lifted'] else 'did not move'}")
 
-        # Control: the same motion where there is nothing to grasp.
+        # Control: the same motion where there is nothing to grasp. It
+        # must actually RUN -- a control the arm cannot reach proves
+        # nothing, so being refused is a failure, not a pass.
         robot.home()
-        empty = (HOME[0], HOME[1] + 0.12, HOME[2])
+        empty = swung(robot, HOME, CONTROL_SWING_DEG)
         control = attempt(robot, args.world, empty, 'CONTROL: grasp empty air')
-        if control is not None and control['held']:
+        if control is None:
+            failures.append('the control could not be run, so nothing '
+                            'shows holding() can say no')
+        elif control['held']:
             failures.append('holding() reported a grasp of empty air')
     finally:
         robot.destroy_node()

@@ -74,6 +74,26 @@ Two possibilities.
    back into `src`, so editing either works — but a full `make clean`
    followed by a build from a stale source tree will not.
 
+## A test fails on a file you deliberately deleted
+
+```
+FileNotFoundError: ... share/threevn_robot_description/config/threevn_arm_v1_yourname.yaml
+```
+
+`--symlink-install` links every source file into `install/`, and never
+removes a link when its source goes away. The dead link stays, and the
+test suite — which discovers profiles by listing that directory — tries
+to read it.
+
+`make build` now prunes dangling links after every build and prints
+each one it removes, so this should not happen. If you build with
+`colcon` by hand, prune yourself:
+
+```bash
+make shell
+  find /ws/install -xtype l -delete
+```
+
 ## `ros2 run` says the executable exists but fails with `StopIteration`
 
 Symptom, after adding a `console_scripts` entry point:

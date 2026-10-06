@@ -101,8 +101,11 @@ setup: doctor
 	@echo "  Ready. Try:  make test   then   make view   then open $(NOVNC)"
 	@echo ""
 
+# Silent on stdout: targets like `make urdf` are piped and redirected, and
+# an echoed command line there is a line of not-XML. Compose reports its
+# own progress on stderr.
 up:
-	TVN_UID=$$(id -u) $(COMPOSE) up -d
+	@TVN_UID=$$(id -u) $(COMPOSE) up -d
 
 down:
 	$(COMPOSE) down
@@ -110,8 +113,17 @@ down:
 shell: up
 	$(RUN_TTY) "exec bash"
 
+# --symlink-install never removes a link whose source has gone. Delete a
+# profile, a world or a launch file and its link stays behind in
+# install/, dangling: the test suite discovers profiles from that
+# directory and dies on the dead one with a FileNotFoundError naming a
+# file you deliberately deleted. Found by running the course's own
+# "design your own arm" project. Pruning after every build removes the
+# whole class of problem.
+PRUNE := find /ws/install -xtype l -printf '  removed stale link %p\n' -delete
+
 build: up
-	$(RUN) "colcon build --symlink-install --event-handlers console_direct+"
+	$(RUN) "colcon build --symlink-install --event-handlers console_direct+ && $(PRUNE)"
 
 # -m 'not slow' excludes the Gazebo tests. The 60s budget is a design
 # constraint, not an aspiration: it is what makes people actually run it.
@@ -162,8 +174,14 @@ else
 $(error ROBOT must be 'arm', 'base' or 'mm', not '$(ROBOT)')
 endif
 
-urdf: build
-	$(RUN) "ros2 run xacro xacro $(SHARE)/urdf/$(URDF_ENTRY) params_file:=$(SHARE)/config/$(URDF_PROFILE).yaml target:=$(TARGET)"
+# Prints the expanded description and NOTHING else on stdout, so that
+# `make urdf > robot.urdf` is valid XML and `make urdf | grep -c ...`
+# counts only the robot. It used to depend on `build`, whose colcon log
+# and make's own echoed command lines landed on stdout ahead of the XML.
+# The build still runs first; its log goes to stderr, where you see it.
+urdf: up
+	@$(RUN) "(colcon build --symlink-install --event-handlers console_direct+ && $(PRUNE)) 1>&2"
+	@$(RUN) "ros2 run xacro xacro $(SHARE)/urdf/$(URDF_ENTRY) params_file:=$(SHARE)/config/$(URDF_PROFILE).yaml target:=$(TARGET)"
 
 # The course site. Rendered in a throwaway python image rather than the
 # dev container, which has no markdown and does not need one.
@@ -304,8 +322,13 @@ dataset-describe: build
 	$(RUN) "ros2 run threevn_data describe"
 
 
+# ALPHA overrides the ridge penalty. Its use in the course is to make a
+# WORSE model on purpose (ALPHA=10), so the promotion gates have
+# something real to refuse. Always through here rather than `ros2 run`
+# in a shell: GITENV is what gives the artefact its provenance, and the
+# provenance gate refuses a model without it.
 train: build
-	$(RUN) "$(GITENV) ros2 run threevn_ml train"
+	$(RUN) "$(GITENV) ros2 run threevn_ml train $(if $(ALPHA),--alpha $(ALPHA),)"
 
 
 # The model registry. Versions are content-addressed and immutable;
@@ -313,8 +336,11 @@ train: build
 registry-register: build
 	$(RUN) "ros2 run threevn_mlops registry register"
 
+# FORCE=1 promotes past failing gates, and the registry records it as
+# forced, with REASON. It exists so a rollback can be rehearsed before
+# it is needed -- not as a way round the gates.
 registry-promote: build
-	$(RUN) "ros2 run threevn_mlops registry promote $(VERSION)"
+	$(RUN) "ros2 run threevn_mlops registry promote $(VERSION) $(if $(FORCE),--force --reason '$(or $(REASON),forced from make)',)"
 
 registry-status: build
 	$(RUN) "ros2 run threevn_mlops registry status"
@@ -373,6 +399,12 @@ robot: build stop
 #
 # The bracket in the pattern stops pkill matching its own command line,
 # which would otherwise kill the shell running it.
+#
+# The /ws/install/*/lib/ pattern catches every executable this workspace
+# builds -- the dashboard, perception, serving, fusion. Killing `ros2
+# launch` with -9 orphans its children, and an orphaned dashboard kept
+# port 8107: the next `make dash` died with "Address already in use".
+# Found by running the course's Tier 5 lessons after `make play`.
 # The dashboard observes whatever robot is already running. It does NOT
 # depend on `stop`, so it can be started alongside `make sim` / `make mock`
 # without killing them.
@@ -429,7 +461,8 @@ stop: up
 	          pkill -9 -f 'robot_state_pub[l]isher' ; pkill -9 -f '[r]viz2' ; \
 	          pkill -9 -f 'joint_state_pub[l]isher' ; pkill -9 -f 'ros2_control_no[d]e' ; \
 	          pkill -9 -f 'parameter_brid[g]e' ; \
-	          pkill -9 -f 'foxglove_brid[g]e' ; sleep 2 ; \
+	          pkill -9 -f 'foxglove_brid[g]e' ; \
+	          pkill -9 -f '/ws/instal[l]/[a-z_]*/lib/' ; sleep 2 ; \
 	          pgrep -f '[r]os2 ' >/dev/null || rm -f /dev/shm/fastrtps_* ; \
 	          true" 2>/dev/null
 	@echo "  stopped"
