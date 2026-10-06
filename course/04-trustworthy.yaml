@@ -1,0 +1,88 @@
+id: trustworthy
+number: 4
+kind: tier
+title: Make it trustworthy
+price: "$5"
+summary: >
+  The layers that let you change a robot's code on a Friday: real test
+  tiers, an image that ships, and a pipeline that catches what you miss.
+
+lessons:
+  - id: test-layers
+    title: Four kinds of test, and what each is for
+    objective: Know which layer should catch a given bug, and why.
+    commands: |
+      make test        # fast, no simulator
+      make test-ros    # integration, mock target
+      make test-sim    # Gazebo, slow
+    checkpoint: >
+      All three are green, and you can say which one would have caught a
+      given regression.
+    doc: testing.md
+    body: |
+      The pyramid you already use survives contact with robotics, but the
+      layers mean different things.
+
+      The fast layer touches no simulator: geometry, limits, naming,
+      structure. The integration layer runs the real control stack against
+      a mock, so it exercises topics, actions and services without
+      physics. The simulation layer runs scenarios in Gazebo, where
+      contact and gravity are real and results vary. Each is slower and
+      less deterministic than the last, which is exactly the order you
+      want to find things in.
+
+      Scenarios here are tests and demos at once, deliberately. Written
+      once for both, the demo cannot drift away from the thing that is
+      actually verified — the failure mode where a conference demo works
+      and the test suite tests something else.
+
+      One real bug from this project, as a warning about the layer
+      boundary: a scenario slept 0.3 seconds of *wall* time, then checked
+      a post-condition once. Simulation time runs at about a third of
+      wall time, so it was looking 0.08 simulated seconds after
+      commanding a motion. The arm reached its target exactly — measured
+      error 0.0000 rad — and the test failed anyway.
+
+  - id: images-that-ship
+    title: An image that carries no simulator
+    objective: Build the image that would go on a robot, and prove it is clean.
+    commands: |
+      make runtime
+      make runtime-verify
+    checkpoint: >
+      The runtime image runs the stack and contains no Gazebo.
+    doc: docker.md
+    body: |
+      The development image is several gigabytes of ROS, Gazebo, RViz and
+      a virtual display. None of that belongs on a robot.
+
+      So the Dockerfile is staged, and the robot image is built from an
+      earlier stage than the one you develop in. `runtime-verify` then
+      checks the claim rather than trusting it: the simulator is absent,
+      and the thing still starts.
+
+      This is the seam from Stage 1 showing up as a build artefact. The
+      architecture said hardware builds need no simulator; this is the
+      image that proves it, and it is small enough to pull over a
+      domestic connection.
+
+  - id: ci-that-catches-you
+    title: A pipeline that catches what you miss
+    objective: See CI fail on something you were sure was fine.
+    commands: |
+      make lint
+    checkpoint: >
+      Lint and tests pass locally, and the same jobs run on every push.
+    doc: cicd.md
+    body: |
+      Nothing in this phase is unfamiliar — jobs, caching, artefacts. What
+      is worth your attention is what CI caught here that local runs did
+      not.
+
+      A lint failure was missed because the output was grepped instead of
+      the exit status being checked. A release workflow raced the image
+      build. A version tag was pushed without the version file being
+      bumped, and the project's own consistency check caught it.
+
+      Each of those is a habit, not a tool. The tool only matters because
+      the habit failed.

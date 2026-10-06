@@ -1,0 +1,113 @@
+id: capable
+number: 6
+kind: tier
+title: Make it capable
+price: "$5"
+summary: >
+  A robot that drives, sees, records what it saw, learns from it, and
+  ships the model like software.
+lessons:
+  - id: it-drives
+    title: Odometry lies, and by how much
+    objective: Measure the gap between where the wheels think it is and where it is.
+    commands: |
+      make base-drive
+      make heading
+    checkpoint: >
+      You have a number for the drift, measured against ground truth
+      rather than assumed.
+    doc: mobile-base.md
+    body: |
+      Wheel odometry is dead reckoning: count wheel turns, integrate,
+      believe the answer. It is wrong immediately and increasingly, and a
+      skid-steer base is worse because turning scrubs the wheels sideways.
+
+      What matters is not that it drifts but that you measured it. The
+      simulator gives you ground truth for free, which is the one place
+      you can grade your own estimator honestly.
+
+      A caution, learned here the expensive way. The first heading metric
+      averaged error over a path with turns in both directions, so the
+      errors cancelled and wheel odometry looked *better* than a gyro. The
+      metric was wrong, not the gyro. When a measurement stops
+      discriminating between two things you know differ, suspect the
+      measurement.
+
+  - id: it-sees
+    title: A camera, and the geometry behind it
+    objective: Turn pixels into a position in metres.
+    commands: |
+      make play WORLD=bench_with_target
+      make perception
+    checkpoint: >
+      The detector reports the target's position, and you can check it
+      against ground truth.
+    doc: perception.md
+    body: |
+      Finding a coloured blob is easy. Saying where it *is* needs the
+      pinhole model and the camera's intrinsics, and that is where the
+      errors live.
+
+      This is also where the frame convention from Stage 2 earns its
+      place. The optical frame rotation is why the answer comes out in the
+      right axes without anyone thinking about it.
+
+      Measure the error rather than eyeballing the overlay. The geometric
+      estimate here is biased, consistently, and the bias has a physical
+      cause: seen at an angle a cube shows two faces, so its silhouette is
+      wider than one edge and the assumed width is wrong. You cannot see
+      that in a picture; you can see it in a distribution.
+
+  - id: data-then-models
+    title: Datasets, splits, and the leak you did not look for
+    objective: Build a dataset whose test set means something.
+    commands: |
+      make dataset EPISODES=40
+      make dataset-describe
+      make train
+    checkpoint: >
+      The model beats the closed-form baseline, judged on the same test
+      set by the same function.
+    doc: machine-learning.md
+    body: |
+      Splitting frames at random is the obvious mistake. Consecutive
+      frames of one episode are near-duplicates, so a random split puts
+      near-copies of training rows into test and reports an accuracy you
+      will never see again. Split by episode.
+
+      The task already had a closed-form solution, which is what makes
+      this honest: the baseline is evaluated in the same run, on the same
+      test set, by the same function. "The model beat the geometry" is not
+      a claim until both numbers come out of one place.
+
+      The model is linear, solved in closed form, with no epochs and no
+      learning rate — because the mapping is known to be linear in the
+      right features, and anything iterative would be ceremony that can
+      also be tuned into looking good. A network would at best rediscover
+      the same mapping while adding capacity to memorise 480 samples.
+
+  - id: mlops
+    title: Shipping a model like software
+    objective: Register, gate, promote and roll back a model.
+    commands: |
+      make registry-register
+      make registry-promote
+      make registry-status
+      make registry-rollback
+    checkpoint: >
+      Production points at a specific immutable version, and you can move
+      it back.
+    doc: mlops.md
+    body: |
+      Everything you know about deploying software applies, with one
+      addition: the artefact has an accuracy, and accuracy decays.
+
+      Versions are content-addressed and immutable; production is a
+      pointer; history is append-only. Promotion runs gates — does it
+      validate, does it beat the baseline, has it regressed, do its
+      features match what is being served, does it know what data and
+      commit produced it. A model that cannot answer the last question
+      cannot be debugged later.
+
+      Rollback is a pointer move, which is the entire reason for the
+      indirection.

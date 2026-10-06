@@ -9,10 +9,11 @@
 # installed only in the build stage, which is why the dev image never
 # grew a dependency for this.
 FROM python:3.12-alpine AS build
-RUN pip install --no-cache-dir markdown==3.7
+RUN pip install --no-cache-dir markdown==3.7 pyyaml==6.0.2
 WORKDIR /src
 COPY docs ./docs
 COPY VERSION ./
+COPY course ./course
 COPY scripts/build_site.py ./scripts/
 # Passed in because .git is not copied into the build context: the
 # footer states which commit the site was built from, and "unknown" in

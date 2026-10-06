@@ -1,0 +1,93 @@
+id: environment
+number: 1
+kind: stage
+title: Your environment
+price: free
+summary: >
+  Get a robot development environment that works the same on your machine
+  as it does in CI, without installing ROS.
+
+lessons:
+  - id: docker-and-nothing-else
+    title: Docker, and nothing else
+    objective: Run a robotics toolchain without installing any of it.
+    commands: |
+      make doctor
+      make setup
+    checkpoint: >
+      `make doctor` prints a green line for every check, and `make setup`
+      finishes with a built workspace.
+    doc: getting-started.md
+    body: |
+      Most robotics tutorials begin with twenty `apt install` lines and
+      end with a machine you cannot reproduce. Six months later something
+      breaks and nobody knows which of those lines did it.
+
+      You already solve this problem at work. The environment is a build
+      artefact: declared in a file, built from that file, identical for
+      everyone. Robotics gets no exemption, so the first thing this
+      project builds is not a robot — it is an image.
+
+      `make doctor` runs before anything else because the most common
+      failure here is not a bug. Docker Desktop ships with less memory
+      than Gazebo needs, and when the simulator is killed for being too
+      large, the error you see looks like a Gazebo crash. So `doctor`
+      checks memory, architecture, disk and the port, and every failure
+      prints the exact fix rather than a diagnosis.
+
+      Read its output even when it passes. Knowing what it checks tells
+      you what usually goes wrong.
+
+  - id: fast-tests-or-no-tests
+    title: A test suite people actually run
+    objective: Prove the robot description is sound, in under a minute.
+    commands: |
+      make test
+    checkpoint: >
+      Several hundred tests pass and the whole run takes less than
+      60 seconds.
+    doc: testing.md
+    body: |
+      The suite is budgeted. Not "we try to keep it fast" — budgeted, as a
+      design constraint, because a suite that takes five minutes is a
+      suite people stop running before they commit, and an unrun test is
+      an expensive comment.
+
+      That budget shapes what goes in it. Anything needing a simulator
+      lives in a different target, because physics is slow and
+      non-deterministic and does not belong in the loop you run every few
+      minutes.
+
+      It is worth noticing what is being tested at this stage. There is no
+      robot yet, no hardware, no simulator — and there are still hundreds
+      of assertions worth making. Geometry, limits, inertia, naming,
+      structure. Robotics has far more that can be checked cheaply than
+      its reputation suggests.
+
+  - id: the-seam
+    title: The decision everything else rests on
+    objective: Understand why the same code can drive a simulator or a motor.
+    commands: |
+      make urdf TARGET=gz   | grep -c GazeboSimSystem
+      make urdf TARGET=mock | grep -c gz_ros2_control
+    checkpoint: >
+      The first prints `1`. The second prints `0` — a build destined for
+      hardware contains no trace of the simulator.
+    doc: architecture.md
+    body: |
+      Two commands, two numbers, and they are the whole architecture.
+
+      The application does not know what it is driving. Simulator, mock,
+      or a physical motor — they are implementations behind one interface,
+      chosen by one argument. You have made this decision before, every
+      time you put a repository interface in front of a database.
+
+      The second number is the interesting one. A zero means the hardware
+      build does not merely *avoid* the simulator; it cannot reach it. The
+      dependency is absent, not unused. That is the difference between a
+      decoupling you claim and one you can prove, and it is why this is
+      asserted by a test rather than described in a README.
+
+      Everything later in this course — Gazebo, the ESP32, a robot you
+      buy instead of build — plugs into this seam. Get it now and the rest
+      is substitution.

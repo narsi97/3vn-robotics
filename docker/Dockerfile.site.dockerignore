@@ -8,5 +8,6 @@
 # rather than relaxing the dev image's.
 *
 !docs
+!course
 !VERSION
 !scripts/build_site.py

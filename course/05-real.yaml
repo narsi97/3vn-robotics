@@ -1,0 +1,52 @@
+id: real
+number: 5
+kind: tier
+title: Make it real
+price: "$5"
+summary: >
+  Firmware, a server, and the ability to find out what a robot did when
+  you were not watching.
+lessons:
+  - id: esp32-is-a-driver
+    title: The microcontroller is a dumb driver
+    objective: Understand why the control loop stays on the host.
+    commands: |
+      make robot    # fails until firmware exists; read the failure
+    checkpoint: >
+      You can explain why micro-ROS is not on the control path here.
+    doc: firmware.md
+    body: |
+      The obvious design puts ROS on the microcontroller. This project
+      measured that option and rejected it: reports of a 1–2 Hz publish
+      ceiling on an ESP32 make it unusable for a loop that needs 50–100 Hz.
+
+      So the host runs the control loop and the ESP32 is a servo driver
+      behind a small framed binary protocol. The transport is private to
+      two functions, `read()` and `write()`, which means it can change
+      later without touching anything above it.
+
+      The safety logic is compiled and tested natively, on your machine,
+      against a fake transport. The alternative is testing an emergency
+      stop by flashing it onto a powered arm.
+
+  - id: deploy-and-watch
+    title: Deploying, and finding out what happened
+    objective: Ship the robot image and get telemetry back from it.
+    commands: |
+      make dash
+    checkpoint: >
+      The dashboard reports the running target, profile and git commit.
+    doc: monitoring.md
+    body: |
+      A robot that only tells you things when you are watching is a robot
+      you cannot debug.
+
+      Traces matter more here than in a web service. A single trace
+      spanning perception, planning, action and hardware is how you answer
+      "why did it do that" — and metrics alone cannot show you that chain.
+
+      Two properties are worth stealing. The collector buffers locally, so
+      the robot keeps working when the network does not; basic movement
+      must never depend on the internet. And simulation and hardware emit
+      through the same path, so the dashboard you learn in simulation is
+      the one you use on the real machine.

@@ -48,6 +48,7 @@ import subprocess
 import sys
 
 import markdown
+import yaml
 
 #: The reading order. Anything in docs/ that is not named here still gets
 #: rendered, under Reference -- so adding a doc never means it silently
@@ -156,6 +157,37 @@ footer.site {
 }
 .back { display: inline-block; margin-bottom: 20px; font-size: 14px; }
 @media (max-width: 620px) { .wrap { padding: 0 16px 56px; } h1 { font-size: 23px; } }
+
+/* --- the ladder --- */
+.stage { border: 1px solid var(--line); border-radius: 10px; margin: 18px 0;
+         overflow: hidden; }
+.stage > header {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  padding: 14px 16px; background: var(--panel); border-bottom: 1px solid var(--line);
+}
+.stage .n { color: var(--dim); font-size: 12px; letter-spacing: .1em;
+            text-transform: uppercase; }
+.stage h2 { margin: 0; font-size: 18px; }
+.price { margin-left: auto; font-size: 12.5px; padding: 2px 10px;
+         border-radius: 999px; border: 1px solid var(--line); color: var(--dim); }
+.price.free { color: #7ddc9a; border-color: #2c5a3c; }
+.price.paid { color: var(--warn); border-color: #5a4a22; }
+.stage .blurb { padding: 12px 16px 2px; color: var(--dim); font-size: 14.5px; }
+.stage ol { margin: 8px 0 14px; padding: 0 16px 0 40px; }
+.stage li { margin: 5px 0; }
+.stage li .obj { color: var(--dim); font-size: 13px; display: block; }
+.lesson-head { color: var(--dim); font-size: 13px; letter-spacing: .04em;
+               text-transform: uppercase; margin-bottom: 6px; }
+.objective { font-size: 17px; color: var(--ink); margin: 0 0 18px; }
+.check {
+  background: var(--panel); border: 1px solid var(--line);
+  border-left: 3px solid #3c7a52; border-radius: 6px; padding: 12px 15px;
+  margin: 22px 0; font-size: 15px;
+}
+.check strong { color: #7ddc9a; }
+.pager { display: flex; justify-content: space-between; gap: 12px;
+         margin-top: 34px; font-size: 14px; }
+.pager span { color: var(--dim); }
 """
 
 PAGE = """<!DOCTYPE html>
@@ -226,6 +258,78 @@ def rewrite_links(html):
                   r'(.*?)</a>', r'<code>\1</code>', html)
 
 
+def load_course(root):
+    """
+    Load the curriculum from course/*.yaml, in file order.
+
+    The curriculum is DATA, not markup in this script. Adding a lesson is
+    adding a block to a YAML file; nothing here needs to know about it.
+    That is the same reason the robot's dimensions live in YAML rather
+    than in the xacro.
+    """
+    course = root / 'course'
+    if not course.is_dir():
+        return []
+    stages = [yaml.safe_load(f.read_text()) for f in sorted(course.glob('*.yaml'))]
+    number = 0
+    for stage in stages:
+        for lesson in stage.get('lessons', []):
+            number += 1
+            lesson['index'] = number
+            lesson['stage'] = stage
+    return stages
+
+
+def lesson_page(lesson, previous, nxt, total):
+    """Render one lesson: objective, what to run, why, and the checkpoint."""
+    stage = lesson['stage']
+    parts = [
+        '<a class="back" href="index.html">&larr; the course</a>',
+        f'<div class="lesson-head">Stage {stage["number"]} &middot; '
+        f'{stage["title"]} &middot; lesson {lesson["index"]} of {total}</div>',
+        f'<h1>{lesson["title"]}</h1>',
+        f'<p class="objective">{lesson["objective"]}</p>',
+    ]
+    if lesson.get('commands'):
+        parts.append(render('```bash\n' + lesson['commands'].strip() + '\n```'))
+    parts.append(rewrite_links(render(lesson.get('body', ''))))
+    if lesson.get('checkpoint'):
+        parts.append(f'<div class="check"><strong>You will know it worked '
+                     f'when:</strong> {lesson["checkpoint"].strip()}</div>')
+    if lesson.get('doc'):
+        target = pathlib.Path(lesson['doc']).stem + '.html'
+        parts.append(f'<p>Going deeper: <a href="{target}">'
+                     f'{lesson["doc"]}</a></p>')
+    prev_link = (f'<a href="lesson-{previous["id"]}.html">&larr; '
+                 f'{previous["title"]}</a>' if previous else '<span></span>')
+    next_link = (f'<a href="lesson-{nxt["id"]}.html">{nxt["title"]} '
+                 f'&rarr;</a>' if nxt else '<span>end of the course</span>')
+    parts.append(f'<div class="pager">{prev_link}{next_link}</div>')
+    return '\n'.join(parts)
+
+
+def ladder_html(stages):
+    """Render the stage/tier ladder: what you get, and what it costs."""
+    out = []
+    for stage in stages:
+        paid = stage.get('price', 'free') != 'free'
+        label = stage['price'] + (' &#128274;' if paid else '')
+        kind = 'paid' if paid else 'free'
+        word = 'Tier' if stage.get('kind') == 'tier' else 'Stage'
+        items = ''.join(
+            f'<li><a href="lesson-{le["id"]}.html">{le["title"]}</a>'
+            f'<span class="obj">{le["objective"]}</span></li>'
+            for le in stage.get('lessons', []))
+        out.append(
+            f'<section class="stage"><header>'
+            f'<span class="n">{word} {stage["number"]}</span>'
+            f'<h2>{stage["title"]}</h2>'
+            f'<span class="price {kind}">{label}</span></header>'
+            f'<p class="blurb">{stage.get("summary", "").strip()}</p>'
+            f'<ol>{items}</ol></section>')
+    return '\n'.join(out)
+
+
 def build(root, out):
     """Render the whole site into `out`."""
     docs = root / 'docs'
@@ -255,7 +359,18 @@ def build(root, out):
             body=f'<a class="back" href="index.html">&larr; all pages</a>\n{html}',
             stamp=f'v{version} · {commit}'))
 
-    index = _index_html(docs, written, out)
+    stages = load_course(root)
+    lessons = [le for st in stages for le in st.get('lessons', [])]
+    for i, lesson in enumerate(lessons):
+        body = lesson_page(lesson,
+                           lessons[i - 1] if i else None,
+                           lessons[i + 1] if i + 1 < len(lessons) else None,
+                           len(lessons))
+        (out / f'lesson-{lesson["id"]}.html').write_text(PAGE.format(
+            title=lesson['title'], style=STYLE, home='index.html', meta=meta,
+            body=body, stamp=f'v{version} · {commit}'))
+
+    index = _index_html(docs, written, out, stages, len(lessons))
     (out / 'index.html').write_text(PAGE.format(
         title='The course', style=STYLE, home='index.html', meta=meta,
         body=index, stamp=f'v{version} · {commit}'))
@@ -264,33 +379,47 @@ def build(root, out):
     return len(list(out.glob('*.html')))
 
 
-def _index_html(docs, written, out):
+def _index_html(docs, written, out, stages, total):
+    """Render the front page: the course first, the manual second."""
     listed = {name for _, items in CURRICULUM for name, _ in items}
-    parts = ['<h1>A robot, built the way software is built</h1>']
+    parts = ['<h1>Build a robot the way you build software</h1>']
     parts.append(render(
-        'One system that evolves, from a simulated arm to a mobile '
-        'manipulator with perception and machine learning. The premise is '
-        'that an experienced software engineer already knows Git, Docker, '
-        'testing, CI and observability, and that robotics is a domain '
-        'those skills transfer into rather than a separate discipline.'))
+        'One system that grows, from a simulated arm to a mobile '
+        'manipulator that sees and learns. You already know Git, Docker, '
+        'testing, CI and observability. This is those skills, pointed at '
+        'a machine that moves.'))
+
+    free = sum(1 for st in stages if st.get('price') == 'free')
+    paid = [st for st in stages if st.get('price') != 'free']
+    cost = f"${sum(int(st['price'].strip('$')) for st in paid)}" if paid else 'free'
+    parts.append(render(
+        f'**{total} lessons** across {len(stages)} stages. The first '
+        f'{free} are free. The rest are {paid[0]["price"]} each — '
+        f'{cost} for everything.'))
+
     parts.append(
-        '<div class="note"><strong>This is a live preview, not a finished '
-        'course.</strong> It is generated from the repository as it stands, '
-        'including the parts that do not work yet. Where something is '
-        'unproven or failing, the page says so rather than waiting until '
-        'it is tidy.</div>')
+        '<div class="note"><strong>This is a live preview of an '
+        'unfinished course.</strong> It is generated from the project as '
+        'it actually stands, including what does not work yet. Where '
+        'something is unproven or failing, the lesson says so.</div>')
+
+    parts.append(ladder_html(stages))
 
     table = phase_table(docs)
     if table:
-        parts.append('<h2>Where the build is</h2>')
+        parts.append('<h2>The real project, honestly</h2>')
+        parts.append(render(
+            'The course is written against a project that is genuinely '
+            'being built, not a finished example. This is where it is:'))
         parts.append(render(table))
 
+    parts.append('<h2>Reference</h2>')
+    parts.append(render(
+        'The project\'s own documentation, linked from the lessons that '
+        'need it. You do not have to read it in order.'))
     for heading, items in CURRICULUM:
-        rows = []
-        for name, label in items:
-            if name in written:
-                rows.append(f'<li><a href="{pathlib.Path(name).stem}.html">'
-                            f'{label}</a></li>')
+        rows = [f'<li><a href="{pathlib.Path(n).stem}.html">{label}</a></li>'
+                for n, label in items if n in written]
         if rows:
             parts.append(f'<div class="group"><h3>{heading}</h3><ul>'
                          + ''.join(rows) + '</ul></div>')
@@ -300,7 +429,7 @@ def _index_html(docs, written, out):
         rows = ''.join(
             f'<li><a href="{pathlib.Path(n).stem}.html">'
             f'{pathlib.Path(n).stem.replace("-", " ")}</a></li>' for n in extra)
-        parts.append('<div class="group"><h3>Reference</h3><ul>'
+        parts.append('<div class="group"><h3>Everything else</h3><ul>'
                      + rows + '</ul></div>')
 
     adrs = sorted((docs / 'decisions').glob('*.md'))

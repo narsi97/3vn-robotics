@@ -1,0 +1,87 @@
+id: moving
+number: 3
+kind: stage
+title: Making it move
+price: free
+summary: >
+  Put the robot in a simulator, drive it, and send the same command to
+  two completely different backends.
+
+lessons:
+  - id: headless-by-default
+    title: A simulator that runs in CI
+    objective: Run Gazebo with no GPU and no display.
+    commands: |
+      make play
+    checkpoint: >
+      Gazebo starts headless, RViz appears at the noVNC URL, and all four
+      controllers report `active`.
+    doc: simulation.md
+    body: |
+      Simulation here is a requirement, not a convenience, and that has an
+      architectural consequence: it must run headless, because a simulator
+      that needs a screen cannot run in CI, and a test that cannot run in
+      CI will eventually stop being true.
+
+      Everything renders in software. There is no GPU in the container and
+      no X server on a Mac. Expect roughly a third of real time — the
+      robot moves in slow motion and that is CPU physics, not a fault.
+
+      Two consequences follow immediately, and both will bite you if you
+      ignore them. Never time anything with `sleep`: simulation time and
+      wall time run at different rates, and code that confuses them works
+      on a fast machine and fails on a slow one. And the Gazebo GUI costs
+      you rendering you do not need — RViz shows more, for less.
+
+  - id: drive-it
+    title: Drive it yourself
+    objective: Move the robot by hand and feel how the controllers behave.
+    commands: |
+      make drive
+    checkpoint: >
+      `w` drives the base forward; `1` then `.` jogs a joint and stops at
+      its limit.
+    doc: viewing.md
+    body: |
+      Read nothing for ten minutes. Drive it into the bench.
+
+      Three things are worth noticing while you do.
+
+      Let go of `w` and it stops — not because the teleop sent a stop, but
+      because the controller brakes when it has not heard a command
+      recently. Velocity is a subscription with a watchdog, not a setting.
+      Kill the teleop mid-drive and the robot still stops.
+
+      Jogging clamps at the joint limit and says so. Those limits are read
+      from the description the robot is *actually running*, not a copy.
+
+      And it feels slow, because it is. You are watching physics computed
+      on a CPU.
+
+  - id: one-goal-two-backends
+    title: One command, two backends
+    objective: Send an identical goal to a simulator and to a mock, unchanged.
+    commands: |
+      make mock      # then, in another terminal, send a trajectory goal
+      make sim       # and send the identical goal
+    checkpoint: >
+      Both report SUCCEEDED, for the same bytes on the wire.
+    doc: architecture.md
+    body: |
+      This is the lesson the whole course is arranged around, and it takes
+      two commands to demonstrate.
+
+      The same action goal, the same client, the same controllers. One
+      run talks to a physics simulation; the other talks to a mock that
+      simply reports back whatever it was told. Neither the client nor the
+      scenario knows which.
+
+      When hardware arrives, it is a third implementation behind the same
+      interface — and the test you just ran is the one that tells you the
+      hardware works, because it is the same test.
+
+      This has since been checked against an arm from another project
+      entirely: a 5-DOF arm nobody here designed, spawned under these
+      controllers, drove unchanged. Joint discovery, state, limits,
+      trajectories, gripper. One hardcoded constant needed changing. That
+      is what this decoupling is worth.

@@ -1,0 +1,89 @@
+id: describing
+number: 2
+kind: stage
+title: Describing a robot
+price: free
+summary: >
+  Write down what the robot physically is, once, in a form that the
+  simulator, the tests and the hardware all read.
+
+lessons:
+  - id: one-source-of-truth
+    title: One source of physical truth
+    objective: Change a robot's dimensions without editing any model file.
+    commands: |
+      make urdf | head -40
+    checkpoint: >
+      Every dimension in the generated URDF traces back to a value in
+      `config/threevn_arm_v1.yaml`.
+    doc: ros2.md
+    body: |
+      A robot description is a tree of links and joints with dimensions,
+      masses and limits. The usual way to write one is to type numbers
+      into XML. The usual result is that the same number appears in four
+      places and three of them are stale.
+
+      So the numbers live in YAML and the XML reads them. Swapping to a
+      different arm is one argument, not an edit. You have done this
+      before too — it is configuration, separated from code, for exactly
+      the reasons you already believe in.
+
+      One detail is worth copying into your own work. Every mass carries a
+      `provenance` field: `measured`, `datasheet`, `estimated` or
+      `computed`. A test requires it. Early on, every physical value in
+      this project was a guess, and the field made that visible in the
+      file rather than implied by a comment.
+
+      That turned out to matter more than expected. Fifteen phases later,
+      when the parts were actually designed, the base was 2.3x too heavy
+      and the shoulder 40% too light — and every tipping-margin
+      calculation before that point had been computed against a robot
+      nobody had designed.
+
+  - id: inertia-is-computed
+    title: Never type a number you can derive
+    objective: Understand why inertia tensors are generated, not written.
+    commands: |
+      make test
+    checkpoint: >
+      The inertia tests pass: every tensor is symmetric, positive
+      definite, and satisfies the triangle inequality.
+    doc: ros2.md
+    body: |
+      An inertia tensor describes how mass is distributed. Typed by hand,
+      it silently disagrees with the shape it is supposed to describe, and
+      the physics engine turns that disagreement into NaN the first time
+      something touches something else.
+
+      Here the tensor is computed from the same mass and dimensions that
+      produced the geometry, so it cannot contradict the shape. There is
+      no step where a human transcribes it.
+
+      This is the same instinct as deriving a value rather than
+      duplicating it, and robotics punishes the alternative harder than
+      most domains: a wrong tensor does not throw, it produces a
+      simulation that looks plausible and is wrong.
+
+  - id: frames-that-pay-later
+    title: Three frames that save you a day each
+    objective: Place the frames that later phases assume exist.
+    commands: |
+      make view
+    checkpoint: >
+      RViz shows the arm with a joint-slider window; dragging a slider
+      moves it within its configured limits.
+    doc: ros2.md
+    body: |
+      Three choices here cost nothing now and pay later.
+
+      `base_footprint` as a zero-inertia root makes attaching a mobile
+      base a one-joint change rather than a restructuring. `tool0` is what
+      every IK tutorial and MoveIt example expects, so the convention is
+      free if you adopt it now. And `camera_optical_frame` carries the
+      REP-103 rotation.
+
+      That last one is the day-saver. Getting the optical frame rotation
+      wrong is the single most common perception bug: everything looks
+      fine until your camera reports objects in the wrong place, and the
+      error is in a fixed transform written months earlier. One joint now,
+      or a day of debugging in a later phase.

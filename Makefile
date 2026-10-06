@@ -170,7 +170,7 @@ urdf: build
 site:
 	@docker run --rm -v "$(PWD)":/src -w /src \
 	  -e THREEVN_GIT_COMMIT=$(GIT_COMMIT) python:3.12-alpine sh -lc \
-	  "pip install --quiet --no-cache-dir markdown==3.7 && \
+	  "pip install --quiet --no-cache-dir markdown==3.7 pyyaml==6.0.2 && \
 	   python3 scripts/build_site.py --root /src --out /src/site --clean"
 
 site-serve: site

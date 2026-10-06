@@ -7,12 +7,24 @@ make site-serve    # and look at it: http://localhost:8109/
 
 ## What it is
 
-This repository's documentation, rendered. Nothing is written for the
-site separately, and that is the whole design: a course that explains
-the project has to stay true as the project moves, and a second copy of
-the explanation drifts from the first within a week. Phase status is
-lifted out of `roadmap.md`, the version out of `VERSION`, the commit
-from git. Deepen the project, rebuild, and the site has deepened.
+A course, not a manual. Six stages: the first three free, then three
+tiers at $5 each. Each lesson states what you will be able to do, what
+to run, why it is built that way, and how you will know it worked.
+
+The curriculum is DATA, in `course/*.yaml` — stage, price, lessons, each
+with an objective, commands, a checkpoint and a body. Adding a lesson is
+adding a block to a YAML file; the generator knows nothing about any
+particular lesson. That is the same reasoning that puts the robot's
+dimensions in YAML rather than in the xacro.
+
+The project's documentation is still rendered, underneath, as reference
+that lessons link into. What changed is which one leads: the course is
+the front page and the docs are the appendix, rather than the other way
+round.
+
+Tiers are **shown, not enforced**. The lock badge and the price are
+visible; nothing checks them. There are no accounts and no payment, so
+anyone with the link reads everything.
 
 It also publishes the parts that do not work. The index says so in a
 banner. A course that only shows the finished half teaches the wrong
