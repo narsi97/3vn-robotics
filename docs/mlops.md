@@ -8,6 +8,19 @@ make serve                 # run whatever is in production
 make registry-rollback     # put the previous one back
 ```
 
+To rehearse a rollback before you need one, make a worse model on
+purpose and force it past the gates — the registry records it as forced:
+
+```bash
+make train ALPHA=10        # over-regularised: ~47 mm against 10.5
+make registry-register
+make registry-promote VERSION=<version> FORCE=1 REASON="rollback rehearsal"
+make registry-rollback
+```
+
+The very first promotion has no undo, and rollback says so rather than
+guessing.
+
 ## A model is not a file
 
 It is a file, the data that produced it, the metrics that justify it,

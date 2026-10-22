@@ -29,11 +29,22 @@ TARGET  ?= mock
 GUI     ?= 0
 NOVNC   := http://localhost:8106/vnc.html
 DASH    := http://localhost:8107/
+# Raw VNC for a native viewer, and the Foxglove WebSocket. Both are
+# bound to 127.0.0.1 by compose; neither is reachable off this machine.
+VNCURL  := vnc://127.0.0.1:5906
+VNCPASS ?= threevn
+FOXURL  := ws://127.0.0.1:8765
+# RVIZ=0 drops RViz from `make play`. Use it when you are watching
+# through Foxglove and nothing is looking at the container's display.
+# It plausibly frees CPU for the physics, but the real-time factor on
+# this box is too noisy to prove that -- see docs/viewing.md.
+RVIZ    ?= 1
 
 .DEFAULT_GOAL := help
 .PHONY: help doctor setup up down shell build test test-sim lint urdf \
         view mock sim robot stop scenario dash acceptance clean nuke test-ros \
-        cad cad-test cad-masses
+        cad cad-test cad-masses play drive vnc foxglove workspace grasp \
+        so101 so101-fetch site site-serve course-check
 
 help:
 	@echo ""
@@ -51,7 +62,16 @@ help:
 	@echo "  make lint      ament linters + check_urdf on every profile"
 	@echo ""
 	@echo "  make urdf      Expand the xacro and print the URDF"
+	@echo "  make workspace Where the gripper can reach (PITCH=90 for side-on)"
+	@echo "  make grasp     Grasp the cube and prove it (needs WORLD=grasp_bench)"
+	@echo "  make so101     SPIKE: run our stack against TheRobotStudio SO-101"
+	@echo "  make site      Render the docs into a static course site"
+	@echo "  make course-check  Validate course/*.yaml without rendering"
 	@echo "  make view      RViz + joint sliders            -> $(NOVNC)"
+	@echo "  make play      WHOLE ROBOT + RViz, watchable   -> $(NOVNC)"
+	@echo "  make drive     Teleop: drive it from the keyboard (2nd terminal)"
+	@echo "  make vnc       Open the desktop in a NATIVE viewer (faster than the browser)"
+	@echo "  make foxglove  How to attach Foxglove   -> $(FOXURL)"
 	@echo "  make mock      Run the stack: no simulator, no hardware"
 	@echo "  make sim       Run the stack in Gazebo (GUI=1 for pixels)"
 	@echo "  make base-sim  Run the MOBILE BASE in Gazebo (GUI=1 for pixels)"
@@ -82,8 +102,11 @@ setup: doctor
 	@echo "  Ready. Try:  make test   then   make view   then open $(NOVNC)"
 	@echo ""
 
+# Silent on stdout: targets like `make urdf` are piped and redirected, and
+# an echoed command line there is a line of not-XML. Compose reports its
+# own progress on stderr.
 up:
-	TVN_UID=$$(id -u) $(COMPOSE) up -d
+	@TVN_UID=$$(id -u) $(COMPOSE) up -d
 
 down:
 	$(COMPOSE) down
@@ -91,8 +114,17 @@ down:
 shell: up
 	$(RUN_TTY) "exec bash"
 
+# --symlink-install never removes a link whose source has gone. Delete a
+# profile, a world or a launch file and its link stays behind in
+# install/, dangling: the test suite discovers profiles from that
+# directory and dies on the dead one with a FileNotFoundError naming a
+# file you deliberately deleted. Found by running the course's own
+# "design your own arm" project. Pruning after every build removes the
+# whole class of problem.
+PRUNE := find /ws/install -xtype l -printf '  removed stale link %p\n' -delete
+
 build: up
-	$(RUN) "colcon build --symlink-install --event-handlers console_direct+"
+	$(RUN) "colcon build --symlink-install --event-handlers console_direct+ && $(PRUNE)"
 
 # -m 'not slow' excludes the Gazebo tests. The 60s budget is a design
 # constraint, not an aspiration: it is what makes people actually run it.
@@ -143,8 +175,51 @@ else
 $(error ROBOT must be 'arm', 'base' or 'mm', not '$(ROBOT)')
 endif
 
-urdf: build
-	$(RUN) "ros2 run xacro xacro $(SHARE)/urdf/$(URDF_ENTRY) params_file:=$(SHARE)/config/$(URDF_PROFILE).yaml target:=$(TARGET)"
+# Prints the expanded description and NOTHING else on stdout, so that
+# `make urdf > robot.urdf` is valid XML and `make urdf | grep -c ...`
+# counts only the robot. It used to depend on `build`, whose colcon log
+# and make's own echoed command lines landed on stdout ahead of the XML.
+# The build still runs first; its log goes to stderr, where you see it.
+urdf: up
+	@$(RUN) "(colcon build --symlink-install --event-handlers console_direct+ && $(PRUNE)) 1>&2"
+	@$(RUN) "ros2 run xacro xacro $(SHARE)/urdf/$(URDF_ENTRY) params_file:=$(SHARE)/config/$(URDF_PROFILE).yaml target:=$(TARGET)"
+
+# The course site. Rendered in a throwaway python image rather than the
+# dev container, which has no markdown and does not need one. The
+# curriculum is validated first, and a lesson pointing at a Make target
+# or a doc that does not exist fails the build.
+site:
+	@docker run --rm -v "$(PWD)":/src -w /src \
+	  -e THREEVN_GIT_COMMIT=$(GIT_COMMIT) python:3.12-alpine sh -lc \
+	  "pip install --quiet --no-cache-dir --root-user-action=ignore --disable-pip-version-check markdown==3.7 pyyaml==6.0.2 && \
+	   python3 scripts/build_site.py --root /src --out /src/site --clean"
+
+course-check:
+	@docker run --rm -v "$(PWD)":/src:ro -w /src python:3.12-alpine sh -lc \
+	  "pip install --quiet --no-cache-dir --root-user-action=ignore --disable-pip-version-check pyyaml==6.0.2 && \
+	   python3 scripts/build_site.py --root /src --check"
+
+site-serve: site
+	@echo ""
+	@echo "  course site -> http://localhost:8109/"
+	@docker run --rm -p 127.0.0.1:8109:80 \
+	  -v "$(PWD)/site":/usr/share/nginx/html:ro nginx:alpine
+
+# A spike: somebody else's robot, our controllers. See the launch file.
+so101-fetch:
+	@./scripts/fetch_so101.sh
+
+so101: build stop
+	$(RUN_TTY) "ros2 launch threevn_sim so101_sim.launch.py"
+
+# Needs a running: make play WORLD=grasp_bench
+grasp: build
+	$(RUN_TTY) "python3 /ws/scripts/verify_grasp.py"
+
+# Pure geometry from the URDF: no simulator, no robot, nothing running.
+workspace: build
+	$(RUN_TTY) "ros2 run threevn_control workspace \
+	            --pitch-deg $(if $(PITCH),$(PITCH),180)"
 
 view: build
 	@echo ""
@@ -181,6 +256,48 @@ base-drive: build
 	$(RUN) "python3 /ws/scripts/verify_base_drive.py"
 
 # The composed robot: arm on base, one controller_manager hosting both.
+play: build stop
+	@echo ""
+	@echo "  Whole robot, headless Gazebo + RViz -> $(NOVNC)"
+	@echo "  Then, in a SECOND terminal:  make drive"
+	@echo ""
+	$(RUN_TTY) "ros2 launch threevn_sim play.launch.py \
+	            profile:=$(MM_PROFILE) world:=$(WORLD) \
+	            rviz:=$(if $(filter 0,$(RVIZ)),false,true)"
+
+# Neither of these starts or stops anything: they are ways to LOOK at
+# a session that is already running.
+vnc: up
+	@echo ""
+	@echo "  Opening $(VNCURL)"
+	@echo "  Password:  $(VNCPASS)"
+	@echo ""
+	@echo "  There is a password only because native clients (macOS"
+	@echo "  Screen Sharing included) refuse a server that offers none --"
+	@echo "  they hang on 'Connecting...' forever. The port is bound to"
+	@echo "  127.0.0.1, so it is not protecting anything. Tick 'Remember'"
+	@echo "  and you will not be asked again."
+	@echo ""
+	@open $(VNCURL) 2>/dev/null || echo "  open it manually: $(VNCURL)"
+
+foxglove: up
+	@echo ""
+	@echo "  1. Install Foxglove:  https://foxglove.dev/download"
+	@echo "  2. Open connection:   $(FOXURL)"
+	@echo ""
+	@echo "  This renders on THIS Mac's GPU -- no framebuffer is shipped,"
+	@echo "  so the view stays smooth however slowly the sim is running."
+	@echo "  Pair it with:  make play RVIZ=0"
+	@echo ""
+
+# No `stop` here: drive ATTACHES to whatever play started. A stop
+# prerequisite would kill the simulator this is meant to drive.
+drive: build
+	@echo ""
+	@echo "  needs a running: make play   (or make mm-sim / make mock)"
+	@echo ""
+	$(RUN_TTY) "ros2 run threevn_control teleop"
+
 mm-sim: build stop
 	@echo '  Gazebo server headless. GUI=1 shows it at $(NOVNC) (slow: llvmpipe).'
 	$(RUN_TTY) "ros2 launch threevn_sim mm_sim.launch.py profile:=$(MM_PROFILE) world:=$(WORLD) gui:=$(if $(filter 1,$(GUI)),true,false)"
@@ -213,8 +330,13 @@ dataset-describe: build
 	$(RUN) "ros2 run threevn_data describe"
 
 
+# ALPHA overrides the ridge penalty. Its use in the course is to make a
+# WORSE model on purpose (ALPHA=10), so the promotion gates have
+# something real to refuse. Always through here rather than `ros2 run`
+# in a shell: GITENV is what gives the artefact its provenance, and the
+# provenance gate refuses a model without it.
 train: build
-	$(RUN) "$(GITENV) ros2 run threevn_ml train"
+	$(RUN) "$(GITENV) ros2 run threevn_ml train $(if $(ALPHA),--alpha $(ALPHA),)"
 
 
 # The model registry. Versions are content-addressed and immutable;
@@ -222,8 +344,11 @@ train: build
 registry-register: build
 	$(RUN) "ros2 run threevn_mlops registry register"
 
+# FORCE=1 promotes past failing gates, and the registry records it as
+# forced, with REASON. It exists so a rollback can be rehearsed before
+# it is needed -- not as a way round the gates.
 registry-promote: build
-	$(RUN) "ros2 run threevn_mlops registry promote $(VERSION)"
+	$(RUN) "ros2 run threevn_mlops registry promote $(VERSION) $(if $(FORCE),--force --reason '$(or $(REASON),forced from make)',)"
 
 registry-status: build
 	$(RUN) "ros2 run threevn_mlops registry status"
@@ -282,6 +407,12 @@ robot: build stop
 #
 # The bracket in the pattern stops pkill matching its own command line,
 # which would otherwise kill the shell running it.
+#
+# The /ws/install/*/lib/ pattern catches every executable this workspace
+# builds -- the dashboard, perception, serving, fusion. Killing `ros2
+# launch` with -9 orphans its children, and an orphaned dashboard kept
+# port 8107: the next `make dash` died with "Address already in use".
+# Found by running the course's Tier 5 lessons after `make play`.
 # The dashboard observes whatever robot is already running. It does NOT
 # depend on `stop`, so it can be started alongside `make sim` / `make mock`
 # without killing them.
@@ -337,7 +468,11 @@ stop: up
 	-@$(RUN) "pkill -9 -f 'ros2 laun[c]h' ; pkill -9 -f '[g]z sim' ; \
 	          pkill -9 -f 'robot_state_pub[l]isher' ; pkill -9 -f '[r]viz2' ; \
 	          pkill -9 -f 'joint_state_pub[l]isher' ; pkill -9 -f 'ros2_control_no[d]e' ; \
-	          pkill -9 -f 'parameter_brid[g]e' ; sleep 2 ; true" 2>/dev/null
+	          pkill -9 -f 'parameter_brid[g]e' ; \
+	          pkill -9 -f 'foxglove_brid[g]e' ; \
+	          pkill -9 -f '/ws/instal[l]/[a-z_]*/lib/' ; sleep 2 ; \
+	          pgrep -f '[r]os2 ' >/dev/null || rm -f /dev/shm/fastrtps_* ; \
+	          true" 2>/dev/null
 	@echo "  stopped"
 
 # Run a scenario against whatever stack is currently up.

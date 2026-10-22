@@ -30,16 +30,30 @@ the solid - it is a decision made when the part is placed on the bed.
 `worst_overhang` therefore takes the build direction, and
 `best_orientation` tries the six axis-aligned ones so the exported part
 can carry a recommendation rather than leaving every user to guess.
+
+It ranks them on support first and then on how tall the part would
+stand, which is a strength criterion rather than a printability one:
+printed PLA is weakest across its layer lines, so a part is stronger
+lying down than standing up. Support still outranks it.
 """
 
+import itertools
 import math
 
 import numpy as np
 from build123d import GeomType
 
+#: The orientation the part was drawn in, which wins ties.
+AS_MODELLED = '+Z up (as modelled)'
+
+#: Build heights closer than this count as the same height. The wrist
+#: bracket is 32.00 by 31.99 mm, and 0.01 mm is not a reason to tell
+#: anyone to rotate a part.
+HEIGHT_TOLERANCE_MM = 0.5
+
 #: The six axis-aligned build directions, by the face that goes down.
 ORIENTATIONS = {
-    '+Z up (as modelled)': (0.0, 0.0, 1.0),
+    AS_MODELLED: (0.0, 0.0, 1.0),
     '-Z up (flipped)': (0.0, 0.0, -1.0),
     '+X up': (1.0, 0.0, 0.0),
     '-X up': (-1.0, 0.0, 0.0),
@@ -184,20 +198,69 @@ def worst_overhang(solid, build_dir=(0.0, 0.0, 1.0)):
     return worst
 
 
+def build_height(solid, build_dir=(0.0, 0.0, 1.0)):
+    """Return how tall the part stands along the build direction, mm."""
+    up = np.array(build_dir, dtype=float)
+    up /= np.linalg.norm(up)
+    box = solid.bounding_box()
+    heights = [
+        float(np.dot(np.array(corner, dtype=float), up))
+        for corner in itertools.product(
+            (box.min.X, box.max.X), (box.min.Y, box.max.Y),
+            (box.min.Z, box.max.Z))
+    ]
+    return max(heights) - min(heights)
+
+
 def best_orientation(solid, limit_deg=45.0, bridge_mm=0.0):
     """
     Return (label, unsupported_area) for the best axis-aligned placement.
 
-    Ties break toward the part as modelled, because a recommendation to
-    rotate a part carries a cost - someone has to notice it - and it
-    should only be made when it buys something.
+    Three criteria, applied in order.
+
+    SUPPORT FIRST. Support on these parts is either a surface nobody can
+    clean up or, inside a sealed cavity, unremovable, so no amount of
+    anything else buys it.
+
+    THEN THE SHORTEST BUILD HEIGHT, which is a strength argument.
+    Printed PLA is weakest across its layer interfaces - roughly half to
+    two thirds of its strength along them - so a part loaded in bending
+    wants its long axis lying in the build plane instead of stacked up
+    the Z axis. The arm links are the case that matters: hollow beams
+    with 1.2 mm walls, carrying bending, and standing them upright puts
+    every one of those loads across a layer boundary. Laying a tall thin
+    part down also stops it wobbling on a bed-slinger, and gives it more
+    first-layer area to hold on with.
+
+    THIS ONLY CHOOSES BETWEEN PLACEMENTS THAT ALREADY NEED NO SUPPORT,
+    which is what keeps it honest - it never trades an unremovable
+    support for a stronger part. What it does cost is bridging: laid
+    down, a beam's sealed cavity becomes a long ceiling the slicer has
+    to span. That is a surface nobody sees, carrying little load, and a
+    slicer bridges it on purpose.
+
+    THEN THE PART AS MODELLED, because a recommendation to rotate
+    carries a cost - someone has to notice it, and the orientation has
+    to survive the trip to the slicer - and it should only be made when
+    it buys something.
     """
-    scored = []
-    for label, direction in ORIENTATIONS.items():
-        scored.append((overhanging_area(solid, direction, limit_deg,
-                                        bridge_mm), label))
-    scored.sort(key=lambda row: (row[0], row[1] != '+Z up (as modelled)'))
-    area, label = scored[0]
+    scored = [
+        (label,
+         overhanging_area(solid, direction, limit_deg, bridge_mm),
+         build_height(solid, direction))
+        for label, direction in ORIENTATIONS.items()
+    ]
+
+    least = min(area for _, area, _ in scored)
+    standing = [row for row in scored if row[1] <= least + 1e-9]
+
+    lowest = min(height for _, _, height in standing)
+    standing = [row for row in standing
+                if row[2] <= lowest + HEIGHT_TOLERANCE_MM]
+
+    # min() keeps the first of equals, so this falls back to the order
+    # ORIENTATIONS is declared in once as-modelled is out of the running.
+    label, area, _ = min(standing, key=lambda row: row[0] != AS_MODELLED)
     return label, area
 
 
@@ -209,5 +272,6 @@ def report(solid, limit_deg=45.0, bridge_mm=0.0):
             solid, (0.0, 0.0, 1.0), limit_deg, bridge_mm),
         'best_orientation': label,
         'unsupported_mm2_best': area,
+        'build_height_mm_best': build_height(solid, ORIENTATIONS[label]),
         'worst_face_deg': worst_overhang(solid),
     }

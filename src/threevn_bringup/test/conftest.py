@@ -46,10 +46,11 @@ def pytest_configure(config):
         'ros: test needs a running ROS graph (excluded from `make test`)')
 
 
-def run(args, timeout=30.0):
+def run(args, timeout=30.0, cwd=None):
     """Run a command and return (returncode, combined output)."""
     proc = subprocess.run(
-        args, capture_output=True, text=True, timeout=timeout, check=False)
+        args, capture_output=True, text=True, timeout=timeout, check=False,
+        cwd=cwd)
     return proc.returncode, proc.stdout + proc.stderr
 
 

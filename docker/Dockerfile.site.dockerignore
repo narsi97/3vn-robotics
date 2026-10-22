@@ -1,0 +1,15 @@
+# Build context for the course site ONLY.
+#
+# BuildKit prefers `<dockerfile>.dockerignore` over the root
+# `.dockerignore`, which is what makes this possible: the root file
+# excludes `docs/` and `*.md` on purpose, because the dev image is 5-6 GB
+# and that context is copied on every build of it. The site image needs
+# exactly those files and almost nothing else, so it gets its own rules
+# rather than relaxing the dev image's.
+*
+!docs
+!course
+!VERSION
+!scripts/build_site.py
+# Lessons name Make targets; the build checks each one exists.
+!Makefile

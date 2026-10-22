@@ -1,10 +1,10 @@
 # Bill of materials — hardware
 
-> **No printable parts exist yet.** The repository contains a *kinematic*
-> model (URDF primitives with correct lengths, masses and joint axes) but
-> no CAD: no STL, no STEP, and `meshes/` is empty. The filament line below
-> is therefore a **projected** cost for parts that still have to be
-> designed. See [roadmap.md](roadmap.md).
+> **Nothing has been printed or bought.** The parts now exist as
+> parametric CAD generated from the robot profile (`make cad`, see
+> [cad.md](cad.md)), so the filament figure below is measured from that
+> geometry rather than projected. It is still a design: no part has been
+> printed, fitted or weighed.
 
 **Two figures, stated separately and on purpose.** Quoting "$30 robot arm"
 while excluding the controller, the power supply and the wiring would be a

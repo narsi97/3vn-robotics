@@ -57,11 +57,15 @@ services:
     depends_on:
       victoriametrics:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:13133/"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
+    # NO healthcheck, deliberately. This image is distroless: no shell,
+    # no wget, no curl. The check that used to be here ran `wget` and so
+    # could never pass -- the collector reported "unhealthy" while it was
+    # delivering every metric, which teaches people to ignore the word.
+    # The health_check extension still answers on 13133; ask it from a
+    # neighbour that has wget:
+    #
+    #   docker compose -f monitoring/compose.yml exec victoriametrics \
+    #     wget -qO- http://collector:13133/
 
   grafana:
     image: grafana/grafana:11.4.0

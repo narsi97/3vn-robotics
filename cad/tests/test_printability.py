@@ -148,8 +148,9 @@ def test_the_recommended_orientation_is_never_worse_than_as_modelled(
     """
     A recommendation has to buy something.
 
-    Ties break toward the part as modelled, because telling someone to
-    rotate a part costs attention and should only happen when it helps.
+    Support is the first criterion and nothing outranks it, so whatever
+    the strength tie-break below picks, it can never be a placement that
+    needs more support than the part as drawn.
     """
     limit, bridge = limits
     for mechanism in parts_mod.MECHANISMS:
@@ -171,3 +172,117 @@ def test_the_bridge_limit_is_declared_not_assumed(cfg):
     fab = prof.fabrication(cfg)
     assert 'max_bridge_mm' in fab
     assert 5.0 < fab['max_bridge_mm'] < 50.0
+
+
+# -- the strength tie-break ---------------------------------------------
+
+def test_build_height_follows_the_build_direction():
+    """The extent along the build axis, not the Z extent of the model."""
+    from build123d import Box
+
+    slab = Box(10.0, 20.0, 30.0)
+    assert pr.build_height(slab, (0.0, 0.0, 1.0)) == pytest.approx(30.0)
+    assert pr.build_height(slab, (1.0, 0.0, 0.0)) == pytest.approx(10.0)
+    assert pr.build_height(slab, (0.0, -1.0, 0.0)) == pytest.approx(20.0)
+
+
+def test_a_tie_at_zero_support_breaks_toward_the_shorter_build():
+    """
+    THE REASON THIS TIE-BREAK EXISTS.
+
+    A plain beam needs no support whichever way up it goes, so support
+    alone cannot choose, and the old rule kept it standing on end -
+    which is the orientation that puts a bending load across every
+    layer interface. Lying down is both stronger and less likely to be
+    knocked over while it prints.
+    """
+    from build123d import Box
+
+    beam = Box(10.0, 10.0, 60.0)
+    label, area = pr.best_orientation(beam)
+    assert area == pytest.approx(0.0)
+    assert label != pr.AS_MODELLED
+    assert pr.build_height(beam, pr.ORIENTATIONS[label]) == \
+        pytest.approx(10.0)
+
+
+def test_a_part_already_lying_down_is_left_alone():
+    """Nothing to buy, so no recommendation to rotate."""
+    from build123d import Box
+
+    assert pr.best_orientation(Box(60.0, 60.0, 10.0))[0] == pr.AS_MODELLED
+
+
+def test_a_near_cube_is_not_rotated_for_a_fraction_of_a_millimetre():
+    """
+    A 0.3 mm saving is not worth an instruction to rotate a part.
+
+    Without a tolerance the wrist bracket flips orientation on the
+    0.01 mm between its 32.00 and 31.99 mm faces, which is noise in the
+    model dressed up as advice.
+    """
+    from build123d import Box
+
+    assert pr.best_orientation(Box(10.0, 10.0, 10.3))[0] == pr.AS_MODELLED
+
+
+def test_the_tie_break_never_stands_a_part_taller(cfg, limits):
+    """
+    Where height is the deciding criterion, it only ever lowers a part.
+
+    Held across the real design, because the strength argument is only
+    sound while that stays true. The condition matters: this asserts
+    nothing about a part that had to be rotated to escape support, which
+    is a different trade and the next test covers it.
+    """
+    limit, bridge = limits
+    for mechanism in parts_mod.MECHANISMS:
+        for name, builder in parts_mod.parts_for(mechanism).items():
+            solid = builder(cfg, mechanism=mechanism)
+            label, best = pr.best_orientation(solid, limit, bridge)
+            as_modelled = pr.overhanging_area(
+                solid, (0.0, 0.0, 1.0), limit, bridge)
+            if as_modelled > best + 1e-9:
+                continue          # support decided this one, not height
+            assert pr.build_height(solid, pr.ORIENTATIONS[label]) <= \
+                pr.build_height(solid) + pr.HEIGHT_TOLERANCE_MM, \
+                f'{mechanism}/{name} would print taller than as modelled'
+
+
+def test_support_outranks_height(cfg, limits):
+    """
+    THE ORDER THE TWO CRITERIA COME IN, ON THE PART THAT PROVES IT.
+
+    The wrist bracket has 670 mm2 of flat ceiling too wide to bridge as
+    drawn, and the orientation that clears it stands 32 mm tall against
+    30. It gets recommended anyway: a part 2 mm taller is a cost worth
+    paying, and support inside it is not removable at any price.
+    """
+    limit, bridge = limits
+    solid = parts_mod.parts_for('direct')['wrist_bracket'](
+        cfg, mechanism='direct')
+    label, best = pr.best_orientation(solid, limit, bridge)
+
+    assert best < 1.0
+    assert pr.overhanging_area(solid, (0.0, 0.0, 1.0), limit, bridge) > 1.0
+    assert label != pr.AS_MODELLED
+    assert pr.build_height(solid, pr.ORIENTATIONS[label]) > \
+        pr.build_height(solid)
+
+
+@pytest.mark.parametrize('name', ['upper_arm_link', 'forearm_link'])
+def test_the_arm_beams_print_lying_down(cfg, limits, name):
+    """
+    THE PART OF THE DESIGN THIS CHANGE IS FOR.
+
+    Both beams are hollow, 1.2 mm walled and loaded in bending, and both
+    print without support either way up. Standing on end they are around
+    100 mm of stacked layer interfaces carrying that bending; lying down
+    the load runs along the extrusions instead.
+    """
+    limit, bridge = limits
+    solid = parts_mod.parts_for('direct')[name](cfg, mechanism='direct')
+    label, area = pr.best_orientation(solid, limit, bridge)
+    assert area < 1.0, 'still has to need no support'
+    assert pr.build_height(solid, pr.ORIENTATIONS[label]) < \
+        pr.build_height(solid) / 2.0

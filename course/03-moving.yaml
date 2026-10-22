@@ -1,0 +1,818 @@
+id: moving
+number: 3
+kind: stage
+title: Making it move
+price: free
+summary: >-
+  Put the robot in a simulator, drive it, speak ROS 2 to it, keep two
+  clocks apart, and send the same command — byte for byte — to two
+  completely different backends.
+
+outcomes:
+  - Run Gazebo with no GPU and no display, and choose the right of three ways to watch it.
+  - Drive the mobile manipulator by keyboard, and explain why it stops when you let go.
+  - Choose correctly between a topic, a service and an action, and inspect each on a live robot.
+  - Keep simulation time and wall time apart, and know why one real-time-factor reading proves nothing.
+  - Send one goal to a mock and to a physics simulation, unchanged, and get the same answer.
+  - Write and run scenarios that are tests and demos at once, against either backend.
+
+prerequisites:
+  - Stage 2 complete.
+  - Docker given at least 6 GB of memory — Gazebo is the first thing in the course that needs it.
+
+lessons:
+  - id: headless-by-default
+    title: A simulator that runs in CI
+    minutes: 30
+    objective: Run Gazebo with no GPU and no display, and confirm every controller came up.
+    body: |
+      Simulation here is a requirement, not a convenience: almost all of
+      this course must be completable without a robot. That has an
+      architectural consequence. The simulator must run **headless**,
+      because one that needs a screen cannot run in CI, and a test that
+      cannot run in CI eventually stops being true.
+
+      Everything renders in software. There is no GPU inside the container
+      and no X server on a Mac, so physics and rendering share the CPU. The
+      robot moves in something like slow motion. That is CPU physics, not a
+      fault, and the next lessons explain why it matters and why you should
+      not trust any single measurement of it.
+
+      `make play` starts the whole robot — the arm on its mobile base, with
+      a camera — in headless Gazebo, plus RViz in the browser. RViz shows
+      more than Gazebo's own window would, for less: the robot from its
+      description, the camera feed, and the trail its wheels think it left.
+
+      In simulation, the controller manager lives **inside the Gazebo
+      process**, started by a plugin when the robot spawns. So controllers
+      cannot be started until the model exists, and the launch file chains
+      each controller's spawner off the previous one finishing. On a busy
+      machine one of them can still miss its activation window — the
+      pitfall below is the most common thing to go wrong in this whole
+      stage.
+    steps:
+      - do: Start the whole robot.
+        run: make play
+        expect: Launch output scrolling, then quiet. Leave this terminal running.
+      - do: Open **http://localhost:8106/vnc.html** in a browser.
+        expect: RViz, with the mobile manipulator on a grid and a camera panel.
+      - do: In a second terminal, check the controllers.
+        run: |
+          make shell
+          ros2 control list_controllers
+        expect: >-
+          Four controllers, all `active`: `arm_controller`,
+          `gripper_controller`, `base_controller` and
+          `joint_state_broadcaster`.
+      - do: Check the hardware side of the seam.
+        run: ros2 control list_hardware_components
+        expect: >-
+          Two components, both `active`: the arm and the base — one
+          controller manager hosting both. Each lists the command interfaces
+          it has claimed: positions for the arm, velocities for the wheels.
+      - do: When you are done, stop everything from the host.
+        run: make stop
+    checkpoint: >-
+      Gazebo runs headless, RViz appears at port 8106, and all four
+      controllers report `active`.
+    pitfalls:
+      - symptom: 'One controller is missing, with "Switch controller timed out after 5 seconds" in the log.'
+        cause: >-
+          A loaded machine. Activation must complete inside the controller
+          manager's update loop, which runs in a simulator already short of
+          CPU. The launch files allow 30 seconds, but a build or a test run
+          alongside can still starve it.
+        fix: >-
+          Stop the other work, then `make stop && make play`. Confirm with
+          `ros2 control list_controllers` every time rather than assuming.
+      - symptom: RViz shows the robot with no joint positions, and teleop cannot read the arm.
+        cause: '`joint_state_broadcaster` is the controller that failed to start, so there is no `/joint_states`.'
+        fix: Same as above — restart on a quieter machine and confirm all four.
+      - symptom: Gazebo disappears mid-run with nothing useful in the log.
+        cause: Docker's VM ran out of memory.
+        fix: Give Docker 6 GB or more; `make doctor` checks it.
+    concepts:
+      - term: Headless simulation
+        meaning: >-
+          Running the physics server with no GUI, so it works on CI runners
+          and in containers with no display.
+      - term: Software rendering
+        meaning: >-
+          Drawing frames on the CPU — here with Mesa's llvmpipe — because
+          the container has no GPU.
+      - term: Controller manager
+        meaning: >-
+          The `ros2_control` process that loads controllers and runs the
+          control loop. In simulation it lives inside Gazebo.
+    quiz:
+      - q: Why must the simulator run headless by default, rather than headless only in CI?
+        a: >-
+          If the default needs a screen, the default is not what CI runs, and
+          the two drift apart. Headless everywhere means one path, tested.
+      - q: Why can controllers not be spawned as soon as Gazebo starts?
+        a: >-
+          The controller manager is started by a plugin on the robot model.
+          Until the robot has spawned, there is no controller manager to talk
+          to — so spawners are chained off the spawn finishing.
+    exercise:
+      task: >-
+        Run `make play` while `make test` runs in another terminal, a few
+        times. Does a controller ever fail to activate? Write down what you
+        would put in a CI job's setup to make that failure impossible to
+        miss, rather than impossible to happen.
+    read:
+      - simulation.md
+      - gazebo.md
+      - learning-path.md
+
+  - id: three-ways-to-watch
+    title: Three ways to watch, and what crosses the wire
+    minutes: 25
+    objective: Pick the right view of a remote robot by understanding what each one transmits.
+    body: |
+      There is no GPU in the container and no X server on macOS, so every
+      view of the robot is a remote view. They are not equivalent, and the
+      difference is **what crosses the boundary**:
+
+      | | open with | what is transmitted |
+      |---|---|---|
+      | browser (noVNC) | port 8106 | a framebuffer, decoded in JavaScript |
+      | native VNC | `make vnc` | the same framebuffer, decoded natively |
+      | Foxglove | `make foxglove` | **messages only** — your machine draws the robot |
+
+      The browser is the right first look, because it needs nothing
+      installed. It is also the slowest: RViz renders in software inside the
+      container, the frame is encoded, shipped, and decoded in a browser tab.
+      Three layers of CPU rasterisation stacked on each other.
+
+      Foxglove changes the question entirely. It subscribes to the robot's
+      topics over a WebSocket and draws the robot on your own GPU from its
+      description and its transforms. No pixels cross the wire, so the view
+      is as smooth as your machine, however slow the simulation is.
+
+      Two lessons came out of setting these up, and both generalise.
+
+      **Probe the protocol, not the socket.** macOS's built-in VNC client
+      kept reporting "Connection failed". The first diagnosis read an
+      established TCP connection as a working one. Probing the actual
+      handshake showed the server offering only one authentication type —
+      "None" — which native clients refuse. The fix was a second VNC server
+      with a password. The password protects nothing (the port is bound to
+      127.0.0.1) and exists only because clients will not finish a handshake
+      without one.
+
+      **Version mismatches can fail silently.** The bridge here speaks a
+      newer WebSocket subprotocol. An older Foxglove asks for the old one,
+      gets HTTP 400, and reports only a failed connection.
+    steps:
+      - do: With `make play` running, use the browser view first.
+        expect: Usable, possibly laggy.
+      - do: Open the same desktop in the native viewer. The password is `threevn`.
+        run: make vnc
+        expect: The same RViz, noticeably smoother.
+      - do: >-
+          Optional, if you are willing to install Foxglove: restart the
+          simulation without RViz, and follow what `make foxglove` prints.
+        run: |
+          make stop
+          make play RVIZ=0
+          make foxglove
+        expect: The robot drawn on your own machine, from messages, with no framebuffer at all.
+    checkpoint: >-
+      You have viewed the running robot at least two ways, and can say what
+      each one sends over the wire.
+    pitfalls:
+      - symptom: macOS Screen Sharing says "Connection failed".
+        cause: >-
+          It reached the password-less server, which offers only the "None"
+          security type that native clients refuse.
+        fix: Use `make vnc`, which opens port 5906 — the server that asks for a password.
+      - symptom: 'Your browser asks "Open Screen Sharing?" when you paste a `vnc://` address.'
+        cause: >-
+          The browser's ordinary hand-off for a non-web URL scheme. Nothing
+          is asking for access to your screen; the VNC server is inside the
+          container and can only see its own virtual display.
+        fix: Allow it, or use `make vnc`, which skips the browser.
+      - symptom: Foxglove will not connect, and the launch log says "Address already in use" on 8765.
+        cause: A bridge from a previous run is still holding the port.
+        fix: '`make stop && make play`.'
+      - symptom: Foxglove still will not connect, with no error you can see.
+        cause: An older Foxglove requesting the old WebSocket subprotocol, rejected with HTTP 400.
+        fix: Update Foxglove before debugging anything else.
+    concepts:
+      - term: Framebuffer streaming
+        meaning: >-
+          Sending rendered pixels to a viewer, as VNC does. Cost grows with
+          screen size and frame rate, and rendering happens remotely.
+      - term: Message-level visualisation
+        meaning: >-
+          Sending the robot's data rather than its pixels, and rendering
+          locally — Foxglove's approach.
+    quiz:
+      - q: The simulation is slow either way. Why is Foxglove smooth when the browser view lags?
+        a: >-
+          Foxglove renders on your own GPU from messages, so the view's frame
+          rate is independent of the container's CPU-bound rendering. The
+          browser view can be no smoother than frames rendered in software
+          and shipped as pixels.
+      - q: Why is it safe for one VNC server to run with no password at all?
+        a: >-
+          It listens on localhost inside the container and is only reachable
+          through websockify for the browser. The published port goes to the
+          other server, bound to 127.0.0.1 on the host.
+    exercise:
+      task: >-
+        Shrink the virtual desktop with `THREEVN_SCREEN=1280x720 make down
+        up`, relaunch, and compare the browser view. Estimate how much less
+        data each frame carries, and whether the improvement you see is
+        about that much.
+    read:
+      - viewing.md
+
+  - id: drive-it
+    title: Drive it yourself
+    minutes: 30
+    objective: Move the robot by hand and feel how its controllers behave.
+    body: |
+      Read nothing for ten minutes. Drive it into the bench.
+
+      ```
+        base     w forward   s back   a left   d right   space stop now
+        arm      1..9 select joint   , jog down   . jog up   tab next   h home
+        gripper  [ open   ] close
+        speed    - slower   + faster
+      ```
+
+      Three things are worth noticing while you do.
+
+      **Let go of `w` and it stops** — not because the teleop sent a stop,
+      but because the base controller brakes when it has not heard a command
+      recently. Velocity is a subscription with a watchdog, not a setting.
+      Kill the teleop mid-drive and the robot still stops. That is the
+      property you want from anything that moves: silence is safe.
+
+      **Jogging clamps at the joint limit**, and says so. The teleop reads
+      those limits from the description the robot is *actually running*, not
+      a copy of its own. Change the profile, relaunch, and the clamp moves.
+
+      **It feels slow**, because it is. You are watching CPU physics.
+
+      One more thing is invisible but worth knowing: this teleop exists
+      because the stock one does not fit this robot. ROS's standard keyboard
+      teleop drives only a base, and by default it publishes a plain
+      velocity message, where this base controller expects a *timestamped*
+      one. Different message types on one topic name never connect — and
+      nothing reports an error. The next lesson shows how to see that in one
+      command.
+    steps:
+      - do: Start the robot if it is not running.
+        run: make play
+      - do: In a second terminal, start the teleop, and keep that terminal focused.
+        run: make drive
+      - do: Hold `w` for a few seconds, then let go. Then hold it again and press Ctrl-C mid-drive.
+        expect: >-
+          The robot stops both times — within half a second of robot time,
+          which is longer by the clock on your wall.
+      - do: Press `1` to select the first arm joint, then hold `.` until it will not go further.
+        expect: The joint stops at its limit and the teleop says so.
+      - do: Press `h` to home the arm, then `[` and `]` to open and close the gripper.
+    checkpoint: >-
+      `w` drives the base forward, letting go stops it, and jogging a joint
+      stops at its limit with a message.
+    pitfalls:
+      - symptom: Keys do nothing.
+        cause: The teleop reads the terminal it runs in.
+        fix: Click into that terminal before pressing keys.
+      - symptom: The teleop says it has no joint states.
+        cause: '`joint_state_broadcaster` failed to activate.'
+        fix: '`make stop && make play` on a quieter machine, and confirm all four controllers.'
+      - symptom: A different keyboard teleop runs without errors, and the robot never moves.
+        cause: >-
+          It publishes an unstamped velocity message; the base controller
+          subscribes to a stamped one. They never match.
+        fix: Use `make drive`, or publish the stamped type.
+    concepts:
+      - term: Command watchdog
+        meaning: >-
+          A controller behaviour that stops the robot when commands stop
+          arriving — here, after half a second.
+      - term: Teleoperation
+        meaning: >-
+          Driving a robot directly by a human, here from a keyboard.
+    quiz:
+      - q: Why is "stops when commands stop" a property of the controller rather than the teleop?
+        a: >-
+          The teleop can crash, hang or lose its connection, and then it
+          cannot send a stop. Only the receiving end can notice silence.
+      - q: Where does the teleop get the joint limits it clamps to?
+        a: >-
+          From the robot description the running robot publishes, so they
+          are always the limits actually in force.
+    exercise:
+      task: >-
+        Find the setting that decides how long the base waits before
+        braking, and the value it has.
+      hint: Look in `src/threevn_bringup/config/base_controllers.yaml`.
+      answer: >-
+        `cmd_vel_timeout: 0.5` — half a second. Longer feels smoother over a
+        flaky link; shorter stops sooner when something dies. It is a safety
+        trade-off, not a tuning detail.
+    read:
+      - learning-path.md
+      - mobile-base.md
+
+  - id: topics-services-actions
+    title: Topics, services and actions
+    minutes: 40
+    objective: Choose the right ROS 2 communication primitive, and inspect each on a live robot.
+    body: |
+      You know message buses, RPC and job queues. ROS 2 gives you three
+      primitives that map onto them closely, and choosing the wrong one is
+      the most common design mistake:
+
+      | primitive | like | use for | cannot |
+      |---|---|---|---|
+      | **topic** | pub/sub | continuous state, many listeners | report failure |
+      | **service** | synchronous RPC | a short request needing an answer | be cancelled |
+      | **action** | a job with progress and cancel | anything that takes seconds | be cheap |
+
+      This robot's whole public interface:
+
+      | name | primitive | why |
+      |---|---|---|
+      | `/joint_states` | topic | continuous, many subscribers, losing one sample is harmless |
+      | `/controller_manager/switch_controller` | service | short, needs success or failure |
+      | `/arm_controller/follow_joint_trajectory` | action | takes seconds, needs feedback, must be cancellable |
+      | `/gripper_controller/gripper_cmd` | action | same |
+      | `/base_controller/cmd_vel` | topic | a stream of velocity commands, latest wins |
+
+      Motion is the only thing here that takes time and can be interrupted,
+      so it is the only thing that is an action. That is the whole heuristic.
+
+      Every one of these came free from `ros2_control`. None was designed by
+      hand, and there is no private API anywhere.
+
+      Two gotchas are worth an hour each. **Types must match exactly**: a
+      publisher and a subscriber on the same topic name with different
+      message types never connect, and nothing logs an error. The base once
+      sat motionless because a config parameter meant to choose the stamped
+      type did not exist on this ROS version — it was accepted and silently
+      ignored. And **`ros2 topic pub` stamps messages with time zero**, which
+      TF treats as ancient, so a transform you published by hand appears not
+      to exist.
+    steps:
+      - do: With `make play` running, open a shell and list what is running.
+        run: |
+          make shell
+          ros2 node list
+          ros2 topic list -t
+      - do: Read one joint state message, then measure the rate.
+        run: |
+          ros2 topic echo /joint_states --once
+          ros2 topic hz /joint_states
+        expect: >-
+          Names, positions and velocities; then a rate well below the
+          configured 50 Hz — roughly 50 times the real-time factor, because
+          the controllers run on simulated time. Ctrl-C to stop.
+      - do: List the long-running interfaces.
+        run: ros2 action list -t
+        expect: The arm's trajectory action and the gripper's command action.
+      - do: Check who listens on the base's velocity topic, and with what type.
+        run: ros2 topic info /base_controller/cmd_vel
+        expect: '`geometry_msgs/msg/TwistStamped`, one subscriber. This is the fastest way to diagnose a silent type mismatch.'
+    checkpoint: >-
+      For each of the robot's public interfaces, you can name its primitive
+      and say why it is that one.
+    pitfalls:
+      - symptom: '`ros2 topic list` shows almost nothing while the simulation is clearly running.'
+        cause: >-
+          Stale shared-memory files left by a process that was killed hard.
+          The middleware's shared-memory transport finds them and gives up.
+        fix: >-
+          `make stop` removes them. The container also runs the middleware
+          over UDP only, which avoids the problem at the cost of a little
+          speed.
+      - symptom: A transform you published with `ros2 topic pub` never shows up in `tf2_echo`.
+        cause: '`ros2 topic pub` stamps messages with time zero, and TF treats them as ancient.'
+        fix: Publish from a small node that stamps with the current clock.
+      - symptom: '`pkill -f joint_state_publisher` kills your own shell.'
+        cause: The pattern matches the `pkill` command line itself.
+        fix: "Bracket one character: `pkill -f 'joint_state_pub[l]isher'`."
+    concepts:
+      - term: Topic
+        meaning: >-
+          A named stream of messages, published and subscribed — pub/sub. No
+          reply, no failure reporting.
+      - term: Service
+        meaning: >-
+          A request with a single response — synchronous RPC. Blocks the
+          caller, and cannot be cancelled.
+      - term: Action
+        meaning: >-
+          A goal with feedback, a result and cancellation — for anything
+          that takes time, like motion.
+      - term: Message type
+        meaning: >-
+          The schema of a topic's messages. Publisher and subscriber must
+          agree exactly, or they silently never connect.
+    quiz:
+      - q: Why is moving the arm an action and not a service?
+        a: >-
+          A motion takes seconds. A service would block the caller for all of
+          it, could not report progress, and could not be cancelled if
+          something got in the way.
+      - q: Why is `/joint_states` a topic and not a service the dashboard could call?
+        a: >-
+          It is continuous state with many consumers. Each would otherwise
+          poll; with a topic they all receive the same stream, and missing a
+          sample costs nothing.
+      - q: A subscriber gets nothing and no error is logged anywhere. What is your first command?
+        a: '`ros2 topic info <topic>` — compare the publisher and subscriber types and counts.'
+    exercise:
+      task: >-
+        You need a new capability: "measure the distance from the gripper to
+        the target". Should it be a topic, a service or an action? Argue for
+        your choice, then argue for one of the other two. Which argument is
+        stronger, and what would change your mind?
+    read:
+      - ros2.md
+      - architecture.md
+
+  - id: two-clocks
+    title: Two clocks, and the bug they cause
+    minutes: 30
+    objective: Keep simulation time and wall time apart, and measure the real-time factor honestly.
+    body: |
+      A simulator keeps its own clock. When physics is fast, simulated time
+      runs at real speed; when it is not, simulated time runs slow. The ratio
+      is the **real-time factor**. Every node here uses simulated time, read
+      from `/clock`, which is why `/clock` is the one bridge between Gazebo
+      and ROS that is never optional.
+
+      The whole robot on a CPU runs at **roughly a third of real time**. Do
+      not read precision into that. Five consecutive samples of one
+      unchanged run measured:
+
+      ```
+      0.373   0.269   0.428   0.284   0.410
+      ```
+
+      A spread of ±20% from background load alone. An earlier version of
+      this course published a headless figure and a GUI figure side by side,
+      as though the difference had been measured. It had not — each was a
+      single reading — and both were removed. One sample cannot tell you
+      whether a change helped.
+
+      Now the bug. A test scenario commanded the arm, slept **0.3 seconds of
+      wall time**, and checked the position once. At a real-time factor of
+      0.27, that is about **0.08 seconds of robot time** — nowhere near
+      enough for the arm to move. The arm reached its target exactly,
+      measured error **0.0000 rad**, and the test failed anyway, because it
+      looked too early.
+
+      The fix is to stop asking "has enough time passed?" and ask "has the
+      thing happened?" — **poll the post-condition until it holds**, with a
+      generous timeout as a backstop. That is correct at any real-time
+      factor, on a fast laptop or a starved CI runner. Timeouts in the robot
+      client went the same way: they spend *simulated* seconds, with a
+      wall-clock backstop so a frozen simulator cannot hang the caller
+      forever.
+    steps:
+      - do: With `make play` running, sample the real-time factor five times.
+        run: |
+          make shell
+          gz topic -e -t /world/empty_bench/stats -n 5 | grep real_time_factor
+        expect: >-
+          Five numbers, all different. One verification run of this lesson
+          got 0.34, 0.65, 0.21, 0.58 and 0.50 — and the arm on its own, in the
+          same world, ranged from 0.02 to 1.09.
+      - do: Read the docstring that records the bug, and the polling loop that fixed it.
+        run: grep -n -A28 "def step" src/threevn_control/threevn_control/scenarios/base.py
+      - do: Find the client's simulated-time wait.
+        run: grep -n -A25 "def _wait" src/threevn_control/threevn_control/robot_client.py
+    checkpoint: >-
+      You have five real-time-factor samples that disagree with each other,
+      and you can explain why polling with a timeout is correct where a
+      sleep is not.
+    pitfalls:
+      - symptom: A test passes on a fast machine and fails on a slow one, or in CI.
+        cause: Something waited a fixed wall-clock time and assumed the robot had moved.
+        fix: Poll the post-condition with a timeout. Never `sleep` and check once.
+      - symptom: A trajectory looks like it undershoots.
+        cause: Often the real-time factor, not the controller — three wall seconds is about one robot second.
+        fix: Check the real-time factor before tuning anything.
+    concepts:
+      - term: Simulation time
+        meaning: >-
+          The simulator's own clock, published on `/clock`. Nodes use it
+          when `use_sim_time` is set.
+      - term: Real-time factor (RTF)
+        meaning: >-
+          Simulated seconds per wall-clock second. About 0.3 for this robot
+          on a CPU, and noisy.
+      - term: Polling a post-condition
+        meaning: >-
+          Repeatedly checking whether the expected state has been reached,
+          until it has or a timeout expires — instead of waiting a fixed
+          time and checking once.
+    quiz:
+      - q: A step sleeps 0.3 s of wall time and checks once. The real-time factor is 0.27. How much robot time has passed?
+        a: About 0.08 seconds — far too little for a motion lasting a second or two.
+      - q: Polling makes correct tests take longer to fail. Why is that an acceptable trade?
+        a: >-
+          A correct pass is fast at any speed; only a genuine failure waits
+          out the timeout. Slow-to-fail is a cost you pay rarely; a
+          wrong result is a cost you pay every time.
+      - q: Why can one real-time-factor reading not tell you whether a change helped?
+        a: >-
+          Back-to-back samples of an unchanged run vary by about ±20%. A
+          single before-and-after pair is inside the noise.
+    exercise:
+      task: >-
+        Take five samples with RViz running and five with `make play RVIZ=0`.
+        Compute the mean and spread of each. Is the difference bigger than
+        the spread? Write one sentence you would be willing to publish about
+        what RViz costs — and nothing stronger.
+    read:
+      - simulation.md
+      - troubleshooting.md
+
+  - id: one-goal-two-backends
+    title: One command, two backends
+    minutes: 35
+    objective: Send an identical goal to a physics simulation and to a mock, unchanged, and get the same answer.
+    body: |
+      This is the lesson the course is arranged around, and it takes two
+      launches to demonstrate.
+
+      The same action goal, the same controllers, the same command line.
+      One run talks to a physics simulation; the other talks to a mock that
+      simply reports back whatever it was told. Neither the client nor the
+      controllers know which.
+
+      Be precise about what each one proves. Success on the **mock** proves
+      the interface contract — the action exists, the joint names are right,
+      the controllers accept and complete the goal — with no physics at all,
+      in seconds. Success in **Gazebo** adds gravity, inertia, contact and
+      controller tuning. Neither proves the real robot works. But when
+      hardware arrives it is a third implementation behind the same
+      interface, and this exact command is the first thing you run against
+      it.
+
+      The claim has since been tested harder than swapping backends. An arm
+      from a different project — five joints, nobody here designed it — was
+      spawned under these controllers and driven unchanged. Joint discovery,
+      state, limits, trajectories and the gripper all worked. One hardcoded
+      constant needed changing. Tier 6 tells that story.
+
+      The arm alone is used here, rather than `make play`, for a reason you
+      will hit sooner or later: when the arm is mounted on the base, its
+      joints are renamed with an `arm_` prefix. Send this goal to the
+      composed robot and it is **rejected**, because the names do not match.
+      The fix is not to hardcode the other names — it is to ask the
+      controller which joints it drives.
+    steps:
+      - do: Start the arm on the mock backend.
+        run: make mock
+      - do: In a second terminal, send a trajectory goal.
+        run: |
+          make shell
+          ros2 action send_goal /arm_controller/follow_joint_trajectory \
+            control_msgs/action/FollowJointTrajectory \
+            "{trajectory: {joint_names: [shoulder_pan_joint, shoulder_lift_joint, elbow_joint, wrist_joint], points: [{positions: [0.4, 0.3, -0.2, 0.1], time_from_start: {sec: 2}}]}}"
+        expect: '`Goal finished with status: SUCCEEDED`.'
+      - do: Stop the mock and start Gazebo with the same arm.
+        run: |
+          make stop
+          make sim
+      - do: Send exactly the same goal again.
+        expect: '`SUCCEEDED` again — same bytes, different physics.'
+      - do: Ask the controller which joints it drives. This is how code should find out, rather than assuming.
+        run: ros2 param get /arm_controller joints
+    checkpoint: >-
+      Both backends report `SUCCEEDED` for byte-identical goals.
+    pitfalls:
+      - symptom: The goal is rejected immediately.
+        cause: >-
+          The joint names do not match the controller's — usually because the
+          composed robot from `make play` prefixes them with `arm_`.
+        fix: >-
+          `ros2 param get /arm_controller joints` and use those names. In
+          code, ask the controller rather than hardcoding a list.
+      - symptom: '`make sim` fails with a pluginlib error saying `mock_components/GenericSystem` is not a Gazebo plugin.'
+        cause: >-
+          A `robot_state_publisher` left over from `make mock` published the
+          mock robot, and something took the description from that topic.
+        fix: >-
+          `make stop` first — every run target does it for you. The launch
+          file also spawns from the same substitution rather than the topic,
+          which closes the hole.
+    concepts:
+      - term: Mock hardware
+        meaning: >-
+          `mock_components/GenericSystem`: a hardware plugin that reports
+          every command straight back as state. Exercises the whole control
+          stack with no physics.
+      - term: Action goal status
+        meaning: >-
+          The final verdict on an action goal — `SUCCEEDED`, `ABORTED` or
+          `CANCELED`. Note that it reports what the controller did, not
+          whether the robot ended up somewhere useful.
+    quiz:
+      - q: The mock reports every command back as the measured state. So what does SUCCEEDED on the mock actually prove?
+        a: >-
+          That the interface contract holds: the action exists, the names and
+          types are right, the controllers accept, execute and complete the
+          goal. Nothing about physics.
+      - q: Why use the arm alone here rather than the whole robot?
+        a: >-
+          The composed robot prefixes the arm's joints with `arm_`, so a goal
+          naming `shoulder_pan_joint` is rejected there.
+    exercise:
+      task: >-
+        Send a goal with `shoulder_pan_joint` at `3.0` rad — far beyond its
+        90° limit — to the mock, then read `/joint_states`. Where did the
+        joint end up, and what status did the goal report? Hold on to the
+        answer; Tier 5 is built on it.
+      answer: >-
+        The joint stops at about 1.5708 rad, its limit, because the
+        controller manager clamps commands — and the goal still reports
+        `SUCCEEDED`. A clamped motion is a "successful" motion to somewhere
+        you did not ask for.
+    read:
+      - architecture.md
+      - decisions/0003-hardware-seam.md
+
+  - id: scenarios-are-tests
+    title: Scenarios are tests you can watch
+    minutes: 35
+    objective: Run scenarios that serve as tests and demos at once, against either backend.
+    body: |
+      A **scenario** is a named sequence of steps. Each step does something
+      to the robot and then asserts what should be true afterwards — polling
+      until it is, as the clocks lesson showed. Scenarios are written against
+      one robot client and nothing else, so the same scenario runs against
+      the mock, against Gazebo and, one day, against the physical arm.
+
+      They are tests and demos at once, on purpose. `make test-sim` runs them
+      and fails the build; `make scenario` runs them for you to watch. Writing
+      them once for both is what stops the demo drifting away from what is
+      actually verified — the failure mode where the conference demo works
+      and the test suite checks something else.
+
+      Six exist: `home`, `move_joint`, `move_to_position`, `gripper`,
+      `safety_limit` and `pick_and_place`.
+
+      **A scenario must pass on both backends.** One that passes in Gazebo
+      and fails on the mock means the abstraction has quietly become
+      simulator-specific. That is exactly how `safety_limit` found out that
+      nothing below the seam enforced joint limits: green in simulation, red
+      on the mock, with identical robot software. Gazebo had only clamped
+      because its physics joint has a hard stop. Tier 5 follows that thread.
+
+      And one honest note about `pick_and_place`. It moves through named
+      poses and opens and closes the gripper — and its "close the gripper"
+      step has no post-condition. Nothing ever checked that anything was
+      held. It is choreography, not verification, and it was honest about
+      being a sequencing demo. But it means **this robot has never picked
+      anything up**. Tier 6 takes that on, and is honest about how far it
+      gets. A step with no check asserts nothing.
+    steps:
+      - do: List the scenarios.
+        run: |
+          make shell
+          ros2 run threevn_control run_scenario --list
+      - do: Start the mock, then run every scenario against it from another terminal.
+        run: |
+          make mock
+          make scenario NAME=all
+        expect: A report per scenario, each step with a time, each ending `PASS`.
+      - do: Stop it, start Gazebo, and run the same set.
+        run: |
+          make stop
+          make sim
+          make scenario NAME=all
+      - do: Read the gripper scenario, and notice where it reads the second finger's position from.
+        run: grep -n -A50 "class Gripper" src/threevn_control/threevn_control/scenarios/arm.py
+    checkpoint: >-
+      Every scenario passes against the mock and against Gazebo, with no
+      change in between.
+    pitfalls:
+      - symptom: 'A step fails with "post-condition not met within 15s".'
+        cause: >-
+          Either the step is genuinely wrong, or the simulator is running so
+          slowly that the motion has not finished.
+        fix: >-
+          Check the real-time factor first. If it is reasonable, the step is
+          telling you the truth.
+      - symptom: The gripper scenario says the right finger never moved.
+        cause: >-
+          The right finger is a mimic joint, so it never appears in
+          `/joint_states`.
+        fix: Read it from TF. That is what the scenario does now — its first version made exactly this mistake.
+    concepts:
+      - term: Scenario
+        meaning: >-
+          A named sequence of action-then-assert steps, written against the
+          robot client alone, so it runs on any backend.
+      - term: Post-condition
+        meaning: >-
+          What must be true after a step. A step without one is recorded but
+          proves nothing.
+    quiz:
+      - q: A scenario passes in Gazebo and fails on the mock. What does that tell you?
+        a: >-
+          The scenario — or the code under it — is relying on something the
+          simulator provides and the abstraction does not promise. Here, it
+          was Gazebo's physical joint stops standing in for limit enforcement.
+      - q: What is wrong with a step that has no post-condition?
+        a: >-
+          It records that an action was attempted, not that it worked. A
+          suite of such steps can pass while the robot does nothing useful.
+    exercise:
+      task: >-
+        Find the step in `pick_and_place` with no post-condition. Write down
+        the check it would need to become a real test — and what that check
+        would need to know that the robot cannot measure about itself.
+      hint: >-
+        Closing the gripper on nothing and closing it on an object leave the
+        finger in different places. But "is the object coming with us" is a
+        different question from "did the fingers stop early".
+    read:
+      - testing.md
+      - simulation.md
+
+project:
+  title: Write a scenario that runs on both backends
+  minutes: 90
+  brief: |
+    Add a scenario called `wave` to the robot's scenario library: pan the
+    arm left and right three times, then return home. Every step must
+    assert a post-condition, and it must pass against the mock **and**
+    Gazebo with no change between them.
+
+    This is the smallest complete contribution to the project: real code,
+    behind the real interface, verified on two backends, held to the
+    project's own lint rules.
+  tasks:
+    - do: Read how the existing scenarios are built.
+      run: sed -n 1,80p src/threevn_control/threevn_control/scenarios/arm.py
+    - do: >-
+        Add a `Wave` class to `arm.py`, registered with `@register`, with
+        `name = 'wave'`. Use `self.robot.move_joint(...)` for the action and
+        `self.robot.get_joint_state()` in the check.
+    - do: Run it against the mock.
+      run: |
+        make mock
+        make scenario NAME=wave
+    - do: Run it against Gazebo.
+      run: |
+        make stop
+        make sim
+        make scenario NAME=wave
+    - do: >-
+        Break your check on purpose — compare against the wrong angle — and
+        confirm the step fails after its timeout rather than immediately.
+        Then fix it.
+    - do: Hold it to the project's style rules.
+      run: make lint
+  done_when:
+    - '`make scenario NAME=wave` passes against the mock and against Gazebo, with no edit in between.'
+    - Every step in your scenario has a post-condition.
+    - You saw your check fail when it should, and pass when it should.
+    - '`make lint` exits 0.'
+  hints:
+    - title: A starting point
+      body: |
+        ```python
+        @register
+        class Wave(Scenario):
+            """Pan left and right, then home."""
+
+            name = 'wave'
+            description = 'Pan the arm left and right three times.'
+
+            def run(self):
+                """Wave, checking every swing."""
+                self.step('home first', lambda: self.robot.home(),
+                          lambda: self.robot.at_pose(POSES['home']))
+                for i in range(3):
+                    for target in (0.6, -0.6):
+                        self.step(
+                            f'swing {i + 1} to {target:+.1f}',
+                            lambda t=target: self.robot.move_joint(
+                                'shoulder_pan_joint', t),
+                            lambda t=target: abs(
+                                self.robot.get_joint_state()['shoulder_pan_joint']
+                                - t) < 0.02)
+        ```
+
+        Note the `t=target` default arguments. Without them, every lambda
+        captures the same loop variable and checks the last value.
+    - title: The style rules that usually bite
+      body: >-
+        Single quotes for strings; the docstring summary on the line after
+        the opening quotes; lines under 99 characters. `make lint` names the
+        rule and the line.
+  read:
+    - testing.md

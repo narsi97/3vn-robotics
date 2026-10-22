@@ -1,0 +1,708 @@
+id: environment
+number: 1
+kind: stage
+title: Your environment
+price: free
+summary: >-
+  Get a robot development environment that behaves the same on your
+  machine as it does in CI, without installing ROS — and meet the one
+  architectural decision everything else in the course rests on.
+
+outcomes:
+  - Build and run a ROS 2 and Gazebo toolchain from one Dockerfile, with nothing installed on your machine but Docker.
+  - Say, for any file in the project, whether changing it needs a rebuild — and why.
+  - Run several hundred checks against a robot that does not exist yet, in under a minute.
+  - Explain the hardware seam, and prove it with two commands rather than a diagram.
+  - Check a licence and a naming rule before they become expensive, and record the decision as an ADR.
+  - Recognise the environment failures that disguise themselves as robotics bugs.
+
+prerequisites:
+  - Docker Desktop (or Docker Engine on Linux) with at least 6 GB of memory and about 10 GB of free disk.
+  - Comfort with a terminal, Git and Make. No ROS and no robotics experience needed.
+
+lessons:
+  - id: docker-and-nothing-else
+    title: Docker, and nothing else
+    minutes: 40
+    objective: Run a complete robotics toolchain without installing any of it.
+    body: |
+      Most robotics tutorials begin with twenty `apt install` lines and end
+      with a machine nobody can reproduce. Six months later something breaks
+      and nobody knows which of those lines did it.
+
+      You already solve this problem at work. The environment is a build
+      artefact: declared in a file, built from that file, identical for
+      everyone. Robotics gets no exemption, so the first thing this project
+      builds is not a robot — it is an image.
+
+      The image is built from `ros:jazzy-ros-base`, not from a ready-made
+      community image that already has Gazebo in it. That would have been
+      quicker on day one and wrong for a course: nobody stands behind it,
+      its layers cannot be audited for licences, and a course about owning
+      your environment should not begin by handing you a black box.
+
+      `make doctor` runs before anything else because the most common
+      failure here is not a bug. Docker Desktop ships with less memory than
+      Gazebo needs, and when the simulator is killed for being too large,
+      what you see looks like a Gazebo crash. So `doctor` checks memory,
+      architecture, disk and the port, and every failure prints **the fix**
+      rather than a diagnosis.
+
+      Read its output even when it passes. What it checks is a list of what
+      usually goes wrong.
+    steps:
+      - do: See what the project can do. The Makefile is the interface; nothing below needs typing twice.
+        run: make
+        expect: A list of targets, from `doctor` and `setup` to `play`, `train` and `site`.
+      - do: Check the machine before building anything.
+        run: make doctor
+        expect: >-
+          A line per check — daemon, architecture, memory, CPUs, free disk,
+          port 8106, git. Any failure names the exact setting to change.
+      - do: >-
+          If memory failed, fix it now: **Docker Desktop → Settings →
+          Resources → Memory**, 6 GB or more. Then run `make doctor` again.
+      - do: Build the image and the ROS workspace. The first run downloads several gigabytes; later runs are cached.
+        run: make setup
+        expect: The build ends with colcon reporting every package finished.
+      - do: Confirm the image is native to your machine rather than emulated.
+        run: docker image inspect threevn-robotics-dev:local --format '{{.Architecture}}'
+        expect: >-
+          `arm64` on Apple Silicon, `amd64` on most other machines. No
+          platform is pinned anywhere, so neither is emulated.
+    checkpoint: >-
+      `make doctor` prints a green line for every check, and `make setup`
+      finishes with a built workspace.
+    pitfalls:
+      - symptom: '`make setup` fails partway with "no space left on device".'
+        cause: >-
+          The image is 5–6 GB, and build volumes and cache come on top.
+          Budget about 10 GB.
+        fix: >-
+          `docker system df` shows where the space went. `make nuke` removes
+          this project's image, volumes and build cache.
+      - symptom: Everything works, but builds and runs are several times slower than expected.
+        cause: >-
+          The image is being emulated — an `amd64` image on an Apple Silicon
+          Mac, usually because of a `DOCKER_DEFAULT_PLATFORM` setting.
+        fix: >-
+          Unset the override and rebuild. The base image publishes a native
+          `arm64` manifest; pinning a platform would force emulation on
+          whichever architecture it does not match.
+    concepts:
+      - term: Dev container
+        meaning: >-
+          The development environment as a build artefact — declared in a
+          Dockerfile, rebuilt identically by every developer and by CI.
+      - term: Preflight check
+        meaning: >-
+          A script that verifies the environment before any real work
+          starts, so a resource problem fails clearly instead of
+          masquerading as a bug later. Here, `make doctor`.
+    quiz:
+      - q: Why does `make doctor` check Docker's memory before anything else?
+        a: >-
+          Because the commonest failure is not a bug. An undersized Docker VM
+          OOM-kills Gazebo, and the symptom looks like a simulator crash.
+          Checking first turns a misleading failure into a clear one with a
+          known fix.
+      - q: The image is built from `ros:jazzy-ros-base` rather than a community image with Gazebo already installed. Give two reasons.
+        a: >-
+          Any two of: no stability contract behind a paid course; layers that
+          cannot be audited for licences; no room for the toolchain layers
+          later phases add; and a course about owning your environment should
+          not start with a black box. See ADR-0002.
+    exercise:
+      task: >-
+        Before reading `scripts/doctor.sh`, write down the five things you
+        would expect to go wrong with a robotics environment on a laptop.
+        Then read the script and compare. Which of yours does it not check,
+        and is that an omission or something that cannot be checked in
+        advance?
+    read:
+      - getting-started.md
+      - decisions/0002-dev-environment.md
+      - docker.md
+
+  - id: inside-the-container
+    title: Living inside the container
+    minutes: 30
+    objective: Know where your code, your build output and your shell actually live, and which edits need a rebuild.
+    body: |
+      One container holds everything, deliberately. Splitting ROS nodes
+      across containers means fighting the middleware's network discovery,
+      and that is not what this course is about. The split comes later, when
+      there is a real network boundary to model.
+
+      Inside it, three kinds of storage do three different jobs:
+
+      - **`src/` is bind-mounted.** It is what you edit, so your editor on
+        the host and the build inside the container see the same files.
+      - **`build/`, `install/` and `log/` are named volumes.** colcon, the
+        ROS build tool, writes tens of thousands of small files. Through
+        the file-sharing layer Docker Desktop uses on macOS, that I/O would
+        dominate every build. Keeping it inside Docker's own storage also
+        keeps generated files out of your checkout.
+      - **ROS is sourced twice, on purpose.** The entrypoint covers
+        `docker compose run`; a profile script covers `docker compose exec`,
+        which bypasses the entrypoint entirely. Without the second,
+        `make build` works and `make shell` mysteriously does not.
+
+      The workspace is built with `--symlink-install`: installed files are
+      symlinks back into `src/`. So **editing** a YAML, xacro or launch file
+      takes effect when you relaunch, with no rebuild. **Adding** a file
+      still needs `make build`, because the symlink for it does not exist
+      yet. That distinction is the single most common "why didn't my change
+      apply?" in this project.
+
+      One more setting is worth knowing about before it bites you. ROS 2
+      discovers other nodes automatically across the network, which is
+      convenient until two developers on one Wi-Fi network silently join
+      each other's robot. The container limits discovery to itself.
+    steps:
+      - do: Open a shell inside the container.
+        run: make shell
+        expect: A prompt inside the container, with ROS already sourced.
+      - do: Inside it, confirm the versions the project pins.
+        run: |
+          printenv ROS_DISTRO
+          gz sim --versions
+        expect: '`jazzy`, and a Gazebo version starting with 8 — that is Harmonic.'
+      - do: See the symlinks `--symlink-install` created.
+        run: ls -l /ws/install/threevn_robot_description/share/threevn_robot_description/config/
+        expect: Each profile is a link pointing back into `/ws/src`.
+      - do: Check the discovery setting, then leave the shell.
+        run: |
+          printenv ROS_AUTOMATIC_DISCOVERY_RANGE
+          exit
+        expect: '`LOCALHOST`.'
+      - do: From the host, find the named volumes that hold the build.
+        run: docker volume ls | grep 3vn-robotics
+        expect: Three volumes, ending in `_build`, `_install` and `_log`.
+    checkpoint: >-
+      You can say, for any file in the repository, whether changing it needs
+      `make build`, a relaunch, or nothing.
+    pitfalls:
+      - symptom: You changed something and nothing happened.
+        cause: >-
+          You added a file rather than editing one. `--symlink-install`
+          links files that existed at build time.
+        fix: Run `make build`, then relaunch.
+      - symptom: Tests fail with `FileNotFoundError` naming a file you deliberately deleted.
+        cause: >-
+          `--symlink-install` never removes a link whose source has gone, so
+          a dead link stays in `install/` and anything that lists that
+          directory trips over it. Found by running this course's own
+          "design your own arm" project.
+        fix: >-
+          `make build` — it now deletes dangling links after every build and
+          prints each one it removes.
+      - symptom: >-
+          `ros2 run` finds a new executable and then fails with
+          `StopIteration`.
+        cause: >-
+          A new Python entry point was added. `--symlink-install` refreshes
+          source files but not the package metadata that maps the command
+          name to a function.
+        fix: >-
+          Rebuild that one package from scratch: inside `make shell`, remove
+          `/ws/build/<pkg>` and `/ws/install/<pkg>`, then
+          `colcon build --symlink-install --packages-select <pkg>`.
+    concepts:
+      - term: Bind mount
+        meaning: >-
+          A host directory mapped into a container, so both see the same
+          files. Right for source code you edit.
+      - term: Named volume
+        meaning: >-
+          Storage Docker manages itself. Faster than a bind mount on macOS
+          for many small files, and invisible in your checkout — right for
+          build output.
+      - term: Symlink install
+        meaning: >-
+          colcon's `--symlink-install`: installed files are links to the
+          sources, so edits apply without a rebuild but new files do not.
+      - term: DDS discovery
+        meaning: >-
+          How ROS 2 nodes find each other automatically over the network.
+          Limited here with `ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST`.
+    quiz:
+      - q: Why are `build/`, `install/` and `log/` named volumes rather than folders in your checkout?
+        a: >-
+          colcon writes tens of thousands of small files, and on macOS the
+          bind-mount layer makes that I/O dominate every build. Volumes are
+          fast, and they keep generated artefacts out of the repository.
+      - q: You edit an existing launch file and the change applies on relaunch. You add a new one and `ros2 launch` cannot find it. Why the difference?
+        a: >-
+          With `--symlink-install`, an existing file is already a symlink
+          into `src/`, so edits show through. A new file has no installed
+          symlink until `make build` creates one.
+    exercise:
+      task: >-
+        Find the line in `docker/compose.yml` that would let your container
+        join a colleague's ROS graph if it were removed. Explain what you
+        would see if it were — and why that would be harder to diagnose
+        than an error.
+      hint: >-
+        Look for the discovery setting from the last step. Without it,
+        nodes from another machine appear in your `ros2 node list`, and
+        their messages arrive on your topics.
+    read:
+      - development.md
+      - docker.md
+
+  - id: fast-tests-or-no-tests
+    title: A test suite people actually run
+    minutes: 30
+    objective: Prove the robot description is sound, in under a minute, with no simulator running.
+    body: |
+      The suite is budgeted. Not "we try to keep it fast" — budgeted, as a
+      design constraint: **60 seconds**. A suite that takes five minutes is a
+      suite people stop running before they commit, and an unrun test is an
+      expensive comment.
+
+      That budget shapes what goes in it. Anything needing a simulator lives
+      in a different target, because physics is slow and non-deterministic
+      and does not belong in the loop you run every few minutes.
+
+      It is worth noticing what can be tested at this stage. There is no
+      robot, no hardware and no simulator — and there are still several
+      hundred assertions worth making:
+
+      - **configuration** — every mass says where its number came from,
+        every name is legal, no dimension is zero or negative
+      - **structure** — one root, no orphan links, every frame later phases
+        depend on is present
+      - **physics plausibility** — every inertia tensor is physically
+        possible, total mass is in a sane range
+      - **consistency** — the limits in the generated model equal the limits
+        in the source data, across a unit conversion
+      - **architecture** — a hardware build contains no simulator, and the
+        package that runs on the robot cannot depend on one
+
+      Plus C++ tests for the wire protocol and the firmware's safety logic,
+      which you will meet in Tier 5. Robotics has far more that can be
+      checked cheaply than its reputation suggests.
+
+      Every test also runs against **every** robot profile and every
+      hardware target. Add a profile and the matrix widens by itself.
+    steps:
+      - do: Run the suite, and time it.
+        run: time make test
+        expect: >-
+          A summary ending `0 errors, 0 failures` with a handful skipped, in
+          well under a minute once the workspace is built.
+      - do: Read the one test that is the architecture. It is short.
+        run: less src/threevn_robot_description/test/test_ros2_control_targets.py
+      - do: >-
+          Now break something on purpose. In
+          `src/threevn_robot_description/config/threevn_arm_v1.yaml`, change
+          `model: threevn_arm_v1` to `model: 3vn_arm_v1`, and run the suite
+          again.
+        run: make test
+        expect: >-
+          A failure in `test_model_name_is_ros_legal`, with a message saying
+          why. You will see why that rule exists two lessons from now.
+      - do: Put it back, and confirm green.
+        run: |
+          git checkout src/threevn_robot_description/config/threevn_arm_v1.yaml
+          make test
+    checkpoint: >-
+      The suite is green in under a minute, and you have watched it catch a
+      fault you planted, by name.
+    pitfalls:
+      - symptom: '`make test` suddenly takes minutes instead of seconds.'
+        cause: >-
+          Something slow reached the fast suite. In `ament_cmake` packages,
+          pytest is launched by CTest, which never sees colcon's
+          `--pytest-args -m "not slow"` — so a marker alone does not keep a
+          simulator test out.
+        fix: >-
+          Slow tests are registered explicitly rather than filtered by
+          marker. Tier 4 covers how; `make test-sim` runs them.
+      - symptom: A failure you have already fixed keeps being reported.
+        cause: >-
+          `colcon test-result` reports every result file under `build/`,
+          not only this run's.
+        fix: >-
+          `make test` clears old results first. If you run colcon by hand,
+          delete `build/*/test_results` before testing.
+    concepts:
+      - term: Test budget
+        meaning: >-
+          A hard limit on how long the fast suite may take — here 60
+          seconds — treated as a design constraint, because speed is what
+          makes people run it.
+      - term: Test matrix
+        meaning: >-
+          The same tests parametrised over every robot profile and every
+          hardware target, so adding either widens coverage automatically.
+    quiz:
+      - q: Why is the 60-second budget a design constraint rather than an aspiration?
+        a: >-
+          Because the value of a test is that it runs. A slow suite gets
+          skipped before commits, and a skipped test protects nothing. The
+          budget decides what may enter the suite, rather than being hoped
+          for afterwards.
+      - q: There is no robot, no hardware and no simulator yet. Name three things that can still be checked.
+        a: >-
+          Any three of: config schema and provenance, legal names, tree
+          structure and required frames, inertia validity, total mass
+          plausibility, limits matching the source data, the hardware seam,
+          and package dependency direction.
+    exercise:
+      task: >-
+        Pick any one assertion in
+        `src/threevn_robot_description/test/test_inertia_valid.py` and write
+        a sentence describing what would happen in Gazebo if the condition
+        it checks were false. Then decide: would you have found that bug
+        faster in the simulator, or with this test?
+      hint: >-
+        An invalid inertia does not raise an error when the model loads. It
+        produces NaN on first contact, which looks like an unstable
+        simulator.
+    read:
+      - testing.md
+
+  - id: the-seam
+    title: The decision everything else rests on
+    minutes: 30
+    objective: Understand — and prove — why the same code can drive a simulator, a mock or a motor.
+    body: |
+      The application does not know what it is driving. A physics
+      simulation, a mock, or a physical servo — they are implementations
+      behind one interface, chosen by one argument:
+
+      ```
+                 your code, controllers, tests, dashboard
+                                   │
+                    ros2_control / controller_manager
+                                   │
+                        hardware_interface plugin
+               ┌───────────────────┼────────────────────┐
+         mock_components     gz_ros2_control      threevn_hardware
+          (no physics)       (Gazebo physics)      (an ESP32 + servos)
+      ```
+
+      You have made this decision before, every time you put a repository
+      interface in front of a database. The difference in robotics is how
+      tempting the alternatives are, so it is worth naming what the seam is
+      **not**: not a node that talks serial and republishes topics (that is
+      a private API the simulator does not share); not `#ifdef`; not two
+      robot descriptions; not a second copy of the controllers for the real
+      robot.
+
+      Two of the three implementations ship with ROS. That is why this
+      project could prove the architecture before a single servo was
+      bought.
+
+      The decoupling is enforced twice, by tests rather than by a README. A
+      build for the mock or the ESP32 must contain no trace of the
+      simulator. And the package that runs on the robot must never declare
+      a dependency on Gazebo — because if it did, installing it on a robot
+      would pull in the whole simulator, and the claim would be quietly
+      false.
+
+      Everything later in this course — Gazebo, the ESP32, a robot somebody
+      else designed — plugs into this seam. Get it now and the rest is
+      substitution.
+    steps:
+      - do: Expand the robot description for Gazebo and count the simulator plugin.
+        run: make urdf TARGET=gz | grep -c GazeboSimSystem
+        expect: '`1`.'
+      - do: Expand it for the mock and count any reference to the Gazebo bridge.
+        run: make urdf TARGET=mock | grep -c gz_ros2_control
+        expect: >-
+          `0`. The hardware build does not merely avoid the simulator; it
+          cannot reach it.
+      - do: Do the same for the real-hardware target, and find its plugin.
+        run: |
+          make urdf TARGET=esp32 | grep -c "<gazebo"
+          make urdf TARGET=esp32 | grep -c Esp32SystemInterface
+        expect: '`0`, then `1`.'
+      - do: Find where the choice is made. There are three branches and no others.
+        run: grep -n "xacro:if" src/threevn_robot_description/urdf/ros2_control/arm.ros2_control.xacro
+      - do: Read the boundary test — the package that runs on the robot may never depend on Gazebo.
+        run: less src/threevn_bringup/test/test_package_dependencies.py
+    checkpoint: >-
+      The first count is `1` and the mock count is `0`, and you can explain
+      why the zero is the interesting number.
+    pitfalls:
+      - symptom: '`make urdf` fails with a Python `NameError`.'
+        cause: >-
+          A xacro conditional written as `${target == 'mock'}` substitutes a
+          bare token, which Python then tries to resolve as a variable.
+        fix: >-
+          Quote the substitution: `${'$(arg target)' == 'mock'}`. A test
+          expands all three targets, so this fails in CI rather than at
+          runtime.
+    concepts:
+      - term: Hardware seam
+        meaning: >-
+          The single interface — a `ros2_control` `SystemInterface` plugin —
+          between everything that decides what the robot does and whatever
+          actually does it.
+      - term: Execution target
+        meaning: >-
+          Which implementation sits behind the seam: `mock`, `gz` (Gazebo)
+          or `esp32` (real servos). Chosen by one launch argument.
+    quiz:
+      - q: '"The mock build avoids the simulator" and "the mock build cannot reach the simulator" — which does the zero prove, and why does the difference matter?'
+        a: >-
+          It proves the stronger one: the dependency is absent, not unused.
+          "Avoids" is a convention someone can break with one import;
+          "cannot reach" is a property a robot install can rely on, because
+          the simulator is never installed.
+      - q: Why is the seam a `ros2_control` plugin rather than a node that talks serial and republishes topics?
+        a: >-
+          A bridge node gives the application that node's interface, which
+          differs from the simulator's — so the application would be coupled
+          to its target. The plugin keeps every topic, service and action
+          identical across all three.
+    exercise:
+      task: >-
+        Add `<exec_depend>ros_gz_sim</exec_depend>` to
+        `src/threevn_bringup/package.xml` and run `make test`. Which test
+        fails, and does its message tell you what to do instead? Revert the
+        change afterwards.
+      answer: >-
+        `test_bringup_never_depends_on_gazebo` fails and names the offending
+        dependency, and says simulator-specific code belongs in
+        `threevn_sim`, which depends on bringup — not the reverse.
+        `git checkout src/threevn_bringup/package.xml` restores it.
+    read:
+      - architecture.md
+      - decisions/0003-hardware-seam.md
+
+  - id: names-and-licences
+    title: Before the first line, a licence and a name
+    minutes: 25
+    objective: Check a licence and a naming rule before either becomes expensive, and record the decision.
+    body: |
+      The first decision this project made was not about code.
+
+      The original specification named a well-known open-source arm as the
+      reference design. Checking its licence first showed **CC BY-NC 4.0** —
+      NonCommercial — on both the original and its successor. This is a paid
+      course. And the problem is wider than not shipping the files: a mesh
+      re-modelled from their CAD is still a derivative work, and a robot
+      description that reproduces their measurements is *arguably* one too.
+      "Arguably" is the wrong amount of certainty to build a product on. So
+      this arm is built from its own primitive geometry, with every number
+      in a file this project owns.
+
+      Two more arms were checked later, with three different outcomes. One
+      highly recommended six-axis arm carries a licence that forbids
+      redistribution outright — and costs about $2,000 against this whole
+      robot's $45–55. Another, the SO-101, is Apache-2.0 and was tried for
+      real; Tier 6 covers what happened.
+
+      The naming rule was the second early decision. `3vn_robot_description`
+      is an **illegal** ROS package name: names must start with a letter,
+      because they become C++ namespaces, Python modules and CMake targets.
+      The same rule binds node, topic and namespace names. So
+      `model: 3vn_arm_v1` in a config file is a latent failure: it is a
+      perfectly good YAML string right up until something derives a
+      namespace or a frame prefix from it, and then it fails deep in the
+      middleware, far from its cause.
+
+      Hence `threevn_` for every package, a separate `display_name: "3VN
+      Arm v1"` for humans, and a test pinning the rule.
+
+      Both decisions are written up as **architecture decision records**.
+      The section that earns its keep is *alternatives considered*: it is
+      what stops the same argument being had again in six months by
+      someone who was not there.
+    steps:
+      - do: Read how three candidate arms were assessed, and what became of each.
+        run: less THIRD_PARTY.md
+      - do: Read the naming decision.
+        run: less docs/decisions/0001-package-naming.md
+      - do: See the identifier and the display name side by side in the profile.
+        run: grep -n -E "model:|display_name:" src/threevn_robot_description/config/threevn_arm_v1.yaml
+        expect: '`model: threevn_arm_v1` and `display_name: "3VN Arm v1"`.'
+      - do: Find the test that keeps it that way.
+        run: grep -n -A10 "def test_model_name_is_ros_legal" src/threevn_robot_description/test/test_config_schema.py
+    checkpoint: >-
+      You can say, for each arm in `THIRD_PARTY.md`, why it was rejected or
+      tried, and which rule the `threevn_` prefix exists to obey.
+    pitfalls:
+      - symptom: A name works in YAML and fails later inside the middleware, with an error that does not mention the name.
+        cause: >-
+          A ROS identifier starting with a digit. YAML does not care; DDS
+          entity names do.
+        fix: >-
+          Keep a ROS-legal identifier and a separate display name, and
+          assert the identifier matches `[a-z][a-z0-9_]*` in a test.
+    concepts:
+      - term: Architecture decision record (ADR)
+        meaning: >-
+          A short document recording one decision: its context, the choice,
+          the alternatives rejected and why, and the consequences.
+      - term: REP-144
+        meaning: >-
+          The ROS convention for package names: lowercase letters, digits
+          and underscores, starting with a letter.
+      - term: Derivative work
+        meaning: >-
+          Something based on a copyrighted work closely enough that the
+          original's licence governs it — a re-modelled mesh, arguably a
+          set of measurements. Not legal advice.
+    quiz:
+      - q: You re-model a NonCommercial-licensed arm from scratch in your own CAD, using its published dimensions. Is that clean for a paid course?
+        a: >-
+          Not obviously. A re-modelled mesh is a derivative work, and a
+          design reproducing its measurements is arguably one. When the
+          answer is "arguably", a commercial product should not depend on
+          it. (Not legal advice.)
+      - q: Why is "alternatives considered" the most valuable section of an ADR?
+        a: >-
+          The decision itself is visible in the code. What is not visible is
+          what was tried and why it lost — and without that, someone
+          proposes the rejected option again and the argument is had twice.
+    exercise:
+      task: >-
+        Write a one-page ADR, in the format of
+        `docs/decisions/0001-package-naming.md`, for a decision you have
+        already made in your own work. Include at least two rejected
+        alternatives, each with the reason it lost.
+    read:
+      - decisions/0001-package-naming.md
+      - decisions/0004-own-geometry.md
+      - so101-spike.md
+
+  - id: symptoms-that-lie
+    title: Symptoms that lie
+    minutes: 25
+    objective: Map the misleading failures of a robotics environment to their real causes.
+    body: |
+      Robotics stacks are deep, and the failures you see are usually several
+      layers away from what caused them. This project has collected a set of
+      them, and every one looks like something it is not:
+
+      | You see | It is |
+      |---|---|
+      | Gazebo dies with no useful message | the Docker VM ran out of memory |
+      | RViz: "OpenGL 1.5 is not supported" | you are rendering through XQuartz, not the container's own display |
+      | `gz sim` segfaults | two incompatible Gazebo libraries, from mixing two apt repositories |
+      | a Gazebo error about a *mock* plugin | a stale node from an earlier run published the wrong robot |
+      | one controller failed: "switch timed out" | a busy machine, not a broken config |
+      | `ros2 topic list` shows nothing while the robot runs | stale shared-memory files from a killed process |
+
+      The habit is the same one you use on any distributed system: when the
+      symptom is in one layer, check the layer below it first, and confirm
+      with a command rather than a theory. Three commands cover most of the
+      table — memory, disk and the port.
+
+      Confirming matters more than it sounds. Early in this project a native
+      VNC viewer kept failing to connect, and the first diagnosis read an
+      open TCP connection as a working one. Probing the actual protocol
+      handshake showed the server offering only an authentication type the
+      client refuses. The socket was fine; the conversation never started.
+      A theory is a starting point, not an answer.
+    steps:
+      - do: Skim the symptoms this project has already paid for.
+        run: grep "^## " docs/troubleshooting.md
+      - do: Check the three resources behind most of them.
+        run: |
+          make doctor
+          docker stats --no-stream
+          docker system df
+      - do: See what, if anything, is holding the project's port.
+        run: lsof -nP -iTCP:8106 -sTCP:LISTEN
+        expect: Docker's process, if the container is up; otherwise nothing.
+      - do: Confirm Gazebo comes from exactly one apt source.
+        run: |
+          make shell
+          apt-cache policy ros-jazzy-gz-sim-vendor | grep -c osrfoundation
+        expect: '`0`. Anything else is the segfault waiting to happen.'
+    checkpoint: >-
+      For each row of the table, you can name the real cause and the command
+      that would confirm it.
+    pitfalls:
+      - symptom: You fixed the cause, and the failure is still reported.
+        cause: >-
+          Something cached the old result — test result files, a stale node,
+          a container that never restarted.
+        fix: >-
+          `make stop` before relaunching; `make test` and `make lint` clear
+          old results themselves.
+    concepts:
+      - term: OOM kill
+        meaning: >-
+          The kernel terminating a process because memory ran out. Inside a
+          Docker VM it leaves the process no chance to log why.
+      - term: ABI mismatch
+        meaning: >-
+          Two binaries compiled against incompatible versions of a library.
+          It tends to surface as a crash far from the cause, not as an
+          install error.
+    quiz:
+      - q: Gazebo exits with no useful message twenty minutes into a run. What is your first command?
+        a: >-
+          `make doctor` or `docker stats --no-stream` — memory. An OOM kill
+          leaves no message from the process itself.
+      - q: On a Mac, RViz says "OpenGL 1.5 is not supported". What happened, and what is the fix?
+        a: >-
+          `DISPLAY` points at XQuartz, whose indirect GLX tops out near
+          OpenGL 1.4 while RViz needs 3.3. Use the container's own virtual
+          display through `make view` and the browser at port 8106.
+    exercise:
+      task: >-
+        Write a troubleshooting entry, in the format of
+        `docs/troubleshooting.md`, for a misleading failure from your own
+        work: the symptom as you first saw it, what it actually was, and
+        the one command that would have told you sooner.
+    read:
+      - troubleshooting.md
+
+project:
+  title: Prove your environment, then break it on purpose
+  minutes: 60
+  brief: |
+    Before you trust a toolchain, watch it fail. You will bring the
+    environment up, time the suite, then plant three faults and record
+    which check catches each one, how quickly, and whether its message
+    would have told you what to do.
+
+    This is the habit the rest of the course builds on: a check you have
+    never seen fail is a check you are taking on trust.
+  tasks:
+    - do: Bring everything up and record how long each step takes.
+      run: |
+        time make doctor
+        time make setup
+        time make test
+    - do: >-
+        **Fault 1 — an illegal name.** Set `model:` in
+        `config/threevn_arm_v1.yaml` to `3vn_arm_v1`. Run `make test`, note
+        the failing test, revert.
+    - do: >-
+        **Fault 2 — a broken boundary.** Give `threevn_bringup` a dependency
+        on `ros_gz_sim` in its `package.xml`. Run `make test`, note the
+        failing test, revert.
+    - do: >-
+        **Fault 3 — a weightless link.** Set the `mass` of `forearm_link` to
+        `0.0`. Run `make test`. How many tests fail, and which one names the
+        actual problem most directly? Revert.
+    - do: >-
+        Write two sentences: which of the three messages was the most useful,
+        and what would you change about the least useful one?
+  done_when:
+    - '`make test` is green on your machine, and you have its time.'
+    - Each planted fault was caught by a test you can name.
+    - '`git status` shows a clean tree — every fault reverted.'
+  hints:
+    - title: Reverting cleanly
+      body: >-
+        `git checkout -- <file>` restores a single file. `git status` before
+        and after each fault tells you whether you left anything behind.
+    - title: Fault 3 failed more than once
+      body: >-
+        It should: one bad number in the arm's profile fails the same test
+        for two profiles — the arm, and the mobile manipulator that is built
+        from it. That is the test matrix doing its job, and a hint about how
+        far a mistake in a shared component travels.
+  read:
+    - getting-started.md
+    - testing.md

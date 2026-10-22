@@ -22,6 +22,10 @@
   <exec_depend>xacro</exec_depend>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>sensor_msgs</exec_depend>
+  <!-- /clock: motion timeouts are spent in simulation time, not wall
+       time, so they hold at any real-time factor. See _wait(). -->
+  <exec_depend>rosgraph_msgs</exec_depend>
+  <exec_depend>rcl_interfaces</exec_depend>
   <exec_depend>control_msgs</exec_depend>
   <exec_depend>trajectory_msgs</exec_depend>
   <exec_depend>controller_manager_msgs</exec_depend>

@@ -23,8 +23,16 @@ suite that takes minutes is a suite people stop running before they
 commit. Everything that needs a simulator is marked `slow` and excluded
 from `make test`.
 
-Current: **~315 fast tests**, **15 ROS integration tests**, **12 Gazebo
-integration tests**, and a passing end-to-end acceptance run.
+Current: **672 fast tests** (Python and C++, including lint), **15 ROS
+integration tests**, **12 Gazebo integration tests**, and a passing
+end-to-end acceptance run.
+
+**`make test-ros` is not in CI**, and that has already cost something.
+When the CAD raised the base by 15 mm, the hand-computed tool height was
+updated in the fast suite but not in `test_tf_matches_kinematics.py`,
+which failed, unnoticed, until the course's own verification ran it on
+2026-10-06. Run it before merging anything that touches the description
+or the controllers.
 
 That includes **53 C++ tests** covering the wire protocol, the hardware
 interface (against a fake transport) and the ESP32 firmware's safety
@@ -112,9 +120,10 @@ reaches pytest only for `ament_python` packages; in an `ament_cmake`
 package pytest is launched by CTest, which never sees the flag — so
 `make test` would quietly spend two minutes starting a simulator.
 
-`threevn_sim/CMakeLists.txt` therefore registers **only**
-`test/test_world.py` with CTest, and `make test-sim` invokes pytest
-directly with `-m slow`. Explicit beats clever here.
+`threevn_sim/CMakeLists.txt` therefore registers with CTest, **by
+name**, only the tests that need no simulator — `test_world.py` and
+`test_controller_merge.py` — and `make test-sim` invokes pytest directly
+with `-m slow`. Explicit beats clever here.
 
 ## Scenarios are tests and demos
 

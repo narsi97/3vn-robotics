@@ -43,13 +43,21 @@ import math
 import time
 
 from control_msgs.action import FollowJointTrajectory, GripperCommand
+from rcl_interfaces.srv import GetParameters
 from rclpy.action import ActionClient
 from rclpy.duration import Duration
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from rosgraph_msgs.msg import Clock
 from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 import tf2_ros
+from threevn_control.kinematics import (
+    arm_geometry,
+    choose_pitch,
+    inverse_kinematics,
+    Unreachable,
+)
 from trajectory_msgs.msg import JointTrajectoryPoint
 
 ARM_JOINTS = [
@@ -68,6 +76,36 @@ POSES = {
     'pick': [0.6, 0.9, -0.7, 0.2],
     'place': [-0.6, 0.9, -0.7, 0.2],
 }
+
+
+def fetch_controller_param(node, controller, name, timeout=3.0):
+    """
+    Read one parameter off a running controller, or return None.
+
+    Returns None rather than raising when the controller is absent: a
+    base-only robot has no `arm_controller`, and a mock target may not
+    have brought one up yet. Callers fall back to a default.
+    """
+    import rclpy
+    client = node.create_client(
+        GetParameters, f'/{controller}/get_parameters')
+    try:
+        if not client.wait_for_service(timeout_sec=timeout):
+            return None
+        future = client.call_async(GetParameters.Request(names=[name]))
+        rclpy.spin_until_future_complete(node, future, timeout_sec=timeout)
+        result = future.result()
+        if result is None or not result.values:
+            return None
+        value = result.values[0]
+        # PARAMETER_STRING_ARRAY == 9, PARAMETER_STRING == 4.
+        if value.type == 9:
+            return list(value.string_array_value) or None
+        if value.type == 4:
+            return [value.string_value] if value.string_value else None
+        return None
+    finally:
+        node.destroy_client(client)
 
 
 class RobotNotReady(RuntimeError):
@@ -124,6 +162,20 @@ class RobotClient(Node):
         self._tf_buffer = tf2_ros.Buffer()
         self._tf_listener = tf2_ros.TransformListener(self._tf_buffer, self)
 
+        #: The URDF the robot is running, kept whole. The limits are
+        #: parsed out of it, and the IK is solved from it.
+        self._description = None
+        self._geometry = None
+
+        #: Latest /clock, or None on a robot that publishes no sim time.
+        #: Motion timeouts are spent in THIS clock -- see _wait().
+        self._sim_time = None
+        self.create_subscription(Clock, '/clock', self._on_clock, 10)
+
+        #: Resolved once, from the controller. See arm_joints().
+        self._joints = None
+        self._prefix = None
+
         #: joint name -> (lower, upper), parsed from /robot_description.
         self._limits = {}
         self.create_subscription(
@@ -137,6 +189,9 @@ class RobotClient(Node):
     def _on_joint_state(self, msg):
         self._state = msg
 
+    def _on_clock(self, msg):
+        self._sim_time = msg.clock.sec + msg.clock.nanosec * 1e-9
+
     def _on_description(self, msg):
         """Parse joint limits out of the URDF the robot is actually running."""
         import xml.etree.ElementTree as ET
@@ -144,6 +199,7 @@ class RobotClient(Node):
             root = ET.fromstring(msg.data)
         except ET.ParseError:
             return
+        self._description = msg.data
         for joint in root.iter('joint'):
             limit = joint.find('limit')
             name = joint.get('name')
@@ -155,9 +211,63 @@ class RobotClient(Node):
 
     # -- validation ----------------------------------------------------
 
+    def arm_joints(self):
+        """
+        Return the arm joints this robot actually has.
+
+        Asked of `arm_controller` rather than assumed, because the name
+        depends on the robot. The arm-only profile calls its first joint
+        `shoulder_pan_joint`; the mobile manipulator calls the same joint
+        `arm_shoulder_pan_joint`, because composing the arm onto a base
+        prefixes it.
+
+        Hardcoding either one drives that robot and fails silently on the
+        other: the controller REJECTS a trajectory whose joint names it
+        does not recognise, which surfaces as `goal rejected` with no clue
+        that a name is at fault. That is exactly how this was found.
+
+        The answer is cached, including the fallback, so a robot with no
+        arm_controller costs one timeout rather than one per call.
+        """
+        if self._joints is None:
+            discovered = fetch_controller_param(
+                self, 'arm_controller', 'joints')
+            self._joints = list(discovered) if discovered else list(ARM_JOINTS)
+        return self._joints
+
+    def joint_prefix(self):
+        """
+        Return the prefix this robot puts on the arm's joint names, or ''.
+
+        Derived by comparing what the controller reports against the
+        canonical names, so nothing has to declare it twice.
+        """
+        if self._prefix is None:
+            prefix = ''
+            joints = self.arm_joints()
+            if len(joints) == len(ARM_JOINTS):
+                for actual, canonical in zip(joints, ARM_JOINTS):
+                    if not actual.endswith(canonical):
+                        prefix = ''
+                        break
+                    candidate = actual[:len(actual) - len(canonical)]
+                    if prefix and candidate != prefix:
+                        prefix = ''
+                        break
+                    prefix = candidate
+            self._prefix = prefix
+        return self._prefix
+
+    def resolve(self, joint):
+        """Return `joint` under this robot's naming, accepting either form."""
+        prefix = self.joint_prefix()
+        if not prefix or joint.startswith(prefix):
+            return joint
+        return prefix + joint
+
     def get_limits(self, joint):
         """Return (lower, upper) for a joint, from the running description."""
-        return self._limits.get(joint)
+        return self._limits.get(self.resolve(joint))
 
     def check_within_limits(self, joint, position):
         """
@@ -167,7 +277,7 @@ class RobotClient(Node):
         the description the robot is ACTUALLY running rather than a copy
         that may have drifted.
         """
-        limits = self._limits.get(joint)
+        limits = self._limits.get(self.resolve(joint))
         if limits is None:
             return
         lower, upper = limits
@@ -215,12 +325,22 @@ class RobotClient(Node):
         self._spin(0.1)
         if self._state is None:
             raise RobotNotReady('no /joint_states received yet')
-        return dict(zip(self._state.name, self._state.position))
+        state = dict(zip(self._state.name, self._state.position))
+        # Also answer to the unprefixed name, so a scenario written
+        # against the arm reads the same joint on the mobile
+        # manipulator. setdefault, never overwrite: a real joint that
+        # happens to collide with an alias keeps its own value.
+        prefix = self.joint_prefix()
+        if prefix:
+            for name, value in list(state.items()):
+                if name.startswith(prefix):
+                    state.setdefault(name[len(prefix):], value)
+        return state
 
     def get_arm_pose(self):
-        """Return the four arm joint positions, in ARM_JOINTS order."""
+        """Return the arm joint positions, in the controller's order."""
         state = self.get_joint_state()
-        return [state[j] for j in ARM_JOINTS]
+        return [state[j] for j in self.arm_joints()]
 
     def get_translation(self, parent, child, timeout=2.0):
         """
@@ -252,6 +372,208 @@ class RobotClient(Node):
         return all(abs(a - b) <= tolerance
                    for a, b in zip(self.get_arm_pose(), target))
 
+    # -- reaching a point ----------------------------------------------
+
+    def geometry(self):
+        """
+        Return this arm's measured geometry, for the IK.
+
+        Taken from /robot_description, so it describes the robot that is
+        actually running rather than a file that may have drifted -- and
+        it works unchanged on the composed mobile manipulator, whose
+        frames carry a prefix.
+        """
+        if self._geometry is None:
+            if self._description is None:
+                raise RobotNotReady('no /robot_description received yet')
+            self._geometry = arm_geometry(
+                self._description,
+                target=self.resolve('grasp_frame'),
+                base=self.resolve('base_link'))
+        return self._geometry
+
+    def approach_pitch(self, position, prefer='middle'):
+        """Return an approach pitch that reaches `position`, or None."""
+        return choose_pitch(self._description, position,
+                            geometry=self.geometry(), prefer=prefer)
+
+    def move_tool_to(self, position, pitch=None, duration=2.5):
+        """
+        Put the gripper at `position`, choosing an approach if none given.
+
+        Raises Unreachable rather than moving somewhere near it, because
+        a grasp that misses by a centimetre and reports success is worse
+        than one that refuses.
+        """
+        if pitch is None:
+            pitch = self.approach_pitch(position)
+            if pitch is None:
+                raise Unreachable(
+                    f'no approach angle reaches {tuple(round(v, 3) for v in position)}')
+        solution = inverse_kinematics(self._description, position, pitch=pitch,
+                                      geometry=self.geometry())
+        ordered = [solution[name] for name in self.arm_joints()]
+        self.move_joints(ordered, duration=duration)
+        return pitch
+
+    # -- grasping ------------------------------------------------------
+
+    def holding(self, threshold=0.004):
+        """
+        Return True when something is between the fingers.
+
+        Measured, not assumed: a commanded-closed gripper that has
+        stopped short is holding something. On this robot the fingers
+        reach 1.7 mm on empty air, so anything above a few millimetres
+        is an object.
+
+        This works the same way on hardware, which is the point -- it
+        reads the robot's own joint state rather than asking the
+        simulator what exists. A check that only works in simulation
+        cannot tell you a real grasp failed.
+        """
+        state = self.get_joint_state()
+        name = self._gripper_feedback_joint()
+        position = state.get(name)
+        if position is None:
+            raise RobotNotReady('no gripper joint in /joint_states')
+        # Strictly BETWEEN closed-on-air and wide open. The upper bound
+        # is not fussiness: a gripper that failed to close at all sits
+        # at its open limit, which is also "greater than the
+        # threshold". Testing only the lower bound reported a confident
+        # grasp of an object the robot had merely pushed out of the way.
+        limits = self.get_limits(name)
+        ceiling = (limits[1] - 0.002) if limits else float('inf')
+        return bool(threshold < position < ceiling)
+
+    def pinch_offset(self):
+        """
+        Return how far the jaws' pinch point sits behind grasp_frame, in metres.
+
+        Measured through TF, because it is not zero and assuming it was
+        is a grasp that closes on nothing: the finger origins are 30 mm
+        BEHIND grasp_frame, and the fingers are 35 mm long, which leaves
+        grasp_frame about 12 mm past the fingertips. Driving grasp_frame
+        to an object therefore puts the object beyond the jaws, and the
+        gripper pushes it away instead of holding it.
+        """
+        frame = self.resolve('grasp_frame')
+        left = self.get_translation(frame, self.resolve('gripper_left_finger_joint')
+                                    .replace('_joint', '_link'))
+        right = self.get_translation(frame, self.resolve('gripper_right_finger_joint')
+                                     .replace('_joint', '_link'))
+        return 0.5 * (left[2] + right[2])
+
+    def grasp_pose(self, position, prefer='middle'):
+        """
+        Return (where grasp_frame must go, at what pitch) to grip `position`.
+
+        Pitch and target have to be solved TOGETHER. The jaws pinch
+        behind grasp_frame, so the commanded point is displaced from the
+        object along the approach direction -- which means the
+        displacement depends on the pitch, and whether the displaced
+        point is reachable depends on the displacement. Choosing a pitch
+        from the object's own position and then applying the offset
+        gives a point that was never checked, and it is usually outside
+        the workspace: the object sits in the reachable band, and the
+        commanded point is 30 mm beyond it.
+
+        So every candidate pitch is tested against its OWN displaced
+        point. Returns None when none of them work.
+        """
+        import numpy as np
+        from threevn_control.kinematics import PITCH_CANDIDATES, reachable
+
+        offset = self.pinch_offset()
+        yaw = math.atan2(position[1], position[0])
+        origin = np.array(position, dtype=float)
+
+        viable = []
+        for pitch in PITCH_CANDIDATES:
+            axis = np.array([math.sin(pitch) * math.cos(yaw),
+                             math.sin(pitch) * math.sin(yaw),
+                             math.cos(pitch)])
+            candidate = tuple(origin - offset * axis)
+            if reachable(self._description, candidate, pitch=pitch,
+                         geometry=self.geometry()):
+                viable.append((candidate, pitch))
+        if not viable:
+            return None
+        if prefer == 'steepest':
+            return viable[0]
+        # Prefer the pose with the most JOINT margin, not the middle of
+        # the pitch range. Measured: a solution that puts
+        # shoulder_lift at 118 degrees against a 120 degree limit does
+        # not arrive -- the arm settles 6 degrees short and the wrist 11
+        # degrees short, missing by 43 mm, because a fully extended arm
+        # at the edge of its travel cannot hold itself there. Poses well
+        # inside the limits reach to under a millimetre. So the
+        # tie-breaker is how far the worst joint sits from its stop.
+        return max(viable, key=lambda item: self._limit_margin(item))
+
+    def _limit_margin(self, item):
+        """Return how close the tightest joint gets to its limit, in radians."""
+        from threevn_control.kinematics import inverse_kinematics
+        candidate, pitch = item
+        try:
+            solution = inverse_kinematics(self._description, candidate,
+                                          pitch=pitch, geometry=self.geometry())
+        except Unreachable:
+            return -1.0
+        worst = float('inf')
+        for name, value in solution.items():
+            bounds = self.get_limits(name)
+            if not bounds:
+                continue
+            worst = min(worst, value - bounds[0], bounds[1] - value)
+        return worst if worst != float('inf') else 0.0
+
+    def _gripper_feedback_joint(self):
+        return self.resolve('gripper_left_finger_joint')
+
+    def grasp_at(self, position, approach=0.06, pitch=None, duration=2.0):
+        """
+        Descend onto `position`, close, and report holding().
+
+        The stand-off is directly ABOVE the object, and each waypoint
+        solves for its own approach angle. The obvious alternative --
+        backing off along the tool axis and coming in along it, holding
+        one orientation -- cannot be done on this arm, and that is a
+        measured fact rather than a style choice: at a fixed pitch the
+        reachable set near the ground is a curve about 4-6 mm wide in
+        radius. A stand-off of any useful size leaves it. Allowing the
+        wrist to re-aim between waypoints is what buys the room.
+
+        Returns what holding() reports, which reads the gripper's own
+        joint state. Whether the object actually came with the robot is
+        a separate question, and one the robot cannot answer about
+        itself -- see scripts/verify_grasp.py, which lifts and checks.
+        """
+        chosen = self.grasp_pose(position)
+        if chosen is None:
+            raise Unreachable(
+                f'the jaws cannot be placed on '
+                f'{tuple(round(v, 3) for v in position)} at any approach angle')
+        target, pitch = chosen
+
+        self.open_gripper()
+        for standoff in (approach, approach * 0.6, approach * 0.3):
+            above = (target[0], target[1], target[2] + standoff)
+            try:
+                self.move_tool_to(above, duration=duration)
+                break
+            except (Unreachable, LimitViolation):
+                continue
+        else:
+            # No room above it. Going straight there is worth trying;
+            # it risks nudging the object, which holding() will notice.
+            pass
+
+        self.move_tool_to(target, pitch=pitch, duration=duration)
+        self.close_gripper()
+        self._spin(1.0)
+        return self.holding()
+
     # -- motion --------------------------------------------------------
 
     def move_joints(self, positions, duration=2.0):
@@ -262,14 +584,15 @@ class RobotClient(Node):
         is rejected or finishes unsuccessfully - a scenario that silently
         continued past a failed motion would produce a misleading pass.
         """
-        if len(positions) != len(ARM_JOINTS):
+        joints = self.arm_joints()
+        if len(positions) != len(joints):
             raise ValueError(
-                f'expected {len(ARM_JOINTS)} joint positions, got {len(positions)}')
+                f'expected {len(joints)} joint positions, got {len(positions)}')
 
         # Reject before sending. Neither ros2_control nor mock_components
         # enforces the limits declared in the URDF, so a goal that leaves
         # here unchecked reaches the hardware unchecked.
-        for joint, position in zip(ARM_JOINTS, positions):
+        for joint, position in zip(joints, positions):
             self.check_within_limits(joint, float(position))
 
         point = JointTrajectoryPoint()
@@ -277,17 +600,19 @@ class RobotClient(Node):
         point.time_from_start = Duration(seconds=duration).to_msg()
 
         goal = FollowJointTrajectory.Goal()
-        goal.trajectory.joint_names = ARM_JOINTS
+        goal.trajectory.joint_names = joints
         goal.trajectory.points = [point]
 
         return self._send(self._arm, goal, duration + 15.0, 'arm motion')
 
     def move_joint(self, name, position, duration=2.0):
         """Move a single named joint, holding the others where they are."""
-        if name not in ARM_JOINTS:
-            raise ValueError(f'{name!r} is not an arm joint; one of {ARM_JOINTS}')
+        joints = self.arm_joints()
+        name = self.resolve(name)
+        if name not in joints:
+            raise ValueError(f'{name!r} is not an arm joint; one of {joints}')
         target = self.get_arm_pose()
-        target[ARM_JOINTS.index(name)] = float(position)
+        target[joints.index(name)] = float(position)
         return self.move_joints(target, duration)
 
     def move_to_named(self, pose_name, duration=2.0):
@@ -325,22 +650,60 @@ class RobotClient(Node):
 
     # -- internals -----------------------------------------------------
 
-    def _send(self, client, goal, timeout, what):
+    def _wait(self, future, timeout):
+        """
+        Spin until `future` completes, spending `timeout` seconds of ROBOT time.
+
+        Wall time is the wrong clock to measure a motion with. A 2.5 s
+        trajectory takes 2.5 seconds of SIMULATION time, and this
+        simulation runs at roughly a third of real time on CPU physics --
+        so a wall-clock deadline that is comfortable on a fast machine
+        expires mid-motion on a slow one, and the failure reads as "no
+        result", as though the robot were broken.
+
+        So the deadline is spent in /clock when /clock exists, which makes
+        it independent of how fast the simulator happens to be running.
+        On real hardware nothing publishes /clock, and wall time is then
+        the only clock there is, so it is used instead. The absolute wall
+        cap is a backstop for the case that matters most: a simulator that
+        has stopped advancing, where a sim-time deadline would never
+        arrive at all.
+        """
         import rclpy
+        started_wall = time.monotonic()
+        wall_cap = started_wall + max(timeout * 30.0, 120.0)
+        started_sim = None
+        while not future.done():
+            rclpy.spin_once(self, timeout_sec=0.05)
+            now_sim = self._sim_time
+            if now_sim is None:
+                if time.monotonic() - started_wall > timeout:
+                    return False
+            else:
+                if started_sim is None:
+                    started_sim = now_sim
+                elif now_sim - started_sim > timeout:
+                    return False
+            if time.monotonic() > wall_cap:
+                return False
+        return True
+
+    def _send(self, client, goal, timeout, what):
         if not client.wait_for_server(timeout_sec=self._timeout):
             raise RobotNotReady(f'{what}: action server unavailable')
 
         send = client.send_goal_async(goal)
-        rclpy.spin_until_future_complete(self, send, timeout_sec=timeout)
+        self._wait(send, timeout)
         handle = send.result()
         if handle is None or not handle.accepted:
             raise MotionFailed(f'{what}: goal rejected')
 
         result = handle.get_result_async()
-        rclpy.spin_until_future_complete(self, result, timeout_sec=timeout)
+        self._wait(result, timeout)
         outcome = result.result()
         if outcome is None:
-            raise MotionFailed(f'{what}: no result within {timeout:.0f}s')
+            raise MotionFailed(
+                f'{what}: no result within {timeout:.0f}s of robot time')
         # status 4 == STATUS_SUCCEEDED
         if outcome.status != 4:
             raise MotionFailed(f'{what}: finished with status {outcome.status}')

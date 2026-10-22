@@ -12,7 +12,7 @@ What is known to be fragile, and what is done about it.
 | **OSRF apt repo leaking in** → incompatible `libgz-*.so`, segfault not an apt error | CI step asserts zero `gz-*` packages from osrfoundation | mitigated |
 | **`xacro.load_yaml` removed upstream** would break the whole config design | CI asserts it exists on every run | mitigated |
 | **Stale YAML after adding a file** — `--symlink-install` only links files present at build time | Documented; `make test` depends on `build`; tests read YAML from the same share dir xacro used | mitigated |
-| **Gripper mimic joint** edge cases in `ros2_control` | Both `mock_components` and `gz_ros2_control` parse URDF `<mimic>`; a test asserts the mimic joint has no command interface | partly — needs a Gazebo test in Phase 2 |
+| **Gripper mimic joint** edge cases in `ros2_control` | Both `mock_components` and `gz_ros2_control` parse URDF `<mimic>`; a test asserts the mimic joint has no command interface. Fallback: two independently driven fingers on one controller | **suspected** — the verified grasp closes without gripping, and the mimic is the leading hypothesis; see manipulation.md |
 | **Every physical value is a guess** | `provenance: estimated` required by test; plausibility bounds (total mass 0.2–3.0 kg); re-measure tracked in roadmap | **open by design** |
 | **Scope creep across 15 phases** | Deferred-package list in roadmap.md; only 3 packages exist | mitigated |
 | **CSP blocks the Phase 3 dashboard WebSocket** | Flagged in deployment.md with two concrete options | **open, Phase 3** |

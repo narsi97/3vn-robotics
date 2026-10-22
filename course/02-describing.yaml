@@ -1,0 +1,754 @@
+id: describing
+number: 2
+kind: stage
+title: Describing a robot
+price: free
+summary: >-
+  Write down what the robot physically is — once — in a form that the
+  simulator, the tests and the hardware all read, and that a test can
+  check before anything moves.
+
+outcomes:
+  - Read a robot description as a tree of links and joints, and predict how each joint moves before you move it.
+  - Change a robot's dimensions by editing data, never a model file, and watch every consumer follow.
+  - Explain why inertia is computed rather than typed, and what a wrong tensor does to a physics engine.
+  - Place the frames later stages depend on, and read any transform between them on a live robot.
+  - Emit target-specific content from one description without falling into xacro's two classic traps.
+  - Test a description with two independent parsers, and derive joint limits from a datasheet rather than a guess.
+
+prerequisites:
+  - Stage 1 complete — `make setup` and `make test` both pass.
+
+lessons:
+  - id: links-and-joints
+    title: A robot is a tree
+    minutes: 30
+    objective: Read a robot description as links and joints, and predict how each joint moves.
+    body: |
+      A robot description — URDF, the Unified Robot Description Format — is
+      a **tree**. Each node is a *link*: a rigid body with a shape you see, a
+      shape that collides, and a mass. Each edge is a *joint*: how a child
+      link moves relative to its parent. If you have built a scene graph or
+      nested coordinate transforms, you already have the model; a joint is a
+      transform with one variable in it.
+
+      Four joint types cover nearly everything:
+
+      | type | moves | here |
+      |---|---|---|
+      | revolute | rotates, between limits | the four arm joints |
+      | continuous | rotates forever | the wheels, in Tier 6 |
+      | prismatic | slides, between limits | the gripper fingers |
+      | fixed | not at all | reference frames like `tool0` |
+
+      This arm is four rotating joints and a gripper:
+
+      | joint | axis | range |
+      |---|---|---|
+      | `shoulder_pan` | Z (vertical) | −90° … +90° |
+      | `shoulder_lift` | Y | −15° … +120° |
+      | `elbow` | Y | −120° … +10° |
+      | `wrist` | Y | −90° … +90° |
+      | gripper | slides | 0 … 18 mm |
+
+      The asymmetric ranges are deliberate: the arm cannot fold back through
+      its own base. Remember the elbow's range in particular — in Tier 6 it
+      turns out to decide what this arm can and cannot pick up.
+
+      Two fingers, one motor: the right finger *mimics* the left, which is
+      what a single-servo gripper physically does. And "tree" is a real
+      constraint, not a metaphor. A description has exactly one root and no
+      loops — which is why a parallel linkage, a mechanism with a closed
+      loop in it, cannot be described directly. That fact comes back to
+      decide a design in Tier 5.
+    steps:
+      - do: Print the expanded description and look at its shape.
+        run: make urdf | head -80
+        expect: '`<link>` blocks with `<visual>`, `<collision>` and `<inertial>`, and `<joint>` blocks naming a parent and a child.'
+      - do: List every joint and its type.
+        run: make urdf | grep '<joint name=.*type='
+        expect: Four `revolute`, two `prismatic`, and ten `fixed` joints for the reference frames and mounts.
+      - do: >-
+          Look at it. Start the viewer, then open
+          **http://localhost:8106/vnc.html** in a browser.
+        run: make view
+        expect: RViz with the arm, and a window of joint sliders.
+      - do: >-
+          Before dragging each slider, predict which way the arm will move.
+          Then drag it. Try to push `elbow` past +10°.
+        expect: The slider stops at the limit. There is no slider for the right finger.
+    checkpoint: >-
+      You can name each joint's type and range, and predict the direction of
+      motion before you drag its slider.
+    pitfalls:
+      - symptom: The browser page stays on "Connecting" or is blank.
+        cause: The container is not running, or another process holds port 8106.
+        fix: >-
+          `make up`, then check the port with
+          `lsof -nP -iTCP:8106 -sTCP:LISTEN`.
+      - symptom: There is no slider for the right gripper finger, and it looks broken.
+        cause: It is a mimic joint. It has no input of its own; it follows the left finger.
+        fix: Nothing to fix. Move the left finger slider and watch both.
+    concepts:
+      - term: URDF
+        meaning: >-
+          Unified Robot Description Format — the XML tree of links and
+          joints that every ROS tool reads to know what the robot is.
+      - term: Link
+        meaning: >-
+          A rigid body in a robot description, with a visual shape, a
+          collision shape and an inertial (mass) block.
+      - term: Joint
+        meaning: >-
+          The connection between a parent and a child link, with a type —
+          revolute, continuous, prismatic or fixed — an axis and limits.
+      - term: Mimic joint
+        meaning: >-
+          A joint that copies another's position, scaled and offset. How one
+          servo drives two gripper fingers.
+      - term: Degrees of freedom (DOF)
+        meaning: >-
+          The number of independent ways a robot can move. This arm has four,
+          plus a gripper.
+    quiz:
+      - q: Why is a wheel a continuous joint rather than a revolute one with a very large limit?
+        a: >-
+          A wheel has no travel limit. Give it one and the controller fights
+          the limit after a few metres, and the base slows to a stop for no
+          visible reason.
+      - q: The gripper has two fingers and one actuated joint. How?
+        a: >-
+          The right finger is a mimic of the left. One servo drives one
+          joint; the description says the other follows.
+      - q: Why can a URDF not describe a parallel linkage directly?
+        a: >-
+          A URDF is a tree — one parent per link, no loops. A linkage is a
+          closed chain, so some link would need two parents.
+    exercise:
+      task: >-
+        From the `make urdf` output alone, sketch the chain from
+        `base_footprint` to `grasp_frame`. Then check it against the running
+        robot: with `make view` up, open `make shell` and run
+        `ros2 run tf2_ros tf2_echo base_link grasp_frame`. Move
+        `shoulder_lift` and watch the numbers change.
+    read:
+      - hardware.md
+      - ros2.md
+
+  - id: one-source-of-truth
+    title: One source of physical truth
+    minutes: 35
+    objective: Change a robot's dimensions without editing any model file.
+    body: |
+      The usual way to write a robot description is to type numbers into
+      XML. The usual result is the same number in four places, three of them
+      stale.
+
+      So the numbers live in YAML and the XML reads them. xacro — the macro
+      language robot descriptions are written in — can load a YAML file
+      directly, and the only argument the description takes is that file's
+      path. A different arm is a different file, not an edit. The long-reach
+      profile exists purely to prove it: it shares every line of xacro with
+      the default and differs only in numbers.
+
+      The rejected alternatives are worth knowing, because both look
+      reasonable. A script that generates a URDF and commits it creates a
+      second artefact that drifts — and someone will eventually edit the
+      generated file, making every consistency test meaningless. Sixty
+      separate macro arguments, one per number, would not survive the
+      mobile base.
+
+      Units live in key names. Joint limits are stored as `lower_deg`,
+      because servo datasheets and humans both work in degrees; the
+      conversion to radians happens inside xacro. That is deliberate: it
+      means the test comparing the generated model to the YAML is a real
+      test, because the value crosses a conversion on the way.
+
+      And every mass carries a `provenance` field — `measured`,
+      `datasheet`, `estimated` or `computed`. A test requires it. For most
+      of this project every mass was `estimated`, a guess, and the field
+      made that visible in the data rather than implied by a comment. It
+      mattered more than expected: when the parts were finally designed,
+      the base turned out 2.3× too heavy and the shoulder 40% too light, and
+      every number computed from them before that had been arithmetic on
+      guesses.
+    steps:
+      - do: Open the profile and find three things — a link's size, a joint limit in degrees, and a `provenance` field.
+        run: less src/threevn_robot_description/config/threevn_arm_v1.yaml
+      - do: See the same limits after expansion, now in radians.
+        run: make urdf | grep "<limit"
+        expect: '`elbow_joint` shows `lower="-2.0943951023931953"` — that is −120°.'
+      - do: Compare the default arm with the long-reach profile.
+        run: diff <(make urdf) <(make urdf PROFILE=threevn_arm_v1_long_reach)
+        expect: >-
+          Every changed line is a number — sizes, origins, masses, inertias.
+          No link, joint or structural line differs.
+      - do: Look at the long-reach arm.
+        run: make view PROFILE=threevn_arm_v1_long_reach
+    checkpoint: >-
+      Every dimension in the generated description traces back to a value
+      in `config/threevn_arm_v1.yaml`, and the diff between two profiles
+      contains numbers only.
+    pitfalls:
+      - symptom: You edited the profile and the viewer still shows the old arm.
+        cause: The description is read once, at launch.
+        fix: Relaunch `make view`. With `--symlink-install`, editing needs no rebuild.
+      - symptom: '`PROFILE=` names a new file you just created, and it is not found.'
+        cause: A new file has no installed symlink until the workspace is rebuilt.
+        fix: Run `make build` once after adding a profile.
+      - symptom: Generating the URDF at CMake build time fails on `load_yaml`.
+        cause: >-
+          CMake's `xacro_add_files()` does not support `xacro.load_yaml()`
+          (ros/xacro#298).
+        fix: >-
+          Expand at launch and test time only — which is what this project
+          does, and why `CMakeLists.txt` installs directories and nothing
+          else.
+    concepts:
+      - term: xacro
+        meaning: >-
+          The macro language robot descriptions are written in. It expands
+          into plain URDF, and here it reads its numbers from YAML with
+          `xacro.load_yaml()`.
+      - term: Profile
+        meaning: >-
+          One YAML file holding every physical number for one robot. Swap the
+          file, get a different robot; no model file changes.
+      - term: Provenance
+        meaning: >-
+          Where a number came from — `measured`, `datasheet`, `estimated` or
+          `computed` — recorded next to it and required by a test.
+    quiz:
+      - q: Why not generate a URDF with a script and commit the result?
+        a: >-
+          It creates a second artefact that drifts from the first. Sooner or
+          later someone edits the generated file, and any test comparing
+          source to output becomes meaningless.
+      - q: Limits are stored in degrees and converted to radians inside xacro. Why does that make the consistency test better?
+        a: >-
+          A test comparing two copies of the same number in the same units is
+          close to a tautology. A conversion in between gives it something to
+          catch — a wrong factor, a missed site, a sign error.
+    exercise:
+      task: >-
+        Count the lines in `diff <(make urdf) <(make urdf
+        PROFILE=threevn_arm_v1_long_reach)`. Then estimate how many places
+        you would have had to edit by hand if the numbers lived in the XML.
+        Which of those edits would a reviewer have been likely to miss?
+    read:
+      - decisions/0005-yaml-single-source.md
+      - development.md
+
+  - id: inertia-is-computed
+    title: Never type a number you can derive
+    minutes: 25
+    objective: Understand why inertia tensors are generated, never written, and check one by hand.
+    body: |
+      An inertia tensor describes how a body's mass is distributed — how
+      hard it is to spin about each axis. Physics engines need one for every
+      link. Typed by hand, it silently disagrees with the shape it describes,
+      and the engine turns that disagreement into NaN the first time
+      something touches something else.
+
+      Here the tensor is **computed** from the same mass and dimensions that
+      produced the geometry, by two small macros — one for boxes, one for
+      cylinders. There is no step where a human transcribes it, so it cannot
+      contradict the shape.
+
+      Three checks run on every link of every profile, with no simulator:
+
+      - the tensor is **symmetric**
+      - it is **positive definite** — no axis has zero or negative
+        resistance to rotation
+      - its principal moments satisfy the **triangle inequality** — no one
+        moment exceeds the other two combined, which no real body can do
+
+      And a floor, `min_inertia`, because a near-zero value is another
+      reliable way to produce NaN on first contact.
+
+      Notice the cost model. A wrong tensor does not throw. It produces a
+      simulation that looks plausible and is wrong — or that "explodes",
+      which looks like an unstable simulator rather than a typo. Catching it
+      in a test that runs in a second is the cheapest place it will ever be
+      caught.
+
+      This is also why the robot is built from primitive boxes and
+      cylinders rather than meshes: every number is checkable by hand.
+    steps:
+      - do: Find the two macros that compute every tensor.
+        run: grep -n "macro name=" src/threevn_robot_description/urdf/common/inertials.xacro
+      - do: See the computed values in the expanded description.
+        run: make urdf | grep "<inertia " | head -8
+      - do: >-
+          Check one by hand. `upper_arm_link` is a box 0.020 × 0.030 × 0.110 m
+          with mass 0.0735 kg. For a box, `ixx = m(y² + z²)/12`. Work it out,
+          then find it in the output.
+        run: |
+          make urdf | awk '/<link name="upper_arm_link">/{f=1} f && /<inertia /{print; exit}'
+        expect: '`ixx="7.962499999999998e-05"` — your arithmetic, to the last digit that matters.'
+      - do: Run the suite; the inertia tests are part of it.
+        run: make test
+    checkpoint: >-
+      The inertia tests pass, and your hand-calculated `ixx` for one link
+      matches the generated value.
+    pitfalls:
+      - symptom: The robot jitters, explodes or flies away the moment it spawns or touches something.
+        cause: >-
+          An impossible inertia — not positive definite, violating the
+          triangle inequality, or nearly zero. It does not fail at load
+          time.
+        fix: >-
+          Never type a tensor. Compute it from mass and shape, keep the
+          `min_inertia` floor, and let `test_inertia_valid.py` catch it with
+          no simulator.
+      - symptom: The total-mass test fails right after you edited a mass.
+        cause: An order-of-magnitude slip — grams typed into a field that holds kilograms.
+        fix: Masses are in kilograms. The plausibility band, 0.2–3.0 kg, exists to catch exactly this.
+    concepts:
+      - term: Inertia tensor
+        meaning: >-
+          A 3×3 matrix describing how a body's mass is distributed about its
+          axes — how hard it is to rotate. Required for every simulated link.
+      - term: Positive definite
+        meaning: >-
+          For an inertia tensor: every axis resists rotation with a positive
+          moment. A tensor that is not is physically impossible.
+    quiz:
+      - q: Why is an invalid inertia worse than a parse error?
+        a: >-
+          A parse error stops you at load time with a line number. An invalid
+          inertia loads fine and produces NaN on first contact, which looks
+          like an unstable simulator and costs hours.
+      - q: Why does building the arm from boxes and cylinders help the tests?
+        a: >-
+          Primitives have closed-form inertias, so every value can be derived
+          and checked by hand. A mesh needs numerical integration and hides
+          its numbers.
+    exercise:
+      task: >-
+        Compute `iyy` and `izz` for `upper_arm_link` as well, and check that
+        all three satisfy the triangle inequality. Then invent a tensor that
+        is symmetric and positive definite but violates it — and describe a
+        body that could have it.
+      hint: >-
+        For a box, `iyy = m(x² + z²)/12` and `izz = m(x² + y²)/12`.
+      answer: >-
+        No real body can have one moment exceeding the sum of the other two,
+        which is precisely the point of the check: a tensor can pass the
+        algebraic tests and still describe something impossible.
+    read:
+      - testing.md
+      - decisions/0004-own-geometry.md
+
+  - id: frames-that-pay-later
+    title: Three frames that save you a day each
+    minutes: 30
+    objective: Place the frames later phases assume, and read any transform between them on a live robot.
+    body: |
+      Every link carries a coordinate frame, and ROS keeps them all in one
+      time-indexed tree called **TF**. Ask "where was the gripper relative
+      to the camera 0.3 seconds ago" and TF answers, interpolating if it
+      must. In this project exactly one thing writes to it,
+      `robot_state_publisher`, which reads the description and the live
+      joint positions. Nothing else ever publishes a transform by hand.
+
+      Three frames cost nothing on day one and pay later:
+
+      - **`base_footprint`**, a weightless root on the ground. Attaching a
+        mobile base becomes one joint rather than a restructuring — which is
+        exactly what happens in Tier 6.
+      - **`tool0`**, the conventional name for the tool flange. Every
+        inverse-kinematics tutorial and motion planner expects it, so the
+        convention is free if you adopt it early.
+      - **`camera_optical_frame`**, separate from `camera_link`.
+
+      That last one is the day-saver. Cameras and robots disagree about
+      axes: robot bodies use *x forward, z up*; the optical convention is
+      *z forward, x right, y down*. A fixed joint carrying exactly that
+      rotation — roll −90°, yaw −90° — lets each side keep its own
+      convention. Getting it wrong is the commonest perception bug there is:
+      everything runs, the rate is right, the numbers look plausible, and
+      the arm reaches 90° away from the object.
+
+      A frame also caught a real bug before any camera existed. A test
+      comparing two independent computations of the transforms found the
+      camera mount tilted **up at the ceiling** instead of down at the
+      workspace.
+
+      One thing will look broken in Gazebo later, so know it now: Gazebo
+      merges links joined by fixed joints, so `tool0` may not exist there at
+      all. That does not matter, because TF comes from the description, not
+      from Gazebo.
+    steps:
+      - do: Start the viewer, and open the browser view.
+        run: make view
+      - do: In a second terminal, read the camera's optical rotation.
+        run: |
+          make shell
+          ros2 run tf2_ros tf2_echo camera_link camera_optical_frame
+        expect: 'A rotation of `[-1.571, 0.000, -1.571]` in roll-pitch-yaw radians — roll and yaw of −90°.'
+      - do: Read where the tool is, then move `shoulder_pan` in the slider window and read it again.
+        run: ros2 run tf2_ros tf2_echo base_link tool0
+        expect: The translation changes as you drag; the rotation follows the pan.
+      - do: Confirm the root of the tree.
+        run: ros2 run tf2_ros tf2_echo base_footprint base_link
+    checkpoint: >-
+      You can read the transform between any two frames on the running
+      robot, and you know which convention each side of the optical rotation
+      uses.
+    pitfalls:
+      - symptom: '`tf2_echo` waits forever and prints nothing.'
+        cause: Nothing is publishing TF — the viewer is not running — or a frame name is misspelled.
+        fix: Keep `make view` running; check names against `make urdf | grep "<link name="`.
+      - symptom: Later, perception reports objects in the wrong place by roughly 90 degrees.
+        cause: Image data tagged with `camera_link` instead of `camera_optical_frame`.
+        fix: The image belongs to the optical frame. Tier 6 shows where this is set.
+    concepts:
+      - term: TF
+        meaning: >-
+          ROS's time-indexed tree of coordinate frames. Here,
+          `robot_state_publisher` is the only thing that writes to it.
+      - term: Optical frame
+        meaning: >-
+          The camera convention — z forward, x right, y down — kept in a
+          frame separate from the camera body, joined by a fixed rotation.
+      - term: tool0
+        meaning: >-
+          The conventional name for the arm's tool flange, expected by motion
+          planners and inverse-kinematics code.
+      - term: REP-103 and REP-105
+        meaning: >-
+          The ROS conventions for units and axis directions, and for the
+          standard frames a mobile robot has (`base_link`, `odom`, `map`).
+    quiz:
+      - q: Gazebo has no `tool0` link. Why is that not a problem here?
+        a: >-
+          Gazebo merges fixed-joint links, but TF comes from
+          `robot_state_publisher` reading the description, not from Gazebo.
+          `tool0` exists wherever it matters.
+      - q: Why should `robot_state_publisher` be the only source of transforms?
+        a: >-
+          Two publishers of one transform means consumers see whichever
+          arrived last. The robot appears to jitter between two answers and
+          no log says why.
+    exercise:
+      task: >-
+        With `make view` running, echo `base_link` to
+        `camera_optical_frame`. Without looking anything up, use the
+        rotation to work out which way the camera is pointing relative to
+        the arm's base. Then check your answer by looking at RViz.
+    read:
+      - architecture.md
+      - perception.md
+
+  - id: one-file-three-targets
+    title: One file, three targets, two traps
+    minutes: 30
+    objective: Emit target-specific content from one description, and avoid the traps that come with it.
+    body: |
+      The seam from Stage 1 lives in one xacro file. A block called
+      `<ros2_control>` lists each joint's command and state interfaces and
+      names a hardware plugin, and a conditional picks the plugin by target.
+      Everything else in the description is identical across all three.
+
+      Simulator-specific content goes in `<gazebo>` tags, which every URDF
+      parser ignores. Ignoring them would be enough to keep them harmless —
+      but this project goes further and emits them only for the `gz` target,
+      because a description destined for hardware should contain no
+      simulator content at all. That is asserted, not hoped.
+
+      Two traps, both met in this project:
+
+      **The bare-token conditional.** `${target == 'mock'}` looks right and
+      raises `NameError`: xacro substitutes the argument as a bare word,
+      which Python then tries to resolve as a variable. The working form
+      quotes the substitution — `${'$(arg target)' == 'mock'}`.
+
+      **Double hyphens in XML comments.** `--` is illegal inside an XML
+      comment, and the parser's complaint — "not well-formed (invalid
+      token)" — does not mention comments at all. This project has a test
+      that scans every xacro and world file for it. It caught one in a
+      world file, and the first automated fix removed the comment's own
+      delimiters along with the offending hyphens. The test caught that
+      too. Mechanical fixes to text deserve the same suspicion as any other
+      code.
+
+      A third trap shows up in Stage 3, and it is worth meeting here: if the
+      simulator takes its description from a *topic* rather than from the
+      same launch substitution, a stale node left over from an earlier run
+      can hand it the wrong robot. The error arrives half a minute later and
+      blames a plugin.
+    steps:
+      - do: Find the three branches.
+        run: grep -n -B1 -A3 "xacro:if" src/threevn_robot_description/urdf/ros2_control/arm.ros2_control.xacro
+      - do: Count Gazebo extension tags per target.
+        run: |
+          make urdf TARGET=gz   | grep -c "<gazebo"
+          make urdf TARGET=mock | grep -c "<gazebo"
+        expect: A positive count for `gz`; `0` for `mock`.
+      - do: Read the test that scans for the comment trap.
+        run: less src/threevn_robot_description/test/test_xacro_comments.py
+    checkpoint: >-
+      You can show that the `mock` and `esp32` expansions contain no
+      simulator content, and explain both traps from memory.
+    pitfalls:
+      - symptom: '`make urdf` raises `NameError: name ''mock'' is not defined` or similar.'
+        cause: A conditional using the bare-token form.
+        fix: "Quote the substitution: `${'$(arg target)' == 'mock'}`."
+      - symptom: An XML file fails with "not well-formed (invalid token)" and the line looks fine.
+        cause: A `--` inside a comment, often several lines earlier.
+        fix: Use a single hyphen. `test_xacro_comments.py` finds them before the parser does.
+    concepts:
+      - term: ros2_control block
+        meaning: >-
+          The part of a description listing each joint's command and state
+          interfaces and naming the hardware plugin that serves them.
+      - term: Gazebo extension tag
+        meaning: >-
+          A `<gazebo>` element carrying simulator-only content. URDF parsers
+          ignore it; this project also omits it from non-simulator builds.
+    quiz:
+      - q: URDF parsers ignore `<gazebo>` tags anyway. Why bother omitting them from the hardware build?
+        a: >-
+          So the hardware build contains no simulator content at all — a
+          property a test can assert. "Present but ignored" is a convention;
+          "absent" is checkable.
+      - q: Why does `${target == 'mock'}` fail?
+        a: >-
+          The argument is substituted as a bare word, so Python sees
+          `mock == 'mock'` and looks for a variable called `mock`.
+    exercise:
+      task: >-
+        On a scratch branch, change one conditional in
+        `arm.ros2_control.xacro` to the bare-token form and run `make test`.
+        Record the exact error text a future teammate would see, then
+        revert. Would that message have led you to the cause?
+    read:
+      - gazebo.md
+      - troubleshooting.md
+
+  - id: two-parsers
+    title: Test it with two parsers, not one
+    minutes: 30
+    objective: Check a description with independent tools, and know which bugs only raw XML reveals.
+    body: |
+      The description is checked by two parsers written by different people
+      in different languages: `urdf_parser_py` in the Python unit tests, and
+      `check_urdf`, the C++ reference parser, in `make lint`. They have
+      different leniencies, so a disagreement between them is itself a
+      finding.
+
+      Some bugs are invisible to *any* parser, though, and the best example
+      is a duplicated link name. `urdf_parser_py` builds a dictionary keyed
+      by name, so the second link silently replaces the first and the parsed
+      tree looks perfectly healthy. The duplicate only exists **before**
+      parsing. So that test reads the raw XML.
+
+      This is not hypothetical. When the arm was later mounted on the mobile
+      base, both descriptions declared an `imu_link`. Two links, one name —
+      not a parse error, just a quiet loss of one of them. A test now asserts
+      both survive the composition.
+
+      One more principle is easy to violate without noticing. Every test
+      builds its description through a shared fixture that expands **the
+      same entry point with the same arguments** that `ros2 launch` uses at
+      runtime. A test that built its URDF some other way would be testing
+      itself — a description nobody runs.
+    steps:
+      - do: Run the linters and the C++ parser across every profile.
+        run: |
+          make lint
+          echo "exit status: $?"
+        expect: '`exit status: 0`. Check the status, not the text — a later lesson shows why.'
+      - do: Read the script that runs the independent parser.
+        run: less scripts/check_description.sh
+      - do: Read the duplicate-name test, and notice what it parses.
+        run: grep -n -A20 "def test_no_duplicate_link_names" src/threevn_robot_description/test/test_urdf_structure.py
+      - do: Find the fixture every description test shares.
+        run: grep -n -A15 "def expanded" src/threevn_robot_description/test/conftest.py
+    checkpoint: >-
+      `make lint` exits 0, and you can explain why the duplicate-name check
+      cannot be done on the parsed model.
+    pitfalls:
+      - symptom: Lint looked green, and CI went red on the same code.
+        cause: The output was searched for the word "FAIL" instead of the exit status being checked.
+        fix: Trust exit codes. `echo $?` immediately after the command.
+      - symptom: Lint reports failures you have already fixed.
+        cause: Stale result files from an earlier run.
+        fix: '`make lint` clears them first; if you ran colcon by hand, clear `build/*/test_results`.'
+    concepts:
+      - term: Independent oracle
+        meaning: >-
+          A second, separately written implementation used to check the
+          first. Agreement means something; disagreement is a finding.
+      - term: Shared fixture
+        meaning: >-
+          One function every test uses to build its input, so all tests
+          check the artefact that actually runs.
+    quiz:
+      - q: Why does a parsed-model check miss a duplicated link name?
+        a: >-
+          The parser stores links in a dictionary keyed by name, so the
+          second silently overwrites the first. After parsing there is only
+          one — and the tree looks fine.
+      - q: What is wrong with a test that builds its URDF with slightly different arguments from the launch file?
+        a: >-
+          It checks a description nobody runs. It can pass while the real one
+          is broken.
+    exercise:
+      task: >-
+        Find one more property of a description that the parsed model hides
+        and only the raw XML shows. Write the test that would check it, as a
+        sketch.
+      hint: >-
+        Think about anything a dictionary or object model throws away:
+        duplicates of other kinds, ordering, comments, attributes the parser
+        does not know about.
+    read:
+      - testing.md
+
+  - id: limits-from-the-datasheet
+    title: Limits come from the datasheet
+    minutes: 25
+    objective: Derive effort and speed limits from the motors that must deliver them, and prove no joint exceeds them.
+    body: |
+      A joint's limits are not only *where* it may go. They also say how hard
+      it may push — effort — and how fast it may turn. Here both are derived
+      from the servo datasheets at 4.8 V, the voltage the bill of materials
+      actually specifies, and recorded in a `servos:` block with
+      `provenance: datasheet`.
+
+      The reason is the whole point of a simulator in this project. An
+      effort limit above the servo's stall torque lets the simulated arm
+      perform motions the real one cannot. **The motion succeeds in Gazebo
+      and stalls on the bench** — the sim-to-real gap this platform exists to
+      catch before it costs a print.
+
+      So a test fails if any joint is configured beyond what its servo can
+      deliver. It has caught real ones. The mobile base's wheels were
+      configured at 20.0 rad/s against a motor ceiling of 19.95 — 21.0
+      no-load, derated by 5%. The gripper is held deliberately *below* its
+      ceiling: configured at stall, a gripper crushes what it picks up and
+      cooks the servo holding it closed.
+
+      Speed limits are derated because a datasheet's no-load speed is a
+      best case. A motor carrying a load, at a slightly low voltage, never
+      reaches it.
+
+      This test checks configuration against capability. It cannot tell
+      you whether the arm can hold *itself* up — that needs masses, lengths
+      and gravity. Tier 6 measures that in simulation and finds the arm
+      sagging several degrees short at full extension.
+    steps:
+      - do: Read the datasheet block and its two servos.
+        run: grep -n -A6 -E "^  (mg996r|sg90):" src/threevn_robot_description/config/threevn_arm_v1.yaml
+        expect: '`stall_torque_nm: 0.922` for the MG996R, `0.177` for the SG90.'
+      - do: See which servo each joint names, and its configured effort.
+        run: grep -n -E "servo:|effort" src/threevn_robot_description/config/threevn_arm_v1.yaml
+      - do: >-
+          Break it. Raise `shoulder_lift_joint`'s `effort` to `1.5` and run
+          the suite.
+        run: make test
+        expect: '`test_revolute_effort_within_servo_stall_torque` fails, naming the joint and the servo.'
+      - do: Revert, and confirm green.
+        run: |
+          git checkout src/threevn_robot_description/config/threevn_arm_v1.yaml
+          make test
+    checkpoint: >-
+      You watched the servo-limit test reject a joint configured beyond its
+      motor, and you can explain why that matters more in simulation than on
+      the bench.
+    pitfalls:
+      - symptom: A motion works every time in simulation and stalls on the real arm.
+        cause: The simulated joint was allowed more torque than the real servo has.
+        fix: Derive effort from the datasheet and let `test_servo_limits.py` hold the line.
+    concepts:
+      - term: Stall torque
+        meaning: >-
+          The most torque a motor produces, at zero speed. Commanding more
+          than this cannot work on the real hardware.
+      - term: Derating
+        meaning: >-
+          Deliberately using less than a datasheet's best-case figure, to
+          allow for load, voltage and wear.
+    quiz:
+      - q: Why is an effort limit above stall torque a simulation bug rather than a hardware one?
+        a: >-
+          The hardware simply cannot exceed its stall torque. The simulator
+          can, so the danger is a simulation that validates motions the robot
+          will never perform.
+      - q: Why configure the gripper below its servo's ceiling rather than at it?
+        a: >-
+          At stall it crushes what it holds and heats the servo continuously
+          while holding closed.
+    exercise:
+      task: >-
+        Estimate the torque `shoulder_lift` needs to hold the arm straight
+        out horizontally, using the computed masses in the profile and the
+        link lengths. Compare it to 0.922 N·m. Then add a 100 g payload at
+        the gripper and do it again. How much headroom is left?
+      hint: >-
+        Torque is the sum of each mass × g × its horizontal distance from the
+        joint. Treat each link's mass as sitting at its middle; the
+        `upper_arm_link` mass includes the elbow servo, so you may want to
+        place part of it at the elbow.
+    read:
+      - hardware.md
+      - bom-hardware.md
+
+project:
+  title: Design your own arm
+  minutes: 75
+  brief: |
+    Make a third arm profile — yours — without editing a single xacro
+    file. You will change its geometry, watch every test widen to cover it,
+    look at it, and then try to make it lie about itself. Each lie should be
+    caught by a test you can name.
+
+    This is the mechanism a student with a different printed arm would use
+    to bring their own robot into this stack.
+  tasks:
+    - do: Copy the default profile to a new one named after you.
+      run: cp src/threevn_robot_description/config/threevn_arm_v1.yaml src/threevn_robot_description/config/threevn_arm_v1_yourname.yaml
+    - do: >-
+        In your copy, set `model: threevn_arm_v1_yourname` and give it a
+        `display_name`. Lengthen the forearm by 20% and shorten the upper
+        arm by 10% — remember to move the joint origins that sit at the end
+        of each link, not just the link boxes.
+    - do: Rebuild once, because you added a file. Then run the suite.
+      run: |
+        make build
+        make test
+    - do: Look at your arm.
+      run: make view PROFILE=threevn_arm_v1_yourname
+    - do: >-
+        Make it lie, three ways, one at a time, running `make test` after
+        each and reverting before the next: remove a `provenance` line from
+        a link; set a joint's effort above its servo's stall torque; give a
+        link a negative dimension.
+    - do: >-
+        Decide whether to keep your profile. If you keep it, every test runs
+        against it forever. If you delete it, run `make build` again and read
+        what it prints: it removes the link your profile left behind in
+        `install/`. Before that step existed, deleting a profile broke the
+        whole suite.
+  done_when:
+    - '`make test` is green with your profile included, and the test count went up.'
+    - '`make view PROFILE=threevn_arm_v1_yourname` shows your arm, visibly different.'
+    - Three lies were each caught by a named test.
+    - '`git diff --stat` shows no change to any `.xacro` file.'
+  hints:
+    - title: The forearm got longer, but the wrist did not move
+      body: >-
+        A link's box and the joint at its far end are separate numbers. The
+        `elbow_joint` origin sits at the end of the upper arm; the
+        `wrist_joint` origin at the end of the forearm. Change the box and
+        the origin together.
+    - title: How many more tests should run?
+      body: >-
+        Every description test is parametrised over every profile, and many
+        over every target as well. Compare the summary line from before and
+        after — the difference is the cost, and the coverage, of one robot.
+  read:
+    - development.md
+    - decisions/0005-yaml-single-source.md

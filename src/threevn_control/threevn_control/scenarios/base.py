@@ -94,7 +94,7 @@ class Scenario:
         self.robot = robot
         self.result = ScenarioResult(name=self.name)
 
-    def step(self, name, action, check=None, settle=0.3):
+    def step(self, name, action, check=None, settle=0.3, timeout=15.0):
         """
         Perform one step and record whether it produced the expected state.
 
@@ -102,19 +102,45 @@ class Scenario:
         it should be afterwards. A step with no `check` is recorded as a
         step but asserts nothing - used for setup, never for the thing the
         scenario exists to prove.
+
+        `check` is POLLED until it passes or `timeout` seconds elapse, and
+        that is not a detail. It used to sleep for `settle` and then test
+        once, which quietly assumed wall time and simulation time run at
+        the same rate. They do not: on CPU-only physics this simulation
+        runs at roughly a third of real time, so a 0.3 s wall-clock settle
+        bought about 0.08 s of robot time. The arm reached an extended
+        pose EXACTLY -- measured error 0.0000 rad -- and the scenario
+        still failed, because it looked too early.
+
+        Polling makes the step correct at any real-time factor rather than
+        only on a machine fast enough. `timeout` is a wall-clock upper
+        bound, generous enough to cover a slow simulator; a step that is
+        genuinely wrong still fails, it just takes longer to say so.
         """
         started = time.monotonic()
         detail = ''
         try:
+            import rclpy
             action()
-            if settle:
+            if check is None:
+                # Nothing to assert; `settle` is the whole point of the
+                # step, so honour it as a plain wait.
                 deadline = time.monotonic() + settle
-                import rclpy
                 while time.monotonic() < deadline:
                     rclpy.spin_once(self.robot, timeout_sec=0.02)
-            passed = True if check is None else bool(check())
+                passed = True
+            else:
+                deadline = time.monotonic() + timeout
+                passed = False
+                while True:
+                    rclpy.spin_once(self.robot, timeout_sec=0.02)
+                    if check():
+                        passed = True
+                        break
+                    if time.monotonic() > deadline:
+                        break
             if not passed:
-                detail = 'post-condition not met'
+                detail = f'post-condition not met within {timeout:.0f}s'
         except Exception as exc:                     # noqa: BLE001
             passed = False
             detail = f'{type(exc).__name__}: {exc}'

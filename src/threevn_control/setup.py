@@ -26,6 +26,8 @@ setup(
         'console_scripts': [
             'run_scenario = threevn_control.run_scenario:main',
             'acceptance = threevn_control.acceptance:main',
+            'teleop = threevn_control.teleop:main',
+            'workspace = threevn_control.workspace:main',
         ],
     },
 )

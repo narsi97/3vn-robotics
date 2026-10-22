@@ -53,7 +53,25 @@ is virtual, rendered in software, and served to your browser. See
 [ADR-0002](decisions/0002-dev-environment.md) for why this rather than
 XQuartz.
 
-## 5. See the seam
+## 5. Drive the whole robot
+
+`make view` shows the arm alone. For the robot this project actually
+builds towards -- arm on a mobile base, with a camera:
+
+```bash
+make play          # headless Gazebo + RViz  -> http://localhost:8106/vnc.html
+make drive         # in a SECOND terminal: keyboard teleop
+```
+
+`w a s d` drives, `1..4` picks an arm joint, `,` and `.` jog it, `[` and
+`]` work the gripper. Let go and the robot stops -- because the
+controller brakes on a stale command, not because teleop told it to.
+
+It runs at roughly **a third of real time** on an M1 with no GPU. That is
+CPU physics, not a fault. If the view itself is laggy that is a separate
+problem with a better fix -- see [viewing.md](viewing.md).
+
+## 6. See the seam
 
 The point of the whole architecture:
 
