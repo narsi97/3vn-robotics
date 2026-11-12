@@ -1,0 +1,151 @@
+# Build on every merge; prod is one button.
+#
+#   pull request   →  version → sast → build → docker   (scanned and built, nothing pushed)
+#   merge to main  →  version → sast → build → docker   (pushed to GHCR as sha-<commit>)
+#   Actions → Course site → Run workflow  →  deploy prod      (a build main already has)
+#
+# The course site (unlisted, on the shared host): docs/ and course/ rendered
+# by scripts/build_site.py, served by nginx. Robot releases are release.yml.
+# Only commits that change the site are built; prod takes the newest such
+# commit at or before the sha you give it. There is no QA environment: prod is the shared host
+# (3vnsystems.com), and only a commit on main that this workflow has already
+# built can go there. Every host deploy is atomic: if the new containers aren't
+# healthy, the host puts the previous ones back and the run fails.
+#
+# The stages live in 3vn-infra (app-pipeline.yml builds, deploy-app.yml
+# deploys), so every product runs the same ones; where prod is lives in
+# 3vn-infra's deploy/manifest.json. This file only says what is specific to
+# this product. What it needs here (Settings → Environments, secrets):
+#   environment prod (main only), holding VPS_SHARED_ADDR / _SSH_KEY /
+#   _KNOWN_HOSTS; INFRA_READ_KEY, a read-only deploy key on 3vn-infra.
+#
+# Going back: Run workflow again with the previous good sha.
+name: Course site
+
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch'
+      && format('{0} → prod', inputs.sha || github.ref_name)
+   || github.event_name == 'pull_request' && format('build PR #{0}', github.event.number)
+   || format('build {0}', github.ref_name) }}
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'course/**'
+      - 'scripts/build_site.py'
+      - 'Makefile'
+      - 'VERSION'
+      - 'docker/Dockerfile.site'
+      - 'docker/Dockerfile.site.dockerignore'
+      - '.github/workflows/course-site.yml'
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'course/**'
+      - 'scripts/build_site.py'
+      - 'Makefile'
+      - 'VERSION'
+      - 'docker/Dockerfile.site'
+      - 'docker/Dockerfile.site.dockerignore'
+      - '.github/workflows/course-site.yml'
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: 'The commit to put on prod (default: the tip of main). Must be on main, and built.'
+        type: string
+        default: ''
+
+# The ceiling for the called workflows: they can use these and nothing more.
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+
+# A newer push to the same PR makes the older build irrelevant. Prod and main
+# never cancel: a deploy stopped halfway is worse than a queue.
+concurrency:
+  group: course-site-${{ github.event_name == 'workflow_dispatch' && 'prod' || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  pipeline:
+    if: github.event_name != 'workflow_dispatch'
+    uses: narsi97/3vn-infra/.github/workflows/app-pipeline.yml@main
+    with:
+      service: robotics-course
+      # The site footer names the commit it was built from; .git isn't in the
+      # build context, so it is passed in.
+      images: |
+        [
+          {
+            "name": "site",
+            "context": ".",
+            "dockerfile": "docker/Dockerfile.site",
+            "build_args": "THREEVN_GIT_COMMIT=${{ github.sha }}"
+          }
+        ]
+
+  # What to press next, on the run's summary page.
+  next:
+    needs: [pipeline]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          SHA: ${{ needs.pipeline.outputs.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          {
+            echo "### ✅ Built — put it on prod when ready"
+            echo ""
+            echo "Actions → Course site → **Run workflow** → sha: \`$SHA\` (or blank for the tip of main)"
+            echo '```sh'
+            echo "gh workflow run course-site.yml -R $REPO -f sha=$SHA"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Prod takes a build main already has, by commit — nothing is rebuilt.
+  # "(only main)": the commit must be on main, whatever branch this was run
+  # from (and the prod environment itself only accepts runs from main).
+  prod-check:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.s.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: s
+        env:
+          IN_SHA: ${{ inputs.sha }}
+        run: |
+          set -euo pipefail
+          want="${IN_SHA:-$GITHUB_SHA}"
+          [[ "$want" =~ ^[0-9a-f]{7,40}$ ]] || { echo "::error::'$want' is not a commit sha"; exit 1; }
+          full="$(git rev-parse --verify "${want}^{commit}")" || { echo "::error::no commit $want here"; exit 1; }
+          git merge-base --is-ancestor "$full" origin/main \
+            || { echo "::error::$want is not on main — only main goes to prod"; exit 1; }
+          # Only site changes are built (the paths above), so take the newest
+          # commit on main's first-parent line, at or before this one, that
+          # changed the site. --first-parent: the merge commit is what a push
+          # to main built, not the PR's own commits.
+          site="$(git log -1 --first-parent --format=%H "$full" -- docs course \
+                  scripts/build_site.py Makefile VERSION docker/Dockerfile.site docker/Dockerfile.site.dockerignore \
+                  .github/workflows/course-site.yml)"
+          [ -n "$site" ] || { echo "::error::no site change at or before $want"; exit 1; }
+          full="$site"
+          # The same short form app-pipeline tagged the images with.
+          echo "sha=$(git rev-parse --short=7 "$full")" >> "$GITHUB_OUTPUT"
+          echo "Promoting $(git log -1 --format='%h %s' "$full")" >> "$GITHUB_STEP_SUMMARY"
+
+  prod:
+    needs: prod-check
+    uses: narsi97/3vn-infra/.github/workflows/deploy-app.yml@main
+    secrets: inherit
+    with:
+      service: robotics-course
+      sha: ${{ needs.prod-check.outputs.sha }}
+      environment: prod
