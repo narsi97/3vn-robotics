@@ -43,15 +43,63 @@ from threevn_cad import profile as prof
 
 OUT = pathlib.Path(__file__).resolve().parents[1] / 'out'
 
+#: Written by main() after the parts, so a sweep of the directory must
+#: not mistake it for a part that no longer exists.
+ASSEMBLY = 'assembly.step'
+
+#: The suffixes this module owns. Anything else in the output directory
+#: -- sliced gcode, a note, a photo -- belongs to whoever put it there.
+GENERATED_SUFFIXES = ('.stl', '.step')
+
+
+def prune_stale(out_dir, keep):
+    """
+    Delete generated geometry that this run is not going to write.
+
+    Export used to only ever ADD files, which is wrong for the same
+    reason a build directory is wrong without a clean: when a part
+    stops belonging to a mechanism, its files stay behind looking
+    exactly as current as the rest. `shoulder_bracket` became
+    linkage-only when direct drive was chosen, and its STL sat in
+    `out/direct/` through every later `make cad`. PRINTING.md is
+    rebuilt from the part list and correctly omitted it, so the
+    manifest and the directory disagreed -- and the directory is what
+    a slicer sees.
+
+    Only `.stl` and `.step` are considered. Deleting anything else
+    would be a surprise, and a surprise in a directory people point
+    slicers at is worse than a stale file.
+    """
+    removed = []
+    for path in sorted(out_dir.iterdir()):
+        if (path.is_file() and path.suffix in GENERATED_SUFFIXES
+                and path.name not in keep):
+            path.unlink()
+            removed.append(path.name)
+    return removed
+
 
 def generate(cfg, mechanism, out_dir):
-    """Write every part for one mechanism. Returns a list of summaries."""
+    """
+    Write every part for one mechanism.
+
+    Returns (summaries, removed): what this run wrote, and what it
+    deleted because it no longer belongs to this mechanism.
+    """
     fab = prof.fabrication(cfg)
     out_dir = pathlib.Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    builders = parts_mod.parts_for(mechanism)
+    # The directory must end up holding this mechanism's parts and
+    # nothing else of ours.
+    keep = {ASSEMBLY}
+    for name in builders:
+        keep.update((f'{name}.stl', f'{name}.step'))
+    removed = prune_stale(out_dir, keep)
+
     written = []
-    for name, builder in sorted(parts_mod.parts_for(mechanism).items()):
+    for name, builder in sorted(builders.items()):
         solid = builder(cfg, mechanism=mechanism)
         stl = out_dir / f'{name}.stl'
         step = out_dir / f'{name}.step'
@@ -74,7 +122,7 @@ def generate(cfg, mechanism, out_dir):
             'stl': stl,
             'step': step,
         })
-    return written
+    return written, removed
 
 
 #: Parts distal to the shoulder-lift joint: everything that servo has to
@@ -244,13 +292,15 @@ def main(argv=None):
     collected = {}
     for mechanism in wanted:
         print(f'  {mechanism}')
-        results = generate(cfg, mechanism,
-                           pathlib.Path(args.out) / mechanism)
+        results, removed = generate(cfg, mechanism,
+                                    pathlib.Path(args.out) / mechanism)
         collected[mechanism] = results
         for row in results:
             print('    %-18s %7.0f mm3  %5.1f g  %4.0f x %4.0f x %4.0f mm' % (
                 row['part'], row['volume_mm3'], row['mass_g'],
                 *row['bbox_mm']))
+        for name in removed:
+            print('    removed stale %s' % name)
         print()
 
     for mechanism, rows in collected.items():
