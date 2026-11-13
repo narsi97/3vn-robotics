@@ -201,8 +201,13 @@ jobs:
               done
             '
 
+      # The artifact is a convenience, not a check: the tests above are
+      # the verdict. Storage is an account-wide quota shared with every
+      # other private repo, and one of them filling it must not turn a
+      # green build here red.
       - uses: actions/upload-artifact@v4
         if: matrix.arch == 'amd64'
+        continue-on-error: true
         with:
           name: expanded-urdf
           path: artifacts/*.urdf
@@ -252,7 +257,11 @@ jobs:
             threevn-robotics-cad:local \
             bash -lc '$CAD_PYTHON -m threevn_cad.export --out /ws/cad/out'
 
+      # Same as expanded-urdf: generating the parts was the check, keeping
+      # a copy is a courtesy that must not fail the job when the shared
+      # artifact quota is full.
       - uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: printable-parts
           path: |
