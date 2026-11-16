@@ -44,7 +44,8 @@ RVIZ    ?= 1
 .PHONY: help doctor setup up down shell build test test-sim lint urdf \
         view mock sim robot stop scenario dash acceptance clean nuke test-ros \
         cad cad-test cad-masses play drive vnc foxglove workspace grasp \
-        so101 so101-fetch site site-serve course-check fake-bus
+        so101 so101-fetch site site-serve course-check fake-bus watch \
+        terms-check
 
 help:
 	@echo ""
@@ -67,8 +68,10 @@ help:
 	@echo "  make so101     The SO-101 in Gazebo (= make sim PROFILE=so101_follower)"
 	@echo "  make site      Render the docs into a static course site"
 	@echo "  make course-check  Validate course/*.yaml without rendering"
+	@echo "  make terms-check   Every glossary term has a keep-or-translate decision"
 	@echo "  make view      RViz + joint sliders            -> $(NOVNC)"
 	@echo "  make play      WHOLE ROBOT + RViz, watchable   -> $(NOVNC)"
+	@echo "  make watch     RViz on whatever robot is RUNNING (mock, sim or hardware)"
 	@echo "  make drive     Teleop: drive it from the keyboard (2nd terminal)"
 	@echo "  make vnc       Open the desktop in a NATIVE viewer (faster than the browser)"
 	@echo "  make foxglove  How to attach Foxglove   -> $(FOXURL)"
@@ -214,6 +217,16 @@ course-check:
 	  "pip install --quiet --no-cache-dir --root-user-action=ignore --disable-pip-version-check pyyaml==6.0.2 && \
 	   python3 scripts/build_site.py --root /src --check"
 
+# Recordings are dubbed and subtitled into other languages, and
+# recordings/terms.yaml says which words stay in English when they are.
+# This checks that it decides every term in the course glossary, once:
+# a lesson that adds a term fails here until somebody has decided how a
+# dubbed recording should say it.
+terms-check:
+	@docker run --rm -v "$(PWD)":/src:ro -w /src python:3.12-alpine sh -lc \
+	  "pip install --quiet --no-cache-dir --root-user-action=ignore --disable-pip-version-check pyyaml==6.0.2 && \
+	   python3 recordings/check_terms.py"
+
 site-serve: site
 	@echo ""
 	@echo "  course site -> http://localhost:8109/"
@@ -319,6 +332,29 @@ play: build stop
 	$(RUN_TTY) "ros2 launch threevn_sim play.launch.py \
 	            profile:=$(MM_PROFILE) world:=$(WORLD) \
 	            rviz:=$(if $(filter 0,$(RVIZ)),false,true)"
+
+# RViz, attached to whatever robot is already running.
+#
+# `make view` brings its own robot_state_publisher and sliders, so it
+# cannot be open beside a running robot. `make play` shows a moving
+# robot, and is wired to the mobile manipulator. This starts no robot
+# and drives none: it draws the description on /robot_description at
+# the joint states being published, whoever is publishing them. So it is
+# ONE picture across mock, Gazebo and real hardware, which is the point
+# of having a seam.
+#
+# A simulator publishes /clock, and RViz has to run on that clock too or
+# every transform it receives looks stale. Asking the graph whether
+# /clock exists is what keeps this one command for every backend.
+#
+# `make stop` closes it along with the robot. Start it again once the
+# next robot is up.
+watch: build
+	@echo ""
+	@echo "  RViz on the running robot -> $(NOVNC)"
+	@echo "  needs a running: make mock | make sim | make robot"
+	@echo ""
+	$(RUN_TTY) "rviz2 -d $(SHARE)/rviz/watch.rviz --ros-args -p use_sim_time:=\$$(ros2 topic list 2>/dev/null | grep -qx /clock && echo true || echo false)"
 
 # Neither of these starts or stops anything: they are ways to LOOK at
 # a session that is already running.

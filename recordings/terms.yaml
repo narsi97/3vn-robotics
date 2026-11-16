@@ -1,0 +1,306 @@
+# Which words stay in English when a recording is dubbed or subtitled.
+#
+# The recordings are made once, in English. The audio is then dubbed and
+# the transcript translated into Indian languages. The written lessons,
+# the commands and the code are NOT translated: a learner types `make
+# sim`, reads `/joint_states` in a terminal and searches for
+# "ros2_control" whatever language they think in.
+#
+# So the test for every term is one question:
+#
+#     Will the learner TYPE it, READ it on screen, or SEARCH for it?
+#
+#       yes -> it stays in English, said in English inside the
+#              local-language sentence, the way engineers in India
+#              already speak
+#       no  -> it is an idea, and it is explained in the local language,
+#              with the English term given ONCE at first use
+#
+# This is a STARTING classification, made by someone who does not speak
+# the target languages. The reviewer for each language owns the final
+# call and should change anything that sounds wrong to a native ear.
+# What a reviewer should not change is the rule above.
+#
+# A translation step reads this file as data:
+#
+#   never_translate  names. Written exactly as shown, in Latin script,
+#                    in every language. `say` is how a voice should
+#                    pronounce it; without it, speech tools spell some
+#                    of these out and mangle others.
+#   keep_in_english  vocabulary. Left as the English word. May be
+#                    inflected by the surrounding language.
+#   translate        ideas. Explained in the local language; the English
+#                    term appears once, in brackets, where it is
+#                    introduced.
+#
+# Subtitles keep `never_translate` and `keep_in_english` terms in Latin
+# script by default, because that is what appears on the screen beside
+# them. A language's reviewer may choose transliteration for
+# `keep_in_english` terms instead; never for `never_translate`.
+#
+# `make terms-check` fails if a term in the course glossary is in none
+# of the three lists, or in two.
+
+version: 1
+
+rules:
+  - id: code-is-never-translated
+    text: >-
+      Anything shown in code font or typed at a terminal is never
+      translated, transliterated or spoken as a translation: commands,
+      flags, file names, joint, topic and frame names, YAML keys, and
+      error text quoted from the screen.
+  - id: say-what-it-does-not-what-it-is-spelt
+    text: >-
+      Narration does not read a command aloud character by character.
+      It says what the command does; the command itself is on screen.
+  - id: numbers-and-units
+    text: >-
+      Numbers and units are spoken in the target language's normal way,
+      and written as digits with SI symbols (1.3 N·m, 50 Hz, 20 ms).
+  - id: first-use
+    text: >-
+      A `translate` term gives its English form once, in brackets, where
+      the idea is introduced, so a learner can find it in the written
+      lessons.
+
+# -- names -------------------------------------------------------------
+never_translate:
+  - {term: "3VN Robotics", say: "three V N robotics"}
+  - {term: "ROS 2", say: "ross two"}
+  - {term: "ros2_control", say: "ross two control"}
+  - {term: "Gazebo", say: "guh-ZEE-bo"}
+  - {term: "RViz", say: "R viz"}
+  - {term: "Docker"}
+  - {term: "Make", say: "make"}
+  - {term: "URDF", say: "U R D F"}
+  - {term: "xacro", say: "ZACK-ro"}
+  - {term: "YAML", say: "YAM-ul"}
+  - {term: "colcon", say: "COAL-con"}
+  - {term: "pytest", say: "pie test"}
+  - {term: "CTest", say: "C test"}
+  - {term: "TF", say: "T F"}
+  - {term: "DDS", say: "D D S"}
+  - {term: "OTLP", say: "O T L P"}
+  - {term: "CRC", say: "C R C"}
+  - {term: "CI", say: "C I"}
+  - {term: "SBOM", say: "ESS-bom"}
+  - {term: "GitHub"}
+  - {term: "Foxglove"}
+  - {term: "VNC", say: "V N C"}
+  - {term: "micro-ROS", say: "micro ross"}
+  - {term: "SO-101", say: "S O one oh one"}
+  - {term: "STS3215", say: "S T S thirty-two fifteen"}
+  - {term: "Feetech", say: "FEE-tek"}
+  - {term: "ESP32", say: "E S P thirty-two"}
+  - {term: "tool0", say: "tool zero"}
+  - {term: "REP-103", say: "rep one oh three"}
+  - {term: "REP-105", say: "rep one oh five"}
+  # The course glossary lists the two together, as one entry.
+  - {term: "REP-103 and REP-105", say: "rep one oh three and rep one oh five"}
+  - {term: "REP-144", say: "rep one forty-four"}
+  # Targets and profiles are typed, so they are names. The `feetech` and
+  # `esp32` targets are said like Feetech and ESP32 above.
+  - {term: "mock"}
+  - {term: "gz", say: "G Z"}
+  - {term: "so101_follower", say: "S O one oh one follower"}
+
+# -- vocabulary the learner types, reads or searches for ----------------
+keep_in_english:
+  # the robot
+  - robot
+  - arm
+  - gripper
+  - servo
+  - motor
+  - joint
+  - link
+  - frame
+  - torque
+  - stall torque
+  - encoder
+  - calibration
+  - degrees of freedom (DOF)
+  - inverse kinematics (IK)
+  - workspace
+  - hard stop
+  - mimic joint
+  - joint prefix
+  - odometry
+  - sensor fusion
+  - teleoperation
+  - inertia tensor
+  - positive definite
+  - optical frame
+  - intrinsics
+  - pinhole model
+  - skid steer
+  # ROS
+  - topic
+  - service
+  - action
+  - message type
+  - node
+  - controller
+  - controller manager
+  - trajectory
+  - launch file
+  - plugin
+  - hardware interface
+  - ros2_control block
+  - mock hardware
+  - simulation time
+  - real-time factor (RTF)
+  - profile
+  - scenario
+  - target
+  - description
+  # software engineering
+  - container
+  - dev container
+  - image
+  - image digest
+  - immutable tag
+  - multi-stage build
+  - OCI labels
+  - bind mount
+  - named volume
+  - symlink install
+  - build matrix
+  - pipeline
+  - deploy
+  - rollback
+  - release
+  - test
+  - integration test
+  - acceptance test
+  - mutation testing
+  - test marker
+  - post-condition
+  - checksum
+  - protocol
+  - packet
+  - heartbeat
+  - watchdog
+  - e-stop
+  - timeout
+  - liveness
+  - readiness
+  - ABI mismatch
+  - OOM kill
+  - headless
+  - spike
+  - parametric CAD
+  - derating
+  # security: the words a learner will search for
+  - software supply chain
+  - attack surface
+  - build provenance
+  - expression injection
+  - environment secret
+  - local port forward
+  # data and models
+  - dataset
+  - model
+  - model registry
+  - baseline
+  - ground truth
+  - ablation
+  - data drift
+  - data leakage
+  - episode
+
+# -- ideas: explain in the local language, English once at first use ----
+#
+# Every entry is a term from the course glossary. `because` is there
+# only where the choice is not obvious.
+translate:
+  - term: hardware seam
+    because: >-
+      The course's own central idea, not an industry word. Explain it,
+      and keep the English "seam" beside it: it is in lesson titles.
+  - term: execution target
+  - term: hidden assumption
+  - term: structural guard
+  - term: independent oracle
+  - term: control case
+  - term: discriminating metric
+  - term: decision check
+  - term: defence in depth
+  - term: fail closed
+    because: >-
+      Explain as "when the check cannot be made, refuse". Give "fail
+      open" beside it once; the pair is what a learner searches for.
+  - term: security through obscurity
+  - term: separation of duties
+  - term: pin versus checksum
+    because: Keep "pin" and "checksum"; translate the contrast.
+  - term: trust on first use (TOFU)
+    because: Keep "TOFU" as the name; explain what is trusted, and when.
+  - term: safe failure state
+  - term: command validation
+  - term: command watchdog
+    because: Keep "watchdog"; translate the rest.
+  - term: latching e-stop
+    because: Keep "e-stop"; translate "latching".
+  - term: belief versus ground truth
+    because: Keep "ground truth"; translate the contrast.
+  - term: polling a post-condition
+    because: Keep "post-condition"; translate "polling" as checking repeatedly.
+  - term: staleness
+  - term: test budget
+  - term: test layer
+  - term: test matrix
+  - term: shared fixture
+  - term: CI parity
+    because: Keep "CI"; translate the idea of "the same everywhere".
+  - term: single source of version
+  - term: release manifest
+  - term: dataset manifest
+  - term: content-addressed version
+  - term: provenance
+    because: >-
+      Explain as "where a number came from". Its four values (measured,
+      datasheet, estimated, computed) are typed, and stay in English.
+  - term: approval gate
+  - term: promotion gate
+  - term: pull before stop
+  - term: pull-based rollback
+    because: Keep "rollback".
+  - term: push telemetry
+  - term: memory limiter
+  - term: metric name translation
+  - term: feature contract
+  - term: interface contract
+  - term: shadow baseline
+    because: Keep "baseline".
+  - term: composition
+  - term: host-side control loop
+  - term: headless simulation
+    because: Keep "headless".
+  - term: software rendering
+  - term: framebuffer streaming
+  - term: message-level visualisation
+  - term: framing
+  - term: resynchronisation
+  - term: preflight check
+  - term: closed kinematic chain
+  - term: tipping margin
+  - term: per-leg error
+  - term: gyro bias
+  - term: edge bleed
+  - term: pinch point
+  - term: print clearance
+  - term: support-free printing
+  - term: derivative work
+    because: A legal idea. Explain it plainly and give the English term.
+  - term: architecture decision record (ADR)
+    because: Keep "ADR" as the name; explain what it records.
+  - term: bill of materials (BOM)
+    because: Keep "BOM" as the name; explain what it lists.
+  - term: Gazebo extension tag
+    because: Keep "Gazebo" and the tag itself; translate "extension".
+  - term: action goal status
+    because: Keep "action" and the status values, which are read on screen.
+  - term: DDS discovery
+    because: Keep "DDS"; translate "discovery" as how nodes find each other.
