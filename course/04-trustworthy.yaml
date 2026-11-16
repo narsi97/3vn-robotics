@@ -985,87 +985,112 @@ lessons:
       this line do something else?**
 
       Start with what holds, because it is a good deal. The workflow asks for
-      a read-only token, and the repository's default token is read-only
+      read-only tokens, and the repository's default token is read-only
       too. The tag becomes a digest before anyone approves, so what was
       approved is what lands. A typed `DEPLOY` stops a misclick. With no
       robot to reach, it fails honestly at the SSH step.
 
-      Now five things that do not hold, each with the line or setting that
-      shows it.
+      The first version of this workflow had five gaps. An audit in November
+      2026 found them. Four are now closed in the file, and one cannot be
+      closed. Each is shown with what was wrong and what replaced it, because
+      the before is where the lesson is. The version the audit read is still
+      in the history, at commit `99cb2a4`.
 
-      **1. Whoever starts a deploy can approve it.** As configured in
-      November 2026, the `robot` environment has one required reviewer, the
-      repository's owner, and GitHub's "Prevent self-review" is off. So the
-      gate is a deliberate pause, not separation of duties: one person can
-      dispatch and approve. With a single maintainer it cannot be otherwise,
-      and saying so is better than letting "required reviewer" suggest a
-      second pair of eyes.
+      **1. Whoever starts a deploy can approve it. Still open.** The `robot`
+      environment has one required reviewer, the repository's owner, and
+      GitHub's "Prevent self-review" is off. So the gate is a deliberate
+      pause, not separation of duties: one person can dispatch and approve.
+      With a single maintainer it cannot be otherwise, and saying so is
+      better than letting "required reviewer" suggest a second pair of eyes.
 
-      **2. The audit line names the wrong person.** The summary writes
+      **2. The audit line named the wrong person. Closed.** The summary wrote
       `approved by @${{ github.actor }}`, but `github.actor` is whoever
-      started the run, not whoever approved it. GitHub records the real
-      reviewer on the run itself. Here they are the same person, so the line
-      is right by accident, which is the worst way for an audit record to be
-      right.
+      started the run, not whoever approved it. Here they were the same
+      person, so the line was right by accident, which is the worst way for
+      an audit record to be right. It now asks GitHub for the run's approvals
+      (`gh api repos/{owner}/{repo}/actions/runs/{run_id}/approvals`) and
+      records who started the run on a separate line.
 
-      **3. Inputs become code.** `${{ inputs.image_tag }}` and
-      `${{ inputs.robot_id }}` are pasted into the scripts by GitHub
-      *before* the shell reads them. A robot id containing a quote and a
-      command closes the quoting and runs the command. It happens in the
-      preflight job, which runs **before** anyone approves, and again in the
-      script sent over SSH, where it would run on the robot. Only someone who
-      can start the workflow can do this, which limits it to people with
-      write access. The fix is mechanical: pass inputs through `env:` and use
-      them as shell variables, so they arrive as data.
+      **3. Inputs became code. Closed.** `${{ inputs.image_tag }}` and
+      `${{ inputs.robot_id }}` were pasted into the scripts by GitHub
+      *before* the shell read them. A robot id containing a quote and a
+      command would have closed the quoting and run the command: in the
+      preflight, which runs **before** anyone approves, and again in the
+      script sent over SSH, where it would run on the robot. Now every input
+      enters through `env:` and is used as a shell variable, so it arrives as
+      data. The robot's script is a quoted heredoc (`<<'SSH'`), so the runner
+      splices nothing into it, and the values cross as arguments quoted with
+      `printf %q`. shellcheck had flagged the unquoted heredoc as SC2087 all
+      along. A new preflight step also refuses any tag or id that is not a
+      plain name, because nothing needs one that is not.
 
-      **4. The key would sit outside the gate.** When an arm exists, the
-      workflow says to store `ROBOT_HOST`, `ROBOT_USER` and `ROBOT_SSH_KEY`
-      as *repository* secrets. Every workflow in the repository, on every
-      branch, can read a repository secret, so a branch carrying a new
-      workflow file could use the robot's key without ever meeting the
-      approval. As **environment secrets** on `robot`, the key is released
-      only to a job that has passed the gate, and a deployment-branch rule
-      (there is none today) would limit that job to `main`.
+      **4. The key would have sat outside the gate. Closed in the file; the
+      setting is a separate check.** The workflow said to store `ROBOT_HOST`,
+      `ROBOT_USER` and `ROBOT_SSH_KEY` as *repository* secrets. Every workflow
+      in the repository, on every branch, can read a repository secret, so a
+      branch carrying a new workflow file could have used the robot's key
+      without ever meeting the approval. It now says **environment secrets**
+      on `robot`, which are released only to a job that has passed the gate.
+      A deployment-branch rule would also limit that job to `main`. That is a
+      setting, not a line in the file, so no file can prove it is there: look
+      at Settings → Environments → robot.
 
-      **5. The robot is never authenticated.**
-      `StrictHostKeyChecking=accept-new` trusts the first host key it sees
-      and remembers it. A fresh CI runner remembers nothing, so every run
-      trusts whatever answers at `ROBOT_HOST`, and anything that can sit
-      between the runner and the robot receives the deploy. The fix is to
-      store the robot's host key as a secret beside the others and check
-      against it.
+      **5. The robot was never authenticated. Closed.**
+      `StrictHostKeyChecking=accept-new` trusted the first host key it saw
+      and remembered it. A fresh CI runner remembers nothing, so every run
+      would have trusted whatever answered at `ROBOT_HOST`, and anything able
+      to sit between the runner and the robot would have received the
+      deploy. The robot's host key is now a fourth secret, `ROBOT_HOST_KEY`,
+      written to a `known_hosts` file, and SSH runs with
+      `StrictHostKeyChecking=yes`. With no host key set, the deploy refuses to
+      start.
 
-      **None of these is exploitable today**, because no robot exists and
-      none of the `ROBOT_*` secrets has been set. That is exactly why now is
-      the time: before the first key exists, each fix costs a few lines.
-      Afterwards, each one comes with a key rotation.
+      **None of these was ever exploitable**, because no robot exists and
+      none of the `ROBOT_*` secrets has been set. That is exactly why they
+      were fixed then: before the first key exists, each fix costs a few
+      lines. Afterwards, each one comes with a key rotation.
     steps:
-      - do: Find every place the workflow uses an input, and note which lines sit inside a script.
+      - do: Find every place the workflow uses an input.
         run: grep -n 'inputs\.' .github/workflows/hardware-deploy.yml
         expect: >-
-          `inputs.confirm` once, in an `if:` that GitHub evaluates, which is
-          safe. `inputs.image_tag` and `inputs.robot_id` several times inside
-          scripts: in the preflight, which runs before approval, and in the
-          `docker run` sent to the robot.
-      - do: Find the token's permissions, the gate, the secrets, the host-key setting and the audit line.
-        run: grep -n -E 'permissions|environment:|secrets\.|StrictHostKeyChecking|approved by' .github/workflows/hardware-deploy.yml
+          A comment, then `inputs.confirm` once, in an `if:` that GitHub
+          evaluates. Every `inputs.image_tag` and `inputs.robot_id` is on an
+          `env:` line or in the job's display name, never inside a `run:`
+          script.
+      - do: Ask the same question of the version the audit read.
+        run: git show 99cb2a4:.github/workflows/hardware-deploy.yml | grep -n 'inputs\.'
+        expect: >-
+          `inputs.image_tag` and `inputs.robot_id` inside scripts: in the
+          preflight, which runs before approval, in the `docker run` sent to
+          the robot, and in the deployment record.
+      - do: Find the token's permissions, the gate, the secrets, the host-key check and the audit line.
+        run: grep -n -E 'permissions|environment:|secrets\.|StrictHostKeyChecking|approvals' .github/workflows/hardware-deploy.yml
+        expect: >-
+          The `permissions:` block (every line under it is `read`, including
+          `actions: read` for the approvals), the registry login's
+          `GITHUB_TOKEN`, four `ROBOT_*` secrets used only in the gated deploy
+          job, `StrictHostKeyChecking=yes`, and the approvals API in the
+          record step.
       - do: >-
           On your own copy, open Settings → Environments → robot (create it if
-          it does not exist yet) and read three things: the required
-          reviewers, whether "Prevent self-review" is ticked, and the
-          deployment-branch rule.
+          it does not exist yet) and read four things: the required
+          reviewers, whether "Prevent self-review" is ticked, the
+          deployment-branch rule, and whether any `ROBOT_*` secret is stored
+          there or, wrongly, under the repository's secrets.
       - do: >-
           On your copy, run the workflow with `DEPLOY` and an image tag that
           exists in your registry, and approve it yourself. When it fails at
-          the SSH step, compare the summary's "approved by" with the reviewer
-          the run page shows.
+          the SSH step, read the summary's "approved by" and "started by"
+          lines, and compare them with the reviewer the run page shows.
         expect: >-
-          Your name in both, because you did both. That is why the line has
-          never been caught out.
+          Your name in all three places, because you did both. The difference
+          from the old version is where "approved by" comes from: the run's
+          approval record, so it stays right when the reviewer is someone
+          else.
     checkpoint: >-
-      You can name the five gaps, point at the line or setting behind each,
-      give its fix, and say which one a project with a single maintainer
-      cannot close.
+      You can name the five gaps, point at the line or setting behind each
+      and at what replaced it, and say which one a project with a single
+      maintainer cannot close.
     pitfalls:
       - symptom: Secrets were "behind the approval", and a new workflow on a branch read them anyway.
         cause: >-
@@ -1079,6 +1104,14 @@ lessons:
         fix: >-
           Put the input in `env:` and use `"$ROBOT_ID"` in the script. The
           shell then receives it as a value, never as code.
+      - symptom: The deploy stops with "ROBOT_HOST_KEY is not set".
+        cause: >-
+          It refuses to trust whatever answers at `ROBOT_HOST`, and no host
+          key was given to check against.
+        fix: >-
+          Read `/etc/ssh/ssh_host_ed25519_key.pub` on the robot itself, not
+          over the network, and store `ROBOT_HOST`, a space and that line as
+          the `ROBOT_HOST_KEY` environment secret on `robot`.
     concepts:
       - term: Separation of duties
         meaning: >-
@@ -1101,7 +1134,7 @@ lessons:
           checking it from then on. On a machine that starts fresh every
           run, every use is the first.
     quiz:
-      - q: The preflight job has only a read token and runs before approval. Why does an injection there still matter?
+      - q: The preflight job had only a read token and runs before approval. Why did an injection there still matter?
         a: >-
           It runs before anyone has looked at anything, so the approval
           cannot prevent it, and a read token can still pull private images
@@ -1113,6 +1146,13 @@ lessons:
           An environment secret is released only to a job that names the
           environment and has passed its rules, so the key exists only after
           approval.
+      - q: Why do the values reach the robot as `printf %q` arguments rather than being written into the heredoc?
+        a: >-
+          An unquoted heredoc is expanded by the runner's shell, so a value
+          becomes part of the remote script's text and the robot's shell
+          parses it as code. A quoted heredoc sends the script verbatim. The
+          values travel as arguments, quoted for the one shell that parses
+          them on the robot, and arrive as `$1` and `$2`.
       - q: Which of the five gaps can a one-person project not close, and what is the honest response?
         a: >-
           Separation of duties: with one maintainer, the requester and the
@@ -1120,18 +1160,22 @@ lessons:
           that the gate is a deliberate pause and not a second opinion,
           rather than let "required reviewer" suggest otherwise.
     exercise:
-      task: On your own copy, close gaps 2 to 5 in one pull request.
+      task: >-
+        Make gap 3 stay closed. Write a check that fails CI if any workflow
+        in `.github/workflows/` has a `${{ inputs.* }}` or
+        `${{ github.event.* }}` expression inside a `run:` script, and show
+        it failing on the version at `99cb2a4` and passing on today's.
+      hint: >-
+        A linter is not enough on its own: actionlint, run on the old file,
+        reported the unquoted heredoc and nothing about the inputs. Parse the
+        YAML rather than grepping it, so an expression on an `env:` line is
+        allowed and the same expression in `run:` is not.
       answer: >-
-        Inputs move into `env:` (`ROBOT_ID: ${{ inputs.robot_id }}`) and the
-        scripts use `"$ROBOT_ID"`. On the robot side, a quoted heredoc
-        (`<<'SSH'`) stops the local shell splicing anything into the remote
-        script, and the values cross as arguments quoted with `printf %q`.
-        The three `ROBOT_*` secrets, plus a new `ROBOT_HOST_KEY`, become
-        environment secrets on `robot`, with a deployment-branch rule for
-        `main`. The deploy writes `ROBOT_HOST_KEY` to a `known_hosts` file
-        and uses `StrictHostKeyChecking=yes`. The summary either drops
-        "approved by" or fetches the reviewer from
-        `gh api repos/{owner}/{repo}/actions/runs/{run_id}/approvals`.
+        Load each workflow with a YAML parser, walk `jobs.*.steps[*].run`,
+        and fail on any match of `\$\{\{\s*(inputs|github\.event)\.` with
+        the file, job and step named. Run it as a fast test beside the
+        others, so it fails in seconds. On `99cb2a4` it names the preflight's
+        resolve step and the deploy step; on today's file it finds nothing.
     read:
       - cicd.md
       - deployment.md
