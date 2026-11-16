@@ -30,9 +30,16 @@ version only.
 The written lesson still carries what a video cannot: the pitfalls, the
 quiz and the exercise. Do not add them to the narration.
 
-Where a segment types something different from the lesson, it says so,
-and [the list at the end](#where-the-script-departs-from-the-lessons)
-says why.
+Each segment types its lesson's commands exactly as the lesson writes
+them, with one exception: segment 5 lists the headings of the licence
+file where the lesson pages through it. Steps that only read a file
+(`less …`) are left to the written lesson, and segment 6 does not run
+`make doctor` a second time.
+
+Writing this script found six steps where a lesson and `main`
+disagreed. They have since been corrected in the lessons;
+[the list at the end](#what-running-the-lessons-found) keeps the
+record.
 
 ## Before recording
 
@@ -524,30 +531,37 @@ If the segments are also published as six clips, cut the transcript at
 the same points and name the parts `stage-1-your-environment.1.en.srt`
 to `….6.en.srt`.
 
-## Where the script departs from the lessons
+## What running the lessons found
 
-Running every lesson step on `main` found these. The script uses what
-works today; the lessons are not changed by this file.
+Every step of the six lessons was run on `main` while this script was
+written. Six did not print what the lesson said. All six were then
+corrected in the lessons, so the lessons and this script now type the
+same commands.
 
-| Lesson | The lesson says | On `main` | This script |
-|---|---|---|---|
-| 1 | `make` lists targets "from `doctor` and `setup` to `play`, `train` and `site`" | `train` is a target and is not in the list | says "from `make doctor` to `make nuke`" |
-| 2 | `docker volume ls \| grep 3vn-robotics` shows three volumes | It prints nothing. The volumes are `docker_build`, `docker_install` and `docker_log`: Compose names them after the `docker/` folder, not the repository | matches the three endings |
-| 3 | "Several hundred" assertions, "well under a minute" | 938 tests, about 900 of them run in a new clone, in 49 to 59 seconds against a limit of 60 | says "about nine hundred" and "under a minute" |
-| 4 | `make urdf TARGET=gz \| grep -c …` prints `1` | It does, after about 290 lines of build output | adds `2>/dev/null` |
-| 4 | `grep -n "xacro:if" …`: "three branches and no others" | It prints fourteen lines: the three targets, four joint-type conditions, and every closing tag | matches the three target lines |
-| 6 | `make shell`, then the `grep -c`, expecting `0` | `0`, and then `make: *** [shell] Error 1` when the shell is left | keeps the error and explains it |
+| Lesson | The lesson said | What `main` printed |
+|---|---|---|
+| 1 | `make` lists targets "from `doctor` and `setup` to `play`, `train` and `site`" | `train` is a target and is not in the list |
+| 2 | `docker volume ls \| grep 3vn-robotics` shows three volumes | Nothing. The volumes are `docker_build`, `docker_install` and `docker_log`: Compose names them after the `docker/` folder, not the repository |
+| 3 | "Several hundred" assertions, "well under a minute" | 938 tests, about 900 of them run in a new clone, in 49 to 59 seconds against a limit of 60 |
+| 4 | `make urdf TARGET=gz \| grep -c …` prints `1` | It did, after about 290 lines of build output |
+| 4 | `grep -n "xacro:if" …`: "three branches and no others" | Fourteen lines: the three targets, four joint-type conditions, and every closing tag |
+| 6 | `make shell`, then the `grep -c`, expecting `0` | `0`, and then `make: *** [shell] Error 1` when the shell is left |
 
-One more, read and not run: `make nuke` removes volumes named
-`3vn-robotics_build`, `3vn-robotics_install` and `3vn-robotics_log`.
-Those are not the names on `main`, so the build volumes would be left
-behind. Lesson 1 sends a learner who is out of disk to `make nuke`.
+`make nuke` was corrected in the same change. It named three volumes
+that never existed, so it left the build volumes behind, and lesson 1
+sends a learner who is out of disk to it. It was not run for this
+script, before the correction or after.
 
 ## What was checked
 
 On 2026-11-16. The test runs and the four counts in segment 4 are from
 `main` at `531010b`. Everything else was run at `99cb2a4`, two merges
 earlier, and none of the files those commands read changed in between.
+
+The lessons were corrected after those runs, on `main` at `48f83af`.
+Nothing was run again for that: of the 31 command lines in this script,
+30 are in the corrected lessons character for character, and the other
+is the heading list in segment 5.
 
 - `git clone`, `make` and `make doctor` were run in a new, empty
   folder.
