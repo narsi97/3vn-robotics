@@ -3,31 +3,45 @@
 # product blocks and BEFORE the catch-all `handle { reverse_proxy
 # homepage:80 }` at the end — Caddy matches handle blocks in order, and
 # the catch-all would otherwise swallow these.
+#
+# The prefix is NOT in this file. Caddy reads it from the environment
+# variable THREEVN_FLEET_PREFIX when it loads the config, so it lives only
+# on the server (see root-env.additions). The first prefix was written
+# here, became public with the repository on 2026-11-15, and is retired:
+# it is still in git history, which is why it was rotated, not just
+# deleted. Never put a real prefix back in this file.
 
 	# --- 3vn-robotics fleet view ---
 	#
-	# UNLISTED, following the house pattern used by delivery-manager and
-	# the client sites: the path itself is the only access control, so
-	# treat it as a secret. Do not link it from 3vnsystems-homepage and
-	# add it to that repo's robots.txt Disallow list.
+	# UNLISTED: the path is obscurity, not access control. Anyone given
+	# the link can pass it on, and the read side has no login. Do not link
+	# it from 3vnsystems-homepage, and keep `Disallow: /fleet-` in that
+	# repo's robots.txt.
+	#
+	# If THREEVN_FLEET_PREFIX is unset, the default below applies, so the
+	# view lands on a known path instead of swallowing the whole site at
+	# `/*`. If it is set but EMPTY, Caddy rejects the whole config at
+	# `caddy validate` / `caddy reload` (`strip_prefix` gets no argument;
+	# checked with Caddy 2.11.7), so the running config stays. Both are
+	# loud; deploy/README.md step 8 has the check.
 	#
 	# The ingest endpoint is separate from the view on purpose. It is the
 	# one thing robots POST to, it is authenticated by a bearer token,
 	# and keeping it on its own path makes it obvious in access logs
 	# which requests are machines and which are a person looking.
-	@robotIngest path /fleet-fab0308e05e11b540b5324b1/api/telemetry
+	@robotIngest path {$THREEVN_FLEET_PREFIX:/fleet-prefix-not-set}/api/telemetry
 	handle @robotIngest {
-		uri strip_prefix /fleet-fab0308e05e11b540b5324b1
+		uri strip_prefix {$THREEVN_FLEET_PREFIX:/fleet-prefix-not-set}
 		reverse_proxy threevn-fleet:8080
 	}
 
 	# The read-only view and its JSON. Same prefix strip: the Go service
 	# registers its routes at the root and knows nothing about the
-	# unlisted prefix, so the prefix can be rotated by editing this file
-	# alone.
-	handle /fleet-fab0308e05e11b540b5324b1/* {
-		uri strip_prefix /fleet-fab0308e05e11b540b5324b1
+	# prefix, so rotating it means changing THREEVN_FLEET_PREFIX (and the
+	# fleet service's FLEET_BASE_PATH to match) and reloading Caddy.
+	handle {$THREEVN_FLEET_PREFIX:/fleet-prefix-not-set}/* {
+		uri strip_prefix {$THREEVN_FLEET_PREFIX:/fleet-prefix-not-set}
 		reverse_proxy threevn-fleet:8080
 	}
 
-	redir /fleet-fab0308e05e11b540b5324b1 /fleet-fab0308e05e11b540b5324b1/ permanent
+	redir {$THREEVN_FLEET_PREFIX:/fleet-prefix-not-set} {$THREEVN_FLEET_PREFIX:/fleet-prefix-not-set}/ permanent

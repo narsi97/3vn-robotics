@@ -1,5 +1,15 @@
-# Append to 3vnsystems-infrastructure/.env (and to .env.prod.example).
+# Append to 3vnsystems-infrastructure/.env (and, with the value left
+# empty, to .env.prod.example).
 #
 # deploy.sh resolves each product repo as a sibling checkout; this tells
 # it where this one lives.
 THREEVN_ROBOTICS_REPO_PATH=../3vn-robotics
+
+# The fleet view's unlisted prefix. Server-only: never commit a real
+# value. Generate one with
+#   echo "/fleet-$(openssl rand -hex 12)"
+# Caddy reads it as {$THREEVN_FLEET_PREFIX}, so the caddy service must see
+# it: add `THREEVN_FLEET_PREFIX: ${THREEVN_FLEET_PREFIX}` to that
+# service's `environment:` in docker/compose.prod.yml. Put the SAME value
+# in env/threevn-fleet.env as FLEET_BASE_PATH.
+THREEVN_FLEET_PREFIX=

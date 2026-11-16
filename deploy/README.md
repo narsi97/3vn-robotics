@@ -65,10 +65,14 @@ Then, in the `3vnsystems-infrastructure` checkout:
 2. Insert the blocks from [`shared-vps/Caddyfile.fragment`](shared-vps/Caddyfile.fragment)
    into `caddy/Caddyfile`, **above** the catch-all `handle` at the end.
 3. Append [`shared-vps/root-env.additions`](shared-vps/root-env.additions)
-   to `.env` (and to `.env.prod.example`).
+   to `.env` (and, with the values empty, to `.env.prod.example`).
+   Generate a fresh prefix for `THREEVN_FLEET_PREFIX` with
+   `echo "/fleet-$(openssl rand -hex 12)"`, and pass it to the `caddy`
+   service's `environment:` as that file says.
 4. Copy [`shared-vps/threevn-fleet.env.example`](shared-vps/threevn-fleet.env.example)
    to `env/threevn-fleet.env`, generate a token with
-   `openssl rand -base64 48`, and `chmod 600` it.
+   `openssl rand -base64 48`, set `FLEET_BASE_PATH` to the same prefix,
+   and `chmod 600` it.
 5. Add `Disallow: /fleet-` to `3vnsystems-homepage/robots.txt`.
 6. Validate and reload Caddy rather than restarting it:
 
@@ -86,6 +90,16 @@ Then, in the `3vnsystems-infrastructure` checkout:
    docker compose -f docker/compose.prod.yml --env-file .env up -d threevn-fleet
    ```
 
+8. Check that Caddy picked the prefix up. If `THREEVN_FLEET_PREFIX` is
+   empty, step 6's `caddy validate` already failed. If it did not reach
+   Caddy at all, the fragment falls back to `/fleet-prefix-not-set`, so
+   that path must NOT answer:
+
+   ```bash
+   curl -s -o /dev/null -w '%{http_code}\n' https://3vnsystems.com/fleet-prefix-not-set/   # expect 404
+   curl -s -o /dev/null -w '%{http_code}\n' "https://3vnsystems.com$THREEVN_FLEET_PREFIX/" # expect 200
+   ```
+
 **Before touching `caddy/Caddyfile` or `compose.prod.yml`, read
 `3vnsystems-infrastructure/ARCHITECTURE.md` §5.** The VPS copies of both
 contain blocks that were never committed — Delivery Manager's secret path
@@ -94,10 +108,18 @@ back up first. Copying a local file over either will delete live config.
 
 ### It is unlisted, and that is the whole access control
 
-The path is a secret. Do not paste it anywhere public, do not link it
-from the homepage, and add it to `robots.txt`. The page also sends
-`X-Robots-Tag: noindex, nofollow` so a leaked path does not become an
-indexed one.
+The path is a secret, and it lives only on the server: the Caddy
+fragment reads it from `THREEVN_FLEET_PREFIX`, and this repository holds
+no real value. The first prefix was committed here and became public
+with the repository on 2026-11-15; it is retired and must never be used
+again (git history keeps it). Do not paste the current one anywhere
+public, do not link it from the homepage, and keep `Disallow: /fleet-`
+in `robots.txt`. The page also sends `X-Robots-Tag: noindex, nofollow`
+so a leaked path does not become an indexed one.
+
+This is obscurity, not access control: the read side has no login, and
+anyone given the link can pass it on. Rotate the prefix if it leaks, and
+give the view real authentication if what it shows ever matters.
 
 The **ingest** endpoint is separately protected by a bearer token,
 because unlike the view it can change what the fleet page says. Anything
@@ -108,7 +130,7 @@ able to write to it can lie about a robot.
 Set three variables wherever the runtime container runs:
 
 ```bash
-THREEVN_FLEET_URL=https://3vnsystems.com/fleet-fab0308e05e11b540b5324b1/api/telemetry
+THREEVN_FLEET_URL=https://3vnsystems.com/<THREEVN_FLEET_PREFIX>/api/telemetry
 THREEVN_FLEET_TOKEN=<the token from threevn-fleet.env>
 THREEVN_ROBOT_ID=robot-001
 ```

@@ -53,16 +53,17 @@ handler already sends `X-Accel-Buffering: no`, and Caddy's
 `reverse_proxy` streams by default — but verify it, because a buffered
 stream looks exactly like a frozen dashboard.
 
-**The dashboard still runs on the robot, not the VPS.** What landed on
-the VPS in Phase 8 is a separate, much smaller thing: a fleet view that
-robots push to. See [`../deploy/README.md`](../deploy/README.md).
+**The dashboard still runs on the robot, not the VPS.** What Phase 8
+built for the VPS is a separate, much smaller thing: a fleet view that
+robots push to. It is built and tested in CI but has not been deployed
+anywhere yet. See [`../deploy/README.md`](../deploy/README.md).
 
 ## Two halves, deployed differently
 
 | | Where | How |
 |---|---|---|
 | robot runtime | on/next to the arm | pull a published image by digest |
-| fleet view | the shared 3VN VPS | built on the VPS from a sibling checkout |
+| fleet view | the shared 3VN VPS (designed; not deployed yet) | built on the VPS from a sibling checkout |
 
 The asymmetry is deliberate. A robot is remote, so rollback has to be a
 pull. The VPS already builds every other 3VN product in place, and a
