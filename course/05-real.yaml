@@ -18,6 +18,7 @@ outcomes:
   - Generate printable parts from the robot profile, and let the CAD correct the simulation rather than the reverse.
   - Make a mechanical decision with a number attached, and write a bill of materials that does not flatter the robot.
   - Roll a robot back with a pull, separate "alive" from "ready", and get metrics out from behind a home router.
+  - List every port a robot stack opens, who can reach it, and what each one does with a request it cannot authenticate.
 
 prerequisites:
   - Tier 4 complete.
@@ -944,6 +945,192 @@ lessons:
     read:
       - monitoring.md
       - dashboard.md
+
+  - id: who-can-reach-it
+    title: Who can reach a robot
+    tags: [security, robops]
+    builds_on: [three-ways-to-watch, what-happened-when-you-were-away]
+    minutes: 35
+    objective: >-
+      List every port the stack opens, who can reach it, and what each one
+      does with a request it cannot authenticate.
+    body: |
+      The supply chain is about what you ship. This lesson is about what you
+      leave listening. The method is the oldest one in infrastructure
+      security: list every port, then for each one ask **who can reach it,
+      and what does it do with someone it does not know?**
+
+      | port | what | bound to | when it cannot tell who you are |
+      |---|---|---|---|
+      | 8106, 5906, 8765 | noVNC, native VNC and Foxglove, on your machine | 127.0.0.1 | serves you anyway: no login, and the VNC password protects nothing |
+      | 8107, 8108 | the dashboard, in the dev and runtime containers; 8107 on the robot too | 127.0.0.1 | serves you anyway |
+      | 3000 | Grafana, on the monitoring box | 127.0.0.1 | asks for a password that defaults to `admin` |
+      | 4318 | the OTLP collector | every interface | accepts the metrics: no authenticator, no TLS |
+      | fleet ingest | the fleet view's write endpoint | the internet | refuses: a bearer token, or 401 |
+      | fleet view | the page and its JSON | the internet | serves you anyway, behind an unlisted path |
+
+      **For people: loopback, plus a tunnel.** Everything a person looks at
+      is bound to 127.0.0.1 and reached over SSH. `ssh -L
+      3000:127.0.0.1:3000` makes the remote Grafana appear on your own port
+      3000, carried inside a connection that has already authenticated you.
+      No login page faces the internet, so there is nothing to brute-force
+      and no window in which a default password is exposed. The weak point
+      is a single line per service. The dashboard listens on every interface
+      *inside* its container, so the `127.0.0.1:` in its port mapping, in
+      compose and in the deploy's `docker run`, is the whole of its access
+      control.
+
+      **For machines: authenticated, and failing closed.** The fleet view's
+      ingest is the only endpoint built to accept writes from the internet,
+      and it is built like it. Tokens are compared in constant time, so a
+      token's prefix does not leak through timing. Bodies are capped at 32
+      KB. Read timeouts stop slow clients holding sockets open. And when no
+      token is configured, it refuses **everything** rather than accepting
+      anything. CI starts the image and asserts that an unauthenticated
+      write gets a 401.
+
+      **Two rows fall short, and both are written down.** The collector
+      listens on every interface with no authenticator. Its compose file says
+      to put TLS in front before pointing a robot on the open internet at
+      it. The robot can already send a bearer token (`THREEVN_OTLP_TOKEN`),
+      but nothing on the other end checks it. And the fleet view's *read*
+      side relies on an unlisted path. That was obscurity, not access
+      control, and it ended when this repository went public, because the
+      path is in it. The comment beside it says the prefix can be rotated by
+      editing that one file. Rotating it before any deploy is now a
+      requirement.
+
+      The course site applies the same thinking to whole repositories. This
+      repository is public, so its deploy lives in a private one, and
+      nothing here holds a credential that can reach a host. A pull request
+      from a fork runs with a read-only token and no secrets. One leftover
+      remains: a read-only deploy key for that private repository, stored
+      here as a repository secret from before the deploy moved, and used by
+      no workflow here any more. A credential nobody uses can only be
+      misused, so it should be deleted, and finding leftovers like it is
+      part of what this audit is for.
+
+      **Honest status:** the fleet view is not deployed anywhere today, the
+      collector has never faced the internet, there is no robot, and nothing
+      here has been penetration-tested. What you can check is the design,
+      and the tests that hold it in place.
+    steps:
+      - do: List every published port in the dev and monitoring stacks, and the address each is bound to.
+        run: grep -n -E '127\.0\.0\.1:[0-9]+:|"4318' docker/compose.yml monitoring/compose.yml
+        expect: Every mapping begins `127.0.0.1:` except one, the collector's `4318:4318`.
+      - do: With the dev container up, ask Docker the same question.
+        run: |
+          make up
+          docker ps --format '{{.Names}}  {{.Ports}}'
+        expect: Every mapping on `threevn-ros` begins `127.0.0.1:`.
+      - do: Build the fleet view and start it with no token, the way a careless deploy would. Then try to write.
+        run: |
+          docker build -f vps/fleet/cloud/Dockerfile -t fleet:local vps/fleet
+          docker run --rm -d --name fleet -p 127.0.0.1:8090:8080 fleet:local
+          curl -s -w ' %{http_code}\n' -X POST http://127.0.0.1:8090/api/telemetry -d '{"robot_id":"r1"}'
+          docker rm -f fleet
+        expect: '`{"error":"ingest is not configured"} 503`. It fails closed.'
+      - do: Start it with a token, write with no token, a wrong one and the right one, then read.
+        run: |
+          docker run --rm -d --name fleet -p 127.0.0.1:8090:8080 -e FLEET_INGEST_TOKEN=s3cret fleet:local
+          curl -s -w ' %{http_code}\n' -X POST http://127.0.0.1:8090/api/telemetry -d '{"robot_id":"r1"}'
+          curl -s -w ' %{http_code}\n' -X POST -H 'Authorization: Bearer nope' http://127.0.0.1:8090/api/telemetry -d '{"robot_id":"r1"}'
+          curl -s -w ' %{http_code}\n' -X POST -H 'Authorization: Bearer s3cret' http://127.0.0.1:8090/api/telemetry -d '{"robot_id":"r1"}'
+          curl -s http://127.0.0.1:8090/api/fleet
+          docker rm -f fleet
+        expect: >-
+          401, 401, 202, and then the read returns robot `r1` with no token at
+          all. Writes are authenticated; reads are not.
+      - do: Look for anything that authenticates the collector's receiver.
+        run: grep -n -E 'auth|tls|endpoint' monitoring/collector/config.yaml
+        expect: >-
+          Two receiver endpoints on `0.0.0.0` and no `auth` anywhere. The only
+          `tls` is on the exporter to VictoriaMetrics, inside one compose
+          network.
+      - do: Find the fleet view's unlisted path in this public repository.
+        run: grep -n "fleet-" deploy/shared-vps/Caddyfile.fragment | head -3
+        expect: The path in the clear, a few lines below a comment telling you to treat it as a secret.
+    checkpoint: >-
+      You have your own copy of the table, filled in from `docker ps` and
+      the compose files, with one sentence for each internet-facing row on
+      what a stranger could do there.
+    pitfalls:
+      - symptom: Someone on your network cannot open your dashboard, so you change its mapping to `0.0.0.0:8107:8107`.
+        cause: The dashboard has no login. The loopback binding is its only access control.
+        fix: >-
+          Leave the binding alone and give them a tunnel instead, `ssh -L
+          8107:127.0.0.1:8107` to your machine, so access stays tied to an SSH
+          key.
+      - symptom: Every report to the fleet view gets a 503.
+        cause: >-
+          `FLEET_INGEST_TOKEN` is unset, and ingest refuses everything rather
+          than accept unauthenticated writes.
+        fix: Set the token on the server, and the same value as `THREEVN_FLEET_TOKEN` on the robot.
+      - symptom: '`admin` / `admin` signs in to Grafana on a real monitoring box.'
+        cause: '`GRAFANA_ADMIN_PASSWORD` was never set, so the compose file''s fallback applied.'
+        fix: >-
+          Set it before the first start, since Grafana stores the admin
+          password then. The loopback binding is why the fallback is
+          survivable, not why it is acceptable.
+    concepts:
+      - term: Attack surface
+        meaning: >-
+          Every way in (each listening port, endpoint and credential) that
+          someone you did not invite could try. Listing it is the first step
+          in securing it.
+      - term: Fail closed
+        meaning: >-
+          When a required check cannot be made, such as when no token is
+          configured, refuse rather than allow. Failing open turns a missing
+          setting into an open door.
+      - term: Local port forward
+        meaning: >-
+          `ssh -L port:host:port`: a port on your machine that leads, through
+          an authenticated SSH connection, to a port bound to loopback on the
+          other end.
+      - term: Security through obscurity
+        meaning: >-
+          Relying on an attacker not knowing something that is not actually
+          secret, such as an unlisted path or an unusual port. It slows a
+          stranger down; it stops nobody who has read the repository.
+    quiz:
+      - q: The dashboard has no login. What stops a stranger on the robot's network from opening it?
+        a: >-
+          Only the `127.0.0.1:` in the port mapping. Inside the container it
+          listens on every interface, so that one prefix, in compose and in
+          the deploy's `docker run`, is its entire access control.
+      - q: Why does the fleet view refuse every write when its token is unset, instead of accepting them?
+        a: >-
+          An unset token is a mistake, and a mistake should not open the
+          door. Failing closed turns a forgotten setting into refused reports,
+          which is loud and harmless, instead of letting the internet write a
+          robot's state.
+      - q: The fleet view's path was unlisted. Why is that no longer a control?
+        a: >-
+          The path is in the repository, and the repository is public.
+          Obscurity works only while the thing is unknown, and publishing the
+          source published it. Rotate the path, and give the read side real
+          access control if what it shows ever matters.
+    exercise:
+      task: >-
+        Make the collector check the token the robot already sends, with TLS
+        in front of it, and show that a push without the token is refused.
+      hint: >-
+        The contrib collector has a `bearertokenauth` extension, and a
+        receiver protocol can name it under `auth`. The robot sends
+        `Authorization: Bearer` with `THREEVN_OTLP_TOKEN` when that variable
+        is set.
+      answer: >-
+        Add `bearertokenauth` under `extensions`, reading the token from an
+        environment variable. Reference it as the `authenticator` in an
+        `auth` block under the HTTP receiver, and list it in
+        `service.extensions`. Terminate TLS in Caddy or a tunnel in front of
+        4318 rather than in the collector. A push with no token now gets a
+        401, while the robot's metrics keep arriving.
+    read:
+      - monitoring.md
+      - viewing.md
+      - deployment.md
 
 project:
   title: A first-power-on runbook
