@@ -84,6 +84,7 @@ never_translate:
   - {term: "OTLP", say: "O T L P"}
   - {term: "CRC", say: "C R C"}
   - {term: "CI", say: "C I"}
+  - {term: "SBOM", say: "ESS-bom"}
   - {term: "GitHub"}
   - {term: "Foxglove"}
   - {term: "VNC", say: "V N C"}
@@ -191,6 +192,13 @@ keep_in_english:
   - spike
   - parametric CAD
   - derating
+  # security: the words a learner will search for
+  - software supply chain
+  - attack surface
+  - build provenance
+  - expression injection
+  - environment secret
+  - local port forward
   # data and models
   - dataset
   - model
@@ -219,6 +227,16 @@ translate:
   - term: discriminating metric
   - term: decision check
   - term: defence in depth
+  - term: fail closed
+    because: >-
+      Explain as "when the check cannot be made, refuse". Give "fail
+      open" beside it once; the pair is what a learner searches for.
+  - term: security through obscurity
+  - term: separation of duties
+  - term: pin versus checksum
+    because: Keep "pin" and "checksum"; translate the contrast.
+  - term: trust on first use (TOFU)
+    because: Keep "TOFU" as the name; explain what is trusted, and when.
   - term: safe failure state
   - term: command validation
   - term: command watchdog
