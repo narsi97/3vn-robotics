@@ -1,0 +1,60 @@
+# The course's topic tags: the ONLY tags a lesson may carry.
+#
+# Every lesson in course/*.yaml lists one or more of these slugs under
+# `tags:`. `make course-check` fails on a tag that is not here, on a
+# lesson with no tags, and on a tag here that no lesson carries -- an
+# empty topic page is a dead end, not a promise.
+#
+# A lesson that is about something else but touches a topic in one
+# passage can say so under `mentions:`, with a short quote of that
+# passage. The topic page lists it under "Also mentioned in" and links
+# straight to the passage; course-check fails if the quote is no longer
+# in the lesson, so the link cannot quietly rot.
+#
+# The order here is the order topics are shown in. The slug is part of a
+# public URL (/robotics/tags/<slug>/, linked from the 3vnsystems.com
+# homepage), so rename one only together with every link to it.
+tags:
+  - slug: ros2
+    label: ROS 2
+    description: Nodes, topics, services and actions, ros2_control, and describing a robot in URDF and xacro, with links, joints, frames, inertia and limits generated from one source.
+
+  - slug: simulation
+    label: Simulation
+    description: Gazebo with no GPU and no display, simulated time, mock hardware and scenarios you can watch.
+
+  - slug: architecture
+    label: Architecture
+    description: The hardware seam, single sources of truth, and swapping or composing whole robots without editing them.
+
+  - slug: motion
+    label: Kinematics, control and perception
+    description: Controllers, driving, odometry, inverse kinematics, workspaces and grasping, and cameras and gyros turned into positions in metres with a measured error.
+
+  - slug: hardware
+    label: Hardware and firmware
+    description: The 3D-printed arm, CAD generated from the robot's own numbers, motors, the bill of materials and the ESP32 firmware.
+
+  - slug: testing
+    label: Testing
+    description: Layers of test, suites fast enough to run, and tests that cannot pass by accident.
+
+  - slug: devops
+    label: DevOps and CI/CD
+    description: Containers, pipelines that run what you run locally, releases and deploys.
+
+  - slug: robops
+    label: RobOps and observability
+    description: Operating and watching real robots, with images built for the robot, deploy gates, rollback, health versus readiness, dashboards that cannot show stale state, and metrics from robots in the field.
+
+  - slug: ai
+    label: AI and MLOps
+    description: Datasets with honest test sets, models that have to beat the geometry they replace, and a registry that gates, promotes, serves and rolls them back.
+
+  - slug: security
+    label: Security
+    description: Supply chain and access, covering auditable base images, licences, what an image ships, digests, approval gates and robots behind home routers.
+
+  - slug: safety
+    label: Safety
+    description: Limits from the datasheet, deciding how things fail, and where safety actually lives.

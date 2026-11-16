@@ -28,6 +28,8 @@ prerequisites:
 lessons:
   - id: it-drives
     title: Odometry lies, and by how much
+    tags: [motion, simulation]
+    builds_on: [drive-it]
     minutes: 35
     objective: Measure the gap between where the wheels think the robot is and where it actually is.
     body: |
@@ -128,6 +130,8 @@ lessons:
 
   - id: two-wrong-answers
     title: Two wrong answers, one better one
+    tags: [motion]
+    builds_on: [it-drives]
     minutes: 35
     objective: Fuse a gyro with wheel odometry, and prove with the right metric that it helped.
     body: |
@@ -229,6 +233,8 @@ lessons:
 
   - id: composing-robots
     title: Composing two robots into one
+    tags: [ros2, architecture, safety]
+    builds_on: [links-and-joints, one-source-of-truth, inertia-is-computed]
     minutes: 35
     objective: Put the arm on the base without editing either, and compute whether it can tip itself over.
     body: |
@@ -320,6 +326,8 @@ lessons:
 
   - id: solve-the-arm
     title: Solve the kinematics, and find out what the arm cannot do
+    tags: [motion]
+    builds_on: [links-and-joints]
     minutes: 40
     objective: Turn a position into joint angles exactly, and map the arm's real workspace.
     body: |
@@ -420,6 +428,8 @@ lessons:
 
   - id: prove-the-grasp
     title: Prove the grasp — and what is still open
+    tags: [motion, testing, simulation]
+    builds_on: [solve-the-arm, scenarios-are-tests]
     minutes: 40
     objective: Verify a grasp with two independent checks and a control, and report honestly when it fails.
     body: |
@@ -539,6 +549,8 @@ lessons:
 
   - id: it-sees
     title: A camera, and the geometry behind it
+    tags: [motion]
+    builds_on: [frames-that-pay-later]
     minutes: 40
     objective: Turn pixels into a position in metres, measure the error, and find its physical cause.
     body: |
@@ -637,6 +649,11 @@ lessons:
 
   - id: datasets
     title: Datasets, splits, and the leak you did not look for
+    tags: [ai]
+    builds_on: [it-sees]
+    mentions:
+      - tag: security
+        quote: the first real recording had no provenance at all
     minutes: 40
     objective: Build a dataset whose test set means something, and that can say where it came from.
     body: |
@@ -732,6 +749,8 @@ lessons:
 
   - id: beats-geometry
     title: When a model beats geometry, and why
+    tags: [ai, motion]
+    builds_on: [datasets, it-sees]
     minutes: 40
     objective: Fit a model, prove it beats the closed form honestly, and find out why it wins.
     body: |
@@ -824,6 +843,11 @@ lessons:
 
   - id: mlops
     title: Shipping a model like software
+    tags: [ai, devops]
+    builds_on: [beats-geometry]
+    mentions:
+      - tag: security
+        quote: Versions are content-addressed and immutable
     minutes: 35
     objective: Register, gate, promote and roll back a model.
     body: |
@@ -939,6 +963,11 @@ lessons:
 
   - id: serve-and-watch
     title: Serving, and noticing the question changed
+    tags: [ai, robops]
+    builds_on: [mlops]
+    mentions:
+      - tag: security
+        quote: picking one is exactly the untracked deployment the registry exists to prevent
     minutes: 35
     objective: Serve whichever model is promoted, compare it live with the physics, and detect drift.
     body: |
@@ -1023,6 +1052,11 @@ lessons:
 
   - id: somebody-elses-robot
     title: Somebody else's robot
+    tags: [architecture, ros2, motion]
+    builds_on: [the-seam, solve-the-arm]
+    mentions:
+      - tag: security
+        quote: Its description is used exactly as it ships, fetched on demand and never committed
     minutes: 35
     objective: Run the whole stack against a robot nobody here designed, and find the assumption that breaks.
     body: |

@@ -23,6 +23,8 @@ prerequisites:
 lessons:
   - id: headless-by-default
     title: A simulator that runs in CI
+    tags: [simulation, devops]
+    builds_on: [docker-and-nothing-else]
     minutes: 30
     objective: Run Gazebo with no GPU and no display, and confirm every controller came up.
     body: |
@@ -127,6 +129,11 @@ lessons:
 
   - id: three-ways-to-watch
     title: Three ways to watch, and what crosses the wire
+    tags: [simulation, robops]
+    builds_on: [headless-by-default]
+    mentions:
+      - tag: security
+        quote: The password protects nothing (the port is bound to 127.0.0.1)
     minutes: 25
     objective: Pick the right view of a remote robot by understanding what each one transmits.
     body: |
@@ -231,6 +238,8 @@ lessons:
 
   - id: drive-it
     title: Drive it yourself
+    tags: [motion, ros2, simulation]
+    builds_on: [headless-by-default]
     minutes: 30
     objective: Move the robot by hand and feel how its controllers behave.
     body: |
@@ -323,6 +332,8 @@ lessons:
 
   - id: topics-services-actions
     title: Topics, services and actions
+    tags: [ros2, architecture]
+    builds_on: [drive-it]
     minutes: 40
     objective: Choose the right ROS 2 communication primitive, and inspect each on a live robot.
     body: |
@@ -440,6 +451,8 @@ lessons:
 
   - id: two-clocks
     title: Two clocks, and the bug they cause
+    tags: [simulation, ros2]
+    builds_on: [headless-by-default]
     minutes: 30
     objective: Keep simulation time and wall time apart, and measure the real-time factor honestly.
     body: |
@@ -539,6 +552,8 @@ lessons:
 
   - id: one-goal-two-backends
     title: One command, two backends
+    tags: [architecture, simulation, ros2]
+    builds_on: [the-seam, topics-services-actions]
     minutes: 35
     objective: Send an identical goal to a physics simulation and to a mock, unchanged, and get the same answer.
     body: |
@@ -645,6 +660,8 @@ lessons:
 
   - id: scenarios-are-tests
     title: Scenarios are tests you can watch
+    tags: [testing, simulation]
+    builds_on: [one-goal-two-backends]
     minutes: 35
     objective: Run scenarios that serve as tests and demos at once, against either backend.
     body: |

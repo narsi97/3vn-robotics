@@ -22,6 +22,7 @@ prerequisites:
 lessons:
   - id: links-and-joints
     title: A robot is a tree
+    tags: [ros2]
     minutes: 30
     objective: Read a robot description as links and joints, and predict how each joint moves.
     body: |
@@ -137,6 +138,8 @@ lessons:
 
   - id: one-source-of-truth
     title: One source of physical truth
+    tags: [ros2, architecture]
+    builds_on: [links-and-joints]
     minutes: 35
     objective: Change a robot's dimensions without editing any model file.
     body: |
@@ -241,6 +244,8 @@ lessons:
 
   - id: inertia-is-computed
     title: Never type a number you can derive
+    tags: [ros2, testing]
+    builds_on: [one-source-of-truth]
     minutes: 25
     objective: Understand why inertia tensors are generated, never written, and check one by hand.
     body: |
@@ -342,6 +347,8 @@ lessons:
 
   - id: frames-that-pay-later
     title: Three frames that save you a day each
+    tags: [ros2, motion]
+    builds_on: [links-and-joints]
     minutes: 30
     objective: Place the frames later phases assume, and read any transform between them on a live robot.
     body: |
@@ -443,6 +450,8 @@ lessons:
 
   - id: one-file-three-targets
     title: One file, three targets, two traps
+    tags: [ros2, simulation]
+    builds_on: [the-seam, one-source-of-truth]
     minutes: 30
     objective: Emit target-specific content from one description, and avoid the traps that come with it.
     body: |
@@ -529,6 +538,8 @@ lessons:
 
   - id: two-parsers
     title: Test it with two parsers, not one
+    tags: [ros2, testing]
+    builds_on: [fast-tests-or-no-tests]
     minutes: 30
     objective: Check a description with independent tools, and know which bugs only raw XML reveals.
     body: |
@@ -609,6 +620,8 @@ lessons:
 
   - id: limits-from-the-datasheet
     title: Limits come from the datasheet
+    tags: [ros2, hardware, safety]
+    builds_on: [links-and-joints]
     minutes: 25
     objective: Derive effort and speed limits from the motors that must deliver them, and prove no joint exceeds them.
     body: |

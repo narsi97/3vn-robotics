@@ -37,7 +37,15 @@ RUN printf 'server {\n\
   index index.html;\n\
   add_header X-Robots-Tag "noindex, nofollow" always;\n\
   location / { try_files $uri $uri.html $uri/ =404; }\n\
+  location = /tags { return 301 tags/; }\n\
+  location ~ ^/tags/([a-z0-9-]+)$ { return 301 $1/; }\n\
 }\n' > /etc/nginx/conf.d/default.conf
+# The topic pages are the only directories: tags/ and tags/<slug>/. Asked
+# for without the trailing slash, nginx's own redirect would be absolute
+# and would drop the /robotics/ prefix Caddy strips before it gets here,
+# sending the reader to a page that does not exist. The two locations
+# above redirect RELATIVELY instead, so the browser keeps the prefix,
+# whatever it is. The slash matters: the pages' links are relative.
 COPY --from=build /site /usr/share/nginx/html
 # apk upgrade: official base images lag Alpine's security fixes.
 # Run as the image's own unprivileged `nginx` user: only the pid file and the
