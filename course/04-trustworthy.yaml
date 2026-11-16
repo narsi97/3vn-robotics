@@ -2,7 +2,9 @@ id: trustworthy
 number: 4
 kind: tier
 title: Make it trustworthy
-price: "$5"
+# Planned as a $5 tier once the course matures; free for everyone until
+# then (decided 2026-11-15). Put the price back when payment opens.
+price: free
 summary: >-
   The layers that let you change a robot's code on a Friday: tests sorted
   by what they can catch, tests that cannot pass by accident, a suite that

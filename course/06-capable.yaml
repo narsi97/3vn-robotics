@@ -2,7 +2,9 @@ id: capable
 number: 6
 kind: tier
 title: Make it capable
-price: "$5"
+# Planned as a $5 tier once the course matures; free for everyone until
+# then (decided 2026-11-15). Put the price back when payment opens.
+price: free
 summary: >-
   A robot that drives, knows roughly where it is, carries an arm, reaches
   for things, sees them, records what it saw, learns from it, ships the
