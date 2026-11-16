@@ -99,7 +99,7 @@ exist only high up, around z = 170–220 mm.
   to know now than after building a perception stack that finds objects
   the arm cannot reach.
 
-## `POSES['pick']` was never a grasp
+## The `pick` pose was never a grasp
 
 Its pitch works out to 23° — the gripper pointing *upward* — and the
 pose is fixed in joint space, derived from nothing about where the

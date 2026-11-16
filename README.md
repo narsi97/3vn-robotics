@@ -88,6 +88,21 @@ all, and
 asserts that `threevn_bringup` never declares a Gazebo dependency. If
 either fails, the decoupling has been broken.
 
+### And the robot is an argument too
+
+`PROFILE` chooses the robot, independently of the target:
+
+```bash
+make so101-fetch                       # once: a pinned, Apache-2.0 description
+make sim      PROFILE=so101_follower   # somebody else's arm, in Gazebo
+make test-ros PROFILE=so101_follower   # the same integration suite, against it
+```
+
+The SO-101 has five joints where the 3VN arm has four, different joint
+names and a revolute jaw. The controllers, the client, the scenarios and
+the tests are the same files for both. See
+[docs/so101.md](docs/so101.md).
+
 ---
 
 ## Repository layout

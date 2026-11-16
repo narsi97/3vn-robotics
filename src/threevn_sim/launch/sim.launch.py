@@ -13,26 +13,28 @@
 # limitations under the License.
 
 """
-Launch the 3VN Arm in Gazebo Harmonic.
+Launch a robot in Gazebo Harmonic.
 
   make sim              headless server (fast, what CI runs)
   make sim GUI=1        adds the Gazebo GUI via noVNC (slow: llvmpipe)
 
+  make sim PROFILE=so101_follower      the same, for the SO-101
+
 Gazebo hosts controller_manager inside its own process through the
 gz_ros2_control system plugin, which is why this cannot simply reuse
 threevn_bringup/robot.launch.py. Everything below that -- the controllers,
-the topics, the actions -- is identical to the mock and esp32 targets.
+the topics, the actions -- is identical to the mock and hardware targets.
 """
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
     IncludeLaunchDescription,
+    OpaqueFunction,
     RegisterEventHandler,
 )
 from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import (
-    Command,
     LaunchConfiguration,
     PathJoinSubstitution,
     PythonExpression,
@@ -40,23 +42,22 @@ from launch.substitutions import (
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
+from threevn_robot_description.describe import (
+    controllers_file,
+    describe,
+    model_name,
+)
 
-DESCRIPTION_PKG = 'threevn_robot_description'
 BRINGUP_PKG = 'threevn_bringup'
 SIM_PKG = 'threevn_sim'
 
 
-def generate_launch_description():
-    profile = LaunchConfiguration('profile')
+def _simulate(context, *args, **kwargs):
+    """Build the actions once `profile` is known."""
+    profile = LaunchConfiguration('profile').perform(context)
     gui = LaunchConfiguration('gui')
     world = LaunchConfiguration('world')
 
-    params_file = PathJoinSubstitution(
-        [FindPackageShare(DESCRIPTION_PKG), 'config', [profile, '.yaml']]
-    )
-    xacro_file = PathJoinSubstitution(
-        [FindPackageShare(DESCRIPTION_PKG), 'urdf', 'threevn_arm.urdf.xacro']
-    )
     world_file = PathJoinSubstitution(
         [FindPackageShare(SIM_PKG), 'worlds', [world, '.sdf']]
     )
@@ -64,25 +65,23 @@ def generate_launch_description():
         [FindPackageShare(SIM_PKG), 'config', 'gz_bridge.yaml']
     )
     # Resolved HERE, not inside the description. threevn_sim depends on
-    # both packages; the description depends on neither.
-    controllers_file = PathJoinSubstitution(
-        [FindPackageShare(BRINGUP_PKG), 'config', 'controllers.yaml']
-    )
+    # both packages; the description depends on neither. The profile
+    # names the file, because which controllers a robot runs under is a
+    # fact about the robot.
+    controllers = PathJoinSubstitution(
+        [FindPackageShare(BRINGUP_PKG), 'config', controllers_file(profile)]
+    ).perform(context)
 
-    # target:=gz selects gz_ros2_control/GazeboSimSystem and emits the
+    # target gz selects gz_ros2_control/GazeboSimSystem and emits the
     # <gazebo> plugin block. Identical description otherwise.
-    # The raw substitution, shared by robot_state_publisher AND the
-    # spawner below so the two cannot possibly disagree.
-    # threevn_sim depends on both the description and bringup, so it is
-    # the right place to join them. The description must not look up
-    # bringup itself -- bringup depends on the description.
-    robot_description_content = Command(
-        ['xacro ', xacro_file, ' params_file:=', params_file, ' target:=gz',
-         ' controllers_file:=', controllers_file]
-    )
+    #
+    # ONE string, shared by robot_state_publisher AND the spawner below
+    # so the two cannot possibly disagree.
+    robot_description_content = describe(
+        profile, target='gz', controllers=controllers)
 
-    # A Command substitution yields URDF XML. Without value_type=str,
-    # launch tries to parse it as YAML and fails at startup.
+    # The description is URDF XML. Without value_type=str, launch tries
+    # to parse it as YAML and fails at startup.
     robot_description = ParameterValue(robot_description_content, value_type=str)
 
     # On llvmpipe the GUI runs at 5-15 FPS; that is CPU rendering, not a fault.
@@ -105,8 +104,8 @@ def generate_launch_description():
         launch_arguments={'gz_args': [gz_args, world_file]}.items(),
     )
 
-    # Spawn from the SAME substitution robot_state_publisher uses, not
-    # from the /robot_description topic.
+    # Spawn from the SAME string robot_state_publisher uses, not from
+    # the /robot_description topic.
     #
     # Spawning from the topic looks tidier and is a real trap: a stale
     # robot_state_publisher left over from `make mock` also publishes
@@ -121,7 +120,7 @@ def generate_launch_description():
         package='ros_gz_sim',
         executable='create',
         arguments=['-string', robot_description_content,
-                   '-name', 'threevn_arm', '-z', '0.0'],
+                   '-name', model_name(profile), '-z', '0.0'],
         output='screen',
     )
 
@@ -158,13 +157,7 @@ def generate_launch_description():
 
     joint_state_broadcaster = spawner('joint_state_broadcaster')
 
-    return LaunchDescription([
-        DeclareLaunchArgument('profile', default_value='threevn_arm_v1'),
-        DeclareLaunchArgument('world', default_value='empty_bench'),
-        DeclareLaunchArgument(
-            'gui', default_value='false',
-            description='Show the Gazebo GUI (slow on software rendering)',
-        ),
+    return [
         gz_sim,
         robot_state_publisher,
         bridge,
@@ -184,4 +177,16 @@ def generate_launch_description():
                 on_exit=[spawner('arm_controller'), spawner('gripper_controller')],
             )
         ),
+    ]
+
+
+def generate_launch_description():
+    return LaunchDescription([
+        DeclareLaunchArgument('profile', default_value='threevn_arm_v1'),
+        DeclareLaunchArgument('world', default_value='empty_bench'),
+        DeclareLaunchArgument(
+            'gui', default_value='false',
+            description='Show the Gazebo GUI (slow on software rendering)',
+        ),
+        OpaqueFunction(function=_simulate),
     ])

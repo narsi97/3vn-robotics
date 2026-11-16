@@ -31,9 +31,9 @@ namespace
 {
 
 /// Map a numeric baud to its termios constant. Only rates the ESP32's
-/// USB CDC actually uses; an unknown value is refused rather than
-/// silently falling back, because a wrong baud produces garbage that
-/// looks like line noise.
+/// USB CDC and the Feetech servo bus actually use; an unknown value is
+/// refused rather than silently falling back, because a wrong baud
+/// produces garbage that looks like line noise.
 speed_t toSpeed(int baud)
 {
   switch (baud) {
@@ -44,7 +44,9 @@ speed_t toSpeed(int baud)
     case 115200: return B115200;
     case 230400: return B230400;
     case 460800: return B460800;
+    case 500000: return B500000;
     case 921600: return B921600;
+    case 1000000: return B1000000;   // the servo bus's default
     default: return 0;
   }
 }

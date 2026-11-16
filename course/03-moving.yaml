@@ -812,7 +812,7 @@ project:
             def run(self):
                 """Wave, checking every swing."""
                 self.step('home first', lambda: self.robot.home(),
-                          lambda: self.robot.at_pose(POSES['home']))
+                          lambda: self.robot.at_pose(self.robot.pose('home')))
                 for i in range(3):
                     for target in (0.6, -0.6):
                         self.step(

@@ -35,7 +35,14 @@ integration tests, and which did not previously exist.
 import math
 import tempfile
 
-from conftest import run as _run
+from conftest import (
+    joint_positions,
+    legal_targets,
+    REQUIRED_FRAMES,
+    ROBOT,
+    run as _run,
+    send_arm_goal,
+)
 import numpy as np
 import pytest
 
@@ -43,19 +50,11 @@ pytestmark = pytest.mark.ros
 
 STARTUP_TIMEOUT = 60.0
 
-#: Frames every later phase depends on.
-FRAMES = ['tool0', 'grasp_frame', 'camera_optical_frame', 'mount_plate_link']
+#: Frames every later phase depends on, for the robot under test.
+FRAMES = REQUIRED_FRAMES
 
-#: Joint poses to compare at. Zero plus a few asymmetric ones, because a
-#: symmetric pose can hide a swapped axis.
-POSES = [
-    {},
-    {'shoulder_lift_joint': math.pi / 2},
-    {'shoulder_pan_joint': 0.7, 'shoulder_lift_joint': 0.9,
-     'elbow_joint': -0.6, 'wrist_joint': 0.4},
-    {'shoulder_pan_joint': -1.2, 'shoulder_lift_joint': 0.3,
-     'elbow_joint': -1.1, 'wrist_joint': -0.8},
-]
+#: The frame the others are measured from.
+BASE = ROBOT['base_frame']
 
 
 def _tf_translation(parent, child, timeout=8):
@@ -78,7 +77,7 @@ def test_tf_resolves_every_required_frame(robot, frame):
     A frame that parses in the URDF but never reaches TF is a frame that
     does not exist as far as perception or planning are concerned.
     """
-    x, y, z = _tf_translation('base_link', frame)
+    x, y, z = _tf_translation(BASE, frame)
     assert all(math.isfinite(v) for v in (x, y, z))
 
 
@@ -103,34 +102,10 @@ def test_tf_tree_has_a_single_root(robot):
     assert len(roots) <= 1, f'TF has multiple roots: {roots}'
 
 
-def _current_joint_positions():
-    """Read the live joint positions from /joint_states."""
-    code, out = _run(['timeout', '6', 'ros2', 'topic', 'echo',
-                      '/joint_states', '--once'], timeout=15)
-    lines = out.splitlines()
-    n_idx = next(i for i, ln in enumerate(lines) if ln.startswith('name:'))
-    p_idx = next(i for i, ln in enumerate(lines) if ln.startswith('position:'))
-    names = [ln.strip('- ').strip() for ln in lines[n_idx + 1:p_idx]]
-    values = []
-    for ln in lines[p_idx + 1:]:
-        stripped = ln.strip()
-        if not stripped.startswith('- '):
-            break
-        values.append(float(stripped[2:]))
-    return dict(zip(names, values))
-
-
 def _home_the_arm():
     """Send the arm to its reference configuration and wait."""
     import time
-    joints = ('shoulder_pan_joint, shoulder_lift_joint, '
-              'elbow_joint, wrist_joint')
-    goal = (f'{{trajectory: {{joint_names: [{joints}], '
-            'points: [{positions: [0.0, 0.0, 0.0, 0.0], '
-            'time_from_start: {sec: 2}}]}}')
-    _run(['ros2', 'action', 'send_goal',
-          '/arm_controller/follow_joint_trajectory',
-          'control_msgs/action/FollowJointTrajectory', goal], timeout=60)
+    send_arm_goal(ROBOT['poses']['home'])
     time.sleep(1.5)
 
 
@@ -151,7 +126,19 @@ def test_tool0_matches_hand_computed_home_position(robot):
     Homes the arm explicitly. The robot fixture is session-scoped and
     shared, so an earlier test in another module may well have left it
     somewhere else - assuming a pristine pose is how this first failed.
+
+    Only the 3VN arm has a figure to compare against: its links are
+    lengths in a YAML that a person can add up. A foreign arm's
+    geometry is a chain of rotated offsets exported from CAD, and a
+    number "computed by hand" from that would in practice be copied
+    from the code under test. The KDL comparison below covers it
+    instead.
     """
+    if ROBOT['kind'] != 'arm':
+        pytest.skip(
+            f'{ROBOT["profile"]}: no hand-computed home position exists '
+            'for a vendor arm; its kinematics are checked against KDL in '
+            'test_our_kinematics_agrees_with_kdl')
     _home_the_arm()
     x, y, z = _tf_translation('base_link', 'tool0')
     assert x == pytest.approx(0.0, abs=1e-3)
@@ -167,30 +154,31 @@ def test_our_kinematics_agrees_with_kdl(robot):
     from the same description. Disagreement means one of them is wrong,
     and the test does not need to know which to be worth having.
 
-    Compared at whatever pose the robot is CURRENTLY in, read from
-    /joint_states, rather than at a pose this test arranges. That removes
-    any dependence on test ordering and makes the check stronger: it
-    holds across the workspace, not just at the one configuration where
-    most of the angles are zero and errors cancel.
+    Compared away from home, at a pose with every joint somewhere
+    different and none at zero. At the reference configuration most of
+    the angles are zero and a swapped axis or a wrong sign cancels out;
+    the session-scoped robot may well be sitting there when this runs,
+    so the test moves it rather than hoping.
     """
-    import pathlib
-
-    from ament_index_python.packages import get_package_share_directory
     from threevn_control.kinematics import parent_map, tool_position
-    import xacro
 
-    share = pathlib.Path(
-        get_package_share_directory('threevn_robot_description'))
-    urdf = xacro.process_file(
-        str(share / 'urdf' / 'threevn_arm.urdf.xacro'),
-        mappings={'params_file': str(share / 'config' / 'threevn_arm_v1.yaml'),
-                  'target': 'mock'}).toprettyxml(indent='  ')
-    parents = parent_map(urdf)
-    positions = _current_joint_positions()
+    target = legal_targets(scale=1.5)
+    code, out = send_arm_goal(target)
+    assert code == 0, out
+    import time
+    time.sleep(1.5)
+
+    parents = parent_map(ROBOT['urdf'])
+    positions = joint_positions()
+    moved = [j for j in ROBOT['arm_joints'] if abs(positions[j]) > 0.05]
+    assert moved == ROBOT['arm_joints'], (
+        f'only {moved} left zero; the comparison would be at a pose that '
+        'hides sign errors')
 
     for frame in FRAMES:
-        ours = np.array(tool_position(parents, positions, target=frame))
-        theirs = np.array(_tf_translation('base_link', frame))
+        ours = np.array(tool_position(parents, positions, target=frame,
+                                      base=BASE))
+        theirs = np.array(_tf_translation(BASE, frame))
         assert np.allclose(ours, theirs, atol=1e-3), (
             f'{frame} at {positions}: kinematics says {np.round(ours, 4)}, '
             f'TF says {np.round(theirs, 4)}'

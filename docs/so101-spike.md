@@ -5,6 +5,10 @@ make so101-fetch     # once: pulls the Apache-2.0 description into vendor/
 make so101           # spawns it in Gazebo under OUR controllers
 ```
 
+> This page records the spike as it was run. Its one failure has since
+> been fixed, and the spike's own launch file is gone: the SO-101 is now
+> a profile, described on [its own page](so101.md). What is below is why.
+
 ## The question
 
 The architecture's central claim is that the application does not know
@@ -84,6 +88,18 @@ annulus that is our only table-height reach should open up.
 
 None of that is verified here. This spike tested the software seam, not
 the arm's workspace.
+
+## What happened next
+
+The constant moved. Named poses are in each robot's profile, the
+description carries them, and the client reads them from the robot it
+is attached to. `make scenario NAME=all` passes on the SO-101, on mock
+and in Gazebo.
+
+Making that true found two more things this spike could not, because it
+stopped at `home()`: upstream's collision meshes run the simulator at an
+eighth of real time, and one scenario drove the longer arm into the
+bench. Both are on [the SO-101 page](so101.md).
 
 ## What this does not say
 

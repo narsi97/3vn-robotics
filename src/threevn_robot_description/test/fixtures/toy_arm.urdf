@@ -1,0 +1,85 @@
+<?xml version="1.0"?>
+<!--
+  A stand-in for "somebody else's robot": two arm joints and a jaw, one
+  mesh, placeholder limits. Written for the overlay tests, so they can
+  run without fetching anything. It has the properties of a vendor URDF
+  that the overlay exists to deal with: no world link, a mesh path
+  relative to this file, and effort/velocity limits nobody measured.
+-->
+<robot name="toy_as_shipped">
+  <link name="base_link">
+    <inertial>
+      <mass value="0.2"/>
+      <inertia ixx="1e-4" ixy="0" ixz="0" iyy="1e-4" iyz="0" izz="1e-4"/>
+    </inertial>
+  </link>
+  <link name="link_a">
+    <inertial>
+      <mass value="0.1"/>
+      <inertia ixx="1e-4" ixy="0" ixz="0" iyy="1e-4" iyz="0" izz="1e-4"/>
+    </inertial>
+    <visual>
+      <origin xyz="0 0 0.5" rpy="0 0 1.5708"/>
+      <geometry><mesh filename="assets/toy_link.stl"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.5" rpy="0 0 1.5708"/>
+      <geometry><mesh filename="assets/toy_link.stl"/></geometry>
+    </collision>
+  </link>
+  <link name="link_b">
+    <inertial>
+      <mass value="0.1"/>
+      <inertia ixx="1e-4" ixy="0" ixz="0" iyy="1e-4" iyz="0" izz="1e-4"/>
+    </inertial>
+    <collision>
+      <geometry><mesh filename="assets/toy_link.stl"/></geometry>
+    </collision>
+  </link>
+  <link name="jaw">
+    <inertial>
+      <mass value="0.01"/>
+      <inertia ixx="1e-6" ixy="0" ixz="0" iyy="1e-6" iyz="0" izz="1e-6"/>
+    </inertial>
+  </link>
+  <link name="tip"/>
+
+  <joint name="j_a" type="revolute">
+    <origin xyz="0 0 0.05" rpy="0 0 0"/>
+    <parent link="base_link"/>
+    <child link="link_a"/>
+    <axis xyz="0 0 1"/>
+    <limit effort="10" velocity="10" lower="-1.0" upper="1.0"/>
+  </joint>
+  <joint name="j_b" type="revolute">
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <parent link="link_a"/>
+    <child link="link_b"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="10" velocity="10" lower="-0.5" upper="1.5"/>
+  </joint>
+  <joint name="j_jaw" type="revolute">
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+    <parent link="link_b"/>
+    <child link="jaw"/>
+    <axis xyz="0 1 0"/>
+    <limit effort="10" velocity="10" lower="-0.1" upper="0.8"/>
+  </joint>
+  <!-- ROS 1 leftovers, as upstream ships them. They contain <joint>
+       elements that are references, not joints. -->
+  <transmission name="j_a_trans">
+    <type>transmission_interface/SimpleTransmission</type>
+    <joint name="j_a">
+      <hardwareInterface>hardware_interface/PositionJointInterface</hardwareInterface>
+    </joint>
+    <actuator name="motor1">
+      <mechanicalReduction>1</mechanicalReduction>
+    </actuator>
+  </transmission>
+
+  <joint name="tip_joint" type="fixed">
+    <origin xyz="0 0 0.12" rpy="0 0 0"/>
+    <parent link="link_b"/>
+    <child link="tip"/>
+  </joint>
+</robot>

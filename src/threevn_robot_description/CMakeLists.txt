@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.8)
 project(threevn_robot_description)
 
 find_package(ament_cmake REQUIRED)
+find_package(ament_cmake_python REQUIRED)
 
 # NOTE: we deliberately do NOT use xacro_add_files() to pre-expand the
 # description at build time. It does not work with xacro.load_yaml()
@@ -11,6 +12,17 @@ find_package(ament_cmake REQUIRED)
 install(
   DIRECTORY config urdf rviz launch meshes
   DESTINATION share/${PROJECT_NAME}
+)
+
+# describe.py: the one function every launch file and integration test
+# calls to turn a profile into a URDF. A Python module in a CMake
+# package, because it has to sit beside the xacro and the profiles it
+# reads -- and because bringup and sim both need it, and both already
+# depend on this package and on nothing else they share.
+ament_python_install_package(${PROJECT_NAME})
+install(
+  PROGRAMS scripts/describe
+  DESTINATION lib/${PROJECT_NAME}
 )
 
 if(BUILD_TESTING)
