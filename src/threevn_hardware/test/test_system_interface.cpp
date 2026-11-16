@@ -24,6 +24,8 @@
 
 #include <gmock/gmock.h>
 
+#include <cmath>
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
@@ -151,6 +153,13 @@ hardware_interface::HardwareInfo makeInfo()
 }
 
 /// Bring an interface up with a fake device attached.
+///
+/// It does what the resource manager does, in the same order: init, then
+/// export the handles, then configure and activate. The handles are the
+/// only way a controller ever sees this class, so the tests below read
+/// state and write commands through them rather than through anything
+/// the class exposes for testing. An interface that parses every frame
+/// correctly and never publishes a number passes every other check.
 struct Rig
 {
   Esp32SystemInterface interface;
@@ -166,15 +175,30 @@ struct Rig
     params.hardware_info = std::move(info);
     init_ok = interface.on_init(params) ==
       hardware_interface::CallbackReturn::SUCCESS;
+    if (init_ok) {
+      // Held for the life of the rig, as the resource manager holds them.
+      states = interface.on_export_state_interfaces();
+      commands = interface.on_export_command_interfaces();
+    }
+  }
+
+  bool activate()
+  {
+    return interface.on_activate(rclcpp_lifecycle::State()) ==
+           hardware_interface::CallbackReturn::SUCCESS;
+  }
+
+  bool deactivate()
+  {
+    return interface.on_deactivate(rclcpp_lifecycle::State()) ==
+           hardware_interface::CallbackReturn::SUCCESS;
   }
 
   bool configureAndActivate()
   {
     const rclcpp_lifecycle::State unconfigured;
     return interface.on_configure(unconfigured) ==
-           hardware_interface::CallbackReturn::SUCCESS &&
-           interface.on_activate(unconfigured) ==
-           hardware_interface::CallbackReturn::SUCCESS;
+           hardware_interface::CallbackReturn::SUCCESS && activate();
   }
 
   hardware_interface::return_type cycle()
@@ -186,7 +210,34 @@ struct Rig
     return r;
   }
 
+  /// What a controller reads: "<joint>/position" or "<joint>/velocity".
+  double state(const std::string & joint, const std::string & what = "position")
+  {
+    return interface.get_state<double>(joint + "/" + what);
+  }
+
+  /// What a controller writes.
+  void command(const std::string & joint, double value)
+  {
+    interface.set_command(joint + "/position", value);
+  }
+
+  /// What the command handle currently holds.
+  double commanded(const std::string & joint)
+  {
+    return interface.get_command<double>(joint + "/position");
+  }
+
+  /// The position the most recent command frame carried for one joint.
+  int32_t lastSent(proto::JointIndex joint)
+  {
+    const auto sent = fake->sentCommands();
+    return sent.empty() ? -1 : sent.back().position_micro[joint];
+  }
+
   bool init_ok = false;
+  std::vector<hardware_interface::StateInterface::ConstSharedPtr> states;
+  std::vector<hardware_interface::CommandInterface::SharedPtr> commands;
 };
 
 }  // namespace
@@ -220,6 +271,17 @@ TEST(Init, RefusesAnUnimplementedTransport)
   EXPECT_FALSE(rig.init_ok);
 }
 
+TEST(Init, RefusesAJointWithoutTheStateInterfacesItPublishes)
+{
+  // read() publishes a position and a velocity for every joint. A
+  // description that leaves one out has no handle to publish into, and
+  // finding that out on the first control cycle is too late.
+  auto info = makeInfo();
+  info.joints[proto::kWrist].state_interfaces.pop_back();   // velocity
+  Rig rig(info);
+  EXPECT_FALSE(rig.init_ok);
+}
+
 TEST(Configure, FailsLoudlyWhenTheDeviceCannotBeOpened)
 {
   Rig rig;
@@ -247,6 +309,72 @@ TEST(Read, AppliesPositionsFromAStateFrame)
   EXPECT_EQ(rig.cycle(), hardware_interface::return_type::OK);
   EXPECT_EQ(rig.interface.framesReceived(), 1u);
   EXPECT_EQ(rig.interface.deviceStatus(), proto::kStatusEnabled);
+}
+
+TEST(Read, PublishesPositionsThroughTheStateHandles)
+{
+  // The handle is where /joint_states comes from. Decoding a frame into
+  // a private member is not the same thing as reporting it.
+  Rig rig;
+  ASSERT_TRUE(rig.init_ok);
+  ASSERT_TRUE(rig.configureAndActivate());
+
+  proto::StatePayload state;
+  state.position_micro[proto::kShoulderPan] = proto::toMicro(0.4);
+  state.position_micro[proto::kElbow] = proto::toMicro(-1.2);
+  state.position_micro[proto::kGripper] = proto::toMicro(0.012);
+  rig.fake->queueState(state);
+  ASSERT_EQ(rig.cycle(), hardware_interface::return_type::OK);
+
+  EXPECT_NEAR(rig.state("shoulder_pan_joint"), 0.4, 1e-9);
+  EXPECT_NEAR(rig.state("shoulder_lift_joint"), 0.0, 1e-9);
+  EXPECT_NEAR(rig.state("elbow_joint"), -1.2, 1e-9);
+  EXPECT_NEAR(rig.state("wrist_joint"), 0.0, 1e-9);
+  EXPECT_NEAR(rig.state("gripper_left_finger_joint"), 0.012, 1e-9);
+}
+
+TEST(Read, PublishesVelocityDifferentiatedFromPosition)
+{
+  Rig rig;
+  ASSERT_TRUE(rig.init_ok);
+  ASSERT_TRUE(rig.configureAndActivate());
+
+  proto::StatePayload state;
+  state.position_micro[proto::kElbow] = proto::toMicro(0.10);
+  rig.fake->queueState(state);
+  rig.cycle();
+  EXPECT_NEAR(rig.state("elbow_joint", "velocity"), 0.0, 1e-9)
+    << "one sample is not a velocity";
+
+  // 0.02 rad further on, one 20 ms cycle later.
+  state.position_micro[proto::kElbow] = proto::toMicro(0.12);
+  rig.fake->queueState(state);
+  rig.cycle();
+
+  EXPECT_NEAR(rig.state("elbow_joint", "velocity"), 1.0, 1e-6);
+  EXPECT_NEAR(rig.state("wrist_joint", "velocity"), 0.0, 1e-9);
+}
+
+TEST(Read, ReportsNoPositionUntilTheDeviceSpeaks)
+{
+  // The real description gives every position state an initial_value,
+  // which is what the mock target starts from. Here it would be a pose
+  // nobody measured, and a controller would plan from it.
+  auto info = makeInfo();
+  info.joints[proto::kShoulderLift].state_interfaces[0].initial_value = "0.5";
+  Rig rig(info);
+  ASSERT_TRUE(rig.init_ok);
+  ASSERT_TRUE(rig.configureAndActivate());
+  rig.cycle();
+
+  EXPECT_TRUE(std::isnan(rig.state("shoulder_lift_joint")));
+
+  proto::StatePayload state;
+  state.position_micro[proto::kShoulderLift] = proto::toMicro(0.85);
+  rig.fake->queueState(state);
+  rig.cycle();
+
+  EXPECT_NEAR(rig.state("shoulder_lift_joint"), 0.85, 1e-9);
 }
 
 TEST(Read, DeclaresTheLinkLostAfterSustainedSilence)
@@ -341,6 +469,156 @@ TEST(Write, HoldsMeasuredPositionBeforeAnyCommandExists)
   EXPECT_EQ(
     commands.back().position_micro[proto::kShoulderLift], proto::toMicro(0.85))
     << "the first command should hold where the arm already is";
+}
+
+TEST(Write, SendsWhatTheControllerCommanded)
+{
+  // The other half of the exchange: a controller writes a position into
+  // the command handle, and that is the number the servo must be sent.
+  Rig rig;
+  ASSERT_TRUE(rig.init_ok);
+  ASSERT_TRUE(rig.configureAndActivate());
+
+  proto::StatePayload state;
+  state.position_micro[proto::kShoulderPan] = proto::toMicro(0.4);
+  state.position_micro[proto::kElbow] = proto::toMicro(-0.3);
+  rig.fake->queueState(state);
+  rig.cycle();
+
+  rig.command("shoulder_pan_joint", 0.9);
+  rig.fake->queueState(state);
+  rig.cycle();
+
+  EXPECT_EQ(rig.lastSent(proto::kShoulderPan), proto::toMicro(0.9));
+  EXPECT_EQ(rig.lastSent(proto::kElbow), proto::toMicro(-0.3))
+    << "a joint nobody commanded stays where it was measured";
+}
+
+TEST(Write, HoldsMeasuredPositionWhenACommandIsNotFinite)
+{
+  // NaN is how ros2_control says "no command". Infinity is not a
+  // position either, and toMicro() would saturate it to the far end of
+  // an int32. Neither may reach a servo.
+  Rig rig;
+  ASSERT_TRUE(rig.init_ok);
+  ASSERT_TRUE(rig.configureAndActivate());
+
+  proto::StatePayload state;
+  state.position_micro[proto::kElbow] = proto::toMicro(0.33);
+  state.position_micro[proto::kWrist] = proto::toMicro(-0.2);
+  rig.fake->queueState(state);
+  rig.cycle();
+
+  rig.command("elbow_joint", std::numeric_limits<double>::quiet_NaN());
+  rig.command("wrist_joint", std::numeric_limits<double>::infinity());
+  rig.fake->queueState(state);
+  rig.cycle();
+
+  EXPECT_EQ(rig.lastSent(proto::kElbow), proto::toMicro(0.33));
+  EXPECT_EQ(rig.lastSent(proto::kWrist), proto::toMicro(-0.2));
+}
+
+// ---------------------------------------------------------- activate --
+
+TEST(Activate, SeedsTheCommandWithTheMeasuredPosition)
+{
+  // A trajectory controller that finds finite numbers in the command
+  // handles when it activates starts its first trajectory from them. So
+  // they should say where the arm is, not nothing and not zero.
+  Rig rig;
+  ASSERT_TRUE(rig.init_ok);
+  ASSERT_TRUE(rig.configureAndActivate());
+  EXPECT_TRUE(std::isnan(rig.commanded("shoulder_lift_joint")))
+    << "nothing has been measured yet, so there is nothing to seed with";
+
+  proto::StatePayload state;
+  state.position_micro[proto::kShoulderLift] = proto::toMicro(0.85);
+  rig.fake->queueState(state);
+  rig.cycle();
+
+  EXPECT_NEAR(rig.commanded("shoulder_lift_joint"), 0.85, 1e-9);
+  EXPECT_NEAR(rig.commanded("elbow_joint"), 0.0, 1e-9);
+}
+
+TEST(Activate, SeedsOnceAndThenLeavesTheCommandAlone)
+{
+  // The seed is a latch, not a follower. Re-seeding every cycle would
+  // have the arm chase its own measurement, and overwrite a controller.
+  Rig rig;
+  ASSERT_TRUE(rig.init_ok);
+  ASSERT_TRUE(rig.configureAndActivate());
+
+  proto::StatePayload state;
+  state.position_micro[proto::kElbow] = proto::toMicro(0.20);
+  rig.fake->queueState(state);
+  rig.cycle();
+
+  state.position_micro[proto::kElbow] = proto::toMicro(0.18);
+  rig.fake->queueState(state);
+  rig.cycle();
+
+  EXPECT_NEAR(rig.commanded("elbow_joint"), 0.20, 1e-9);
+  EXPECT_EQ(rig.lastSent(proto::kElbow), proto::toMicro(0.20));
+}
+
+TEST(Activate, KeepsACommandThatArrivedBeforeTheFirstStateFrame)
+{
+  Rig rig;
+  ASSERT_TRUE(rig.init_ok);
+  ASSERT_TRUE(rig.configureAndActivate());
+
+  rig.command("wrist_joint", 0.3);
+
+  proto::StatePayload state;
+  state.position_micro[proto::kWrist] = proto::toMicro(0.1);
+  state.position_micro[proto::kElbow] = proto::toMicro(0.7);
+  rig.fake->queueState(state);
+  rig.cycle();
+
+  EXPECT_NEAR(rig.commanded("wrist_joint"), 0.3, 1e-9);
+  EXPECT_EQ(rig.lastSent(proto::kWrist), proto::toMicro(0.3));
+  EXPECT_NEAR(rig.commanded("elbow_joint"), 0.7, 1e-9)
+    << "the joints nobody commanded are still seeded";
+}
+
+TEST(Activate, ForgetsACommandLeftFromBeforeDeactivation)
+{
+  // Deactivating releases torque, and a limp arm sags or gets moved by
+  // hand. The command handle still holds the last pose a controller
+  // asked for. Sending that the moment torque returns would throw the
+  // arm back to it.
+  Rig rig;
+  ASSERT_TRUE(rig.init_ok);
+  ASSERT_TRUE(rig.configureAndActivate());
+
+  proto::StatePayload state;
+  state.position_micro[proto::kElbow] = proto::toMicro(0.2);
+  rig.fake->queueState(state);
+  rig.cycle();
+
+  // Commanded to 1.0, and deactivated when it had got as far as 0.6.
+  rig.command("elbow_joint", 1.0);
+  state.position_micro[proto::kElbow] = proto::toMicro(0.6);
+  rig.fake->queueState(state);
+  rig.cycle();
+  ASSERT_EQ(rig.lastSent(proto::kElbow), proto::toMicro(1.0));
+  ASSERT_TRUE(rig.deactivate());
+
+  ASSERT_TRUE(rig.activate());
+  EXPECT_TRUE(std::isnan(rig.commanded("elbow_joint")));
+
+  // Before the device has spoken again: hold the last measurement.
+  rig.cycle();
+  EXPECT_EQ(rig.lastSent(proto::kElbow), proto::toMicro(0.6))
+    << "the stale command must not be sent";
+
+  // It was moved by hand while limp, and now reports where it is.
+  state.position_micro[proto::kElbow] = proto::toMicro(-0.5);
+  rig.fake->queueState(state);
+  rig.cycle();
+
+  EXPECT_EQ(rig.lastSent(proto::kElbow), proto::toMicro(-0.5));
+  EXPECT_NEAR(rig.commanded("elbow_joint"), -0.5, 1e-9);
 }
 
 TEST(Write, SendsACommandEveryCycleAsTheHeartbeat)
