@@ -245,6 +245,8 @@ In the order that unblocks the most lessons:
    one picture across mock, Gazebo and the servo bus. Checked on all
    three with the SO-101 and on mock with the 3VN arm. The first
    recording script is `recordings/pilot-one-command-three-backends.md`.
+   The second covers stage 1 and needs no robot:
+   `recordings/stage-1-your-environment.md`.
 4. **The SO-101 tiers in CI**: fetch the pinned description, run
    `test-ros` and `test-sim` for both profiles. `make test-ros` is not
    in CI for either robot today.
