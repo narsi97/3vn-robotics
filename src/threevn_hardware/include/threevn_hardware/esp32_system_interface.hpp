@@ -116,11 +116,24 @@ private:
   /// time, so nothing is ever actually throttled.
   rclcpp::Clock clock_{RCL_STEADY_TIME};
 
-  std::vector<double> commands_;
+  /// The last state the device reported, in protocol joint order.
+  ///
+  /// These are this class's working copy, not what ros2_control sees.
+  /// Controllers and /joint_states read the framework's handles, so
+  /// read() copies these out with set_state(). Commands have no copy
+  /// here at all: write() takes each target straight from the command
+  /// handle with get_command(), the one place a controller writes it.
   std::vector<double> positions_;
   std::vector<double> velocities_;
   /// Positions from the previous cycle, for differentiating velocity.
   std::vector<double> previous_positions_;
+
+  /// Handle names, "<joint>/position" and "<joint>/velocity", in protocol
+  /// joint order. Built once in on_init so the control loop does not
+  /// assemble strings. The position name serves both the state handle
+  /// and the command handle.
+  std::vector<std::string> position_names_;
+  std::vector<std::string> velocity_names_;
 
   std::string device_;
   int baud_ = 921600;
@@ -134,6 +147,9 @@ private:
   uint32_t stale_cycles_ = 0;
   bool link_lost_ = false;
   bool activated_ = false;
+  /// Set on activation, cleared once read() has seeded the command
+  /// handles from the first state frame that follows it.
+  bool seed_commands_ = false;
 };
 
 }  // namespace hardware

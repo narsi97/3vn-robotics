@@ -7,7 +7,15 @@
 #
 # The gate is a GitHub Environment named `robot`, configured with a
 # required reviewer. Approval is a human looking at a specific image
-# digest and a specific robot and saying yes.
+# digest and a specific robot and saying yes. Every credential that can
+# reach the robot is an ENVIRONMENT secret on `robot`, so it is released
+# only to a job that has passed that gate - never a repository secret,
+# which every workflow on every branch could read.
+#
+# Inputs are data, never code. Every `${{ inputs.* }}` below is in an
+# `env:` block or an `if:` that GitHub evaluates; no script has an
+# expression pasted into it, and nothing is spliced into the script that
+# runs on the robot. The audit-the-gate lesson walks through why.
 #
 # HONEST STATUS: no physical arm exists. This workflow is the mechanism,
 # not a thing that has ever run against hardware. It will fail at the SSH
@@ -36,6 +44,9 @@ on:
 permissions:
   contents: read
   packages: read
+  # Read the run's approvals, so the record names the reviewer rather
+  # than whoever started the run.
+  actions: read
 
 jobs:
   preflight:
@@ -43,6 +54,9 @@ jobs:
     runs-on: ubuntu-24.04
     outputs:
       digest: ${{ steps.resolve.outputs.digest }}
+    env:
+      IMAGE_TAG: ${{ inputs.image_tag }}
+      ROBOT_ID: ${{ inputs.robot_id }}
     steps:
       - name: The confirmation must be typed
         if: inputs.confirm != 'DEPLOY'
@@ -50,6 +64,22 @@ jobs:
           echo "::error::confirmation not given."
           echo "Type DEPLOY to acknowledge that a physical arm may move."
           exit 1
+
+      # The values already arrive as data. This makes them boring as well:
+      # a robot id or a tag has no business containing a quote, a space or
+      # a semicolon, and refusing them here costs nothing.
+      - name: Inputs must be plain names
+        run: |
+          set -euo pipefail
+          plain='^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'
+          if ! [[ "$IMAGE_TAG" =~ $plain ]]; then
+            echo "::error::image_tag must match $plain"
+            exit 1
+          fi
+          if ! [[ "$ROBOT_ID" =~ $plain ]]; then
+            echo "::error::robot_id must match $plain"
+            exit 1
+          fi
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -62,7 +92,7 @@ jobs:
         id: resolve
         run: |
           set -euo pipefail
-          ref="ghcr.io/${{ github.repository }}:${{ inputs.image_tag }}"
+          ref="ghcr.io/${GITHUB_REPOSITORY}:${IMAGE_TAG}"
           if ! docker manifest inspect "$ref" > /tmp/m.json 2>/dev/null; then
             echo "::error::$ref is not in the registry"
             exit 1
@@ -73,6 +103,10 @@ jobs:
           digest=$(docker manifest inspect -v "$ref" \
                    | jq -r 'if type=="array" then .[0].Descriptor.digest
                             else .Descriptor.digest end')
+          if ! [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "::error::could not resolve $ref to a sha256 digest"
+            exit 1
+          fi
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
           {
@@ -80,8 +114,8 @@ jobs:
             echo ""
             echo "| | |"
             echo "|---|---|"
-            echo "| robot | \`${{ inputs.robot_id }}\` |"
-            echo "| tag | \`${{ inputs.image_tag }}\` |"
+            echo "| robot | \`$ROBOT_ID\` |"
+            echo "| tag | \`$IMAGE_TAG\` |"
             echo "| digest | \`$digest\` |"
             echo ""
             echo "Awaiting approval. The arm may move when this proceeds."
@@ -98,17 +132,21 @@ jobs:
     runs-on: ubuntu-24.04
     needs: preflight
     # THE GATE. This environment requires a reviewer; the job waits here
-    # until a human approves it. Configure required reviewers under
-    # Settings > Environments > robot.
+    # until a human approves it. Configure required reviewers, and a
+    # deployment-branch rule for `main`, under Settings > Environments >
+    # robot. The ROBOT_* secrets below live there too.
     environment:
       name: robot
       url: https://github.com/${{ github.repository }}
+    env:
+      ROBOT_ID: ${{ inputs.robot_id }}
+      DIGEST: ${{ needs.preflight.outputs.digest }}
     steps:
       - name: Deploy
         env:
-          DIGEST: ${{ needs.preflight.outputs.digest }}
           ROBOT_HOST: ${{ secrets.ROBOT_HOST }}
           ROBOT_USER: ${{ secrets.ROBOT_USER }}
+          ROBOT_HOST_KEY: ${{ secrets.ROBOT_HOST_KEY }}
           SSH_KEY: ${{ secrets.ROBOT_SSH_KEY }}
         run: |
           set -euo pipefail
@@ -122,40 +160,65 @@ jobs:
             echo "reports success against nothing is worse than one that"
             echo "says it cannot proceed."
             echo ""
-            echo "When an arm exists, set these repository secrets:"
-            echo "  ROBOT_HOST     hostname or IP on the robot's network"
-            echo "  ROBOT_USER     ssh user"
-            echo "  ROBOT_SSH_KEY  private key for that user"
+            echo "When an arm exists, set these as ENVIRONMENT secrets on"
+            echo "the 'robot' environment (Settings > Environments > robot),"
+            echo "not as repository secrets:"
+            echo "  ROBOT_HOST      hostname or IP on the robot's network"
+            echo "  ROBOT_USER      ssh user"
+            echo "  ROBOT_SSH_KEY   private key for that user"
+            echo "  ROBOT_HOST_KEY  one known_hosts line: ROBOT_HOST, a space,"
+            echo "                  then /etc/ssh/ssh_host_ed25519_key.pub"
+            echo "                  as read ON the robot, not over the network"
+            exit 1
+          fi
+
+          if [ -z "${ROBOT_HOST_KEY:-}" ]; then
+            echo "::error::ROBOT_HOST_KEY is not set."
+            echo "Refusing to trust whatever answers at ROBOT_HOST. Store the"
+            echo "robot's host key as an environment secret on 'robot'."
             exit 1
           fi
 
           install -m 600 /dev/null /tmp/deploy_key
-          printf '%s' "$SSH_KEY" > /tmp/deploy_key
+          printf '%s\n' "$SSH_KEY" > /tmp/deploy_key
+          install -m 600 /dev/null /tmp/known_hosts
+          printf '%s\n' "$ROBOT_HOST_KEY" > /tmp/known_hosts
+
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY}@${DIGEST}"
 
           # Pull FIRST, restart second. Pulling into a stopped robot means
           # a slow or failed download leaves it down; this way the running
           # container is only replaced once its successor is on disk.
-          ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new \
-              "$ROBOT_USER@$ROBOT_HOST" bash -s <<SSH
+          #
+          # The heredoc is QUOTED ('SSH'), so this shell expands nothing in
+          # it: the remote script is exactly the text below. The values
+          # cross as positional arguments, each quoted with printf %q so the
+          # remote shell reads them as single words.
+          ssh -i /tmp/deploy_key \
+              -o UserKnownHostsFile=/tmp/known_hosts \
+              -o StrictHostKeyChecking=yes \
+              "$ROBOT_USER@$ROBOT_HOST" \
+              bash -s -- "$(printf %q "$IMAGE")" "$(printf %q "$ROBOT_ID")" <<'SSH'
             set -euo pipefail
-            IMAGE="ghcr.io/${{ github.repository }}@${DIGEST}"
+            IMAGE="$1"
+            ROBOT_ID="$2"
 
-            echo "pulling \$IMAGE"
-            docker pull "\$IMAGE"
+            echo "pulling $IMAGE"
+            docker pull "$IMAGE"
 
             docker rm -f threevn-runtime 2>/dev/null || true
-            docker run -d --name threevn-runtime \\
-              --restart unless-stopped \\
-              --device /dev/ttyUSB0 \\
-              -p 127.0.0.1:8107:8107 \\
-              -e THREEVN_ROBOT_ID='${{ inputs.robot_id }}' \\
-              -e THREEVN_TARGET=esp32 \\
-              "\$IMAGE"
+            docker run -d --name threevn-runtime \
+              --restart unless-stopped \
+              --device /dev/ttyUSB0 \
+              -p 127.0.0.1:8107:8107 \
+              -e THREEVN_ROBOT_ID="$ROBOT_ID" \
+              -e THREEVN_TARGET=esp32 \
+              "$IMAGE"
 
             # Readiness, not liveness. /healthz only says the process
             # answers; /readyz says the ROBOT is usable, which is the
             # question a deploy needs answered.
-            for i in \$(seq 1 30); do
+            for i in $(seq 1 30); do
               if curl -fsS http://127.0.0.1:8107/readyz >/dev/null 2>&1; then
                 echo "robot is ready"
                 curl -s http://127.0.0.1:8107/api/version
@@ -172,14 +235,24 @@ jobs:
 
       - name: Record the deployment
         if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULT: ${{ job.status }}
         run: |
+          # github.actor is whoever STARTED the run. The reviewer is recorded
+          # on the run itself, so ask for it rather than assume they match.
+          approver=$(gh api \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/approvals" \
+            --jq '[.[] | select(.state == "approved") | .user.login] | unique | join(", ")' \
+            2>/dev/null) || approver=""
           {
             echo "### Deployment"
             echo ""
             echo "| | |"
             echo "|---|---|"
-            echo "| robot | \`${{ inputs.robot_id }}\` |"
-            echo "| digest | \`${{ needs.preflight.outputs.digest }}\` |"
-            echo "| approved by | @${{ github.actor }} |"
-            echo "| result | ${{ job.status }} |"
+            echo "| robot | \`$ROBOT_ID\` |"
+            echo "| digest | \`$DIGEST\` |"
+            echo "| approved by | ${approver:-(no approval recorded)} |"
+            echo "| started by | $GITHUB_ACTOR |"
+            echo "| result | $RESULT |"
           } >> "$GITHUB_STEP_SUMMARY"

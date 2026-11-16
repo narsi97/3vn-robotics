@@ -72,12 +72,13 @@ shows the finished half teaches the wrong thing about engineering.
 
 ## Three constraints, all from where it is served
 
-It sits behind the shared 3VNSYSTEMS Caddy on an unlisted path, which
-dictates more than it looks like:
+It sits behind the shared 3VNSYSTEMS Caddy, at a public path,
+`3vnsystems.com/robotics/`, which dictates more than it looks like:
 
-- **Every link is relative.** The site lives under a secret path today
-  and may live at a bare domain tomorrow. Per
-  `projects-for-businesses/README.md`, that move is meant to be a config
+- **Every link is relative.** The site lives under `/robotics/` today,
+  an older unlisted path still serves it for links shared before it went
+  public, and it may live at a bare domain tomorrow. Per
+  `projects-for-businesses/README.md`, each move is meant to be a config
   change rather than a rewrite, so nothing may hardcode the prefix.
 - **No JavaScript at all.** The enforced CSP is
   `script-src 'self'` with no `'unsafe-inline'`, so an inline `<script>`
@@ -87,9 +88,10 @@ dictates more than it looks like:
   `X-Robots-Tag` header from nginx. One of the three may be ignored by a
   given crawler; all three being ignored is unlikely.
 
-**This is obscurity, not security.** Anyone given the link can pass it
-on. It keeps an unfinished course out of search results; it is not a
-login, and nothing behind it is secret.
+**Public, but not yet indexed.** Since 2026-11-15 the course and its
+repository are public and free. The noindex keeps an unfinished course
+out of search results until it is ready to be found; it hides nothing,
+and nothing on the site is secret.
 
 ## Deploying it
 

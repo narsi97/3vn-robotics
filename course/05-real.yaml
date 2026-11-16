@@ -638,9 +638,11 @@ lessons:
 
       Deployment is deliberately asymmetric. The **robot** pulls a published
       image, because it is remote and rollback has to be a pull. The small
-      **fleet view** on the shared server is built there, from a checkout,
-      like every other product on that box — a second deployment model there
-      would buy nothing.
+      **fleet view** is designed to be built on the shared server from a
+      checkout, like every other product on that box, because a second
+      deployment model there would buy nothing. That half is a design, not a
+      running service: the fleet view has not been deployed anywhere yet, and
+      `deploy/README.md` is the procedure for when it is.
 
       And nothing reaches into the robot. Robots sit behind home routers
       where inbound connections do not work — but the real reason is that a
@@ -967,7 +969,7 @@ lessons:
       | 3000 | Grafana, on the monitoring box | 127.0.0.1 | asks for a password that defaults to `admin` |
       | 4318 | the OTLP collector | every interface | accepts the metrics: no authenticator, no TLS |
       | fleet ingest | the fleet view's write endpoint | the internet | refuses: a bearer token, or 401 |
-      | fleet view | the page and its JSON | the internet | serves you anyway, behind an unlisted path |
+      | fleet view | the page and its JSON | the internet | serves you anyway, behind an unlisted path set on the server |
 
       **For people: loopback, plus a tunnel.** Everything a person looks at
       is bound to 127.0.0.1 and reached over SSH. `ssh -L
@@ -994,11 +996,15 @@ lessons:
       to put TLS in front before pointing a robot on the open internet at
       it. The robot can already send a bearer token (`THREEVN_OTLP_TOKEN`),
       but nothing on the other end checks it. And the fleet view's *read*
-      side relies on an unlisted path. That was obscurity, not access
-      control, and it ended when this repository went public, because the
-      path is in it. The comment beside it says the prefix can be rotated by
-      editing that one file. Rotating it before any deploy is now a
-      requirement.
+      side relies on an unlisted path. That is obscurity, not access
+      control, and the first path stopped being even obscure when this
+      repository went public, because it was written in the Caddy fragment.
+      It has been rotated: the fragment now reads the prefix from
+      `THREEVN_FLEET_PREFIX` on the server, and this repository holds no real
+      value. Deleting the old one from the file was not enough on its own,
+      because git history keeps it, so it is retired for good. The read side
+      is still unauthenticated, and anyone given the new link can pass it
+      on.
 
       The course site applies the same thinking to whole repositories. This
       repository is public, so its deploy lives in a private one, and
@@ -1047,9 +1053,16 @@ lessons:
           Two receiver endpoints on `0.0.0.0` and no `auth` anywhere. The only
           `tls` is on the exporter to VictoriaMetrics, inside one compose
           network.
-      - do: Find the fleet view's unlisted path in this public repository.
-        run: grep -n "fleet-" deploy/shared-vps/Caddyfile.fragment | head -3
-        expect: The path in the clear, a few lines below a comment telling you to treat it as a secret.
+      - do: Look for the fleet view's unlisted path in this public repository, then in its history.
+        run: |
+          grep -n 'FLEET_PREFIX' deploy/shared-vps/Caddyfile.fragment | head -3
+          git log --oneline -G 'fleet-[0-9a-f]{20}' -- deploy/shared-vps/Caddyfile.fragment
+        expect: >-
+          Comments naming `THREEVN_FLEET_PREFIX`, then the first route, which
+          uses `{$THREEVN_FLEET_PREFIX:...}`: a variable set on the server, not
+          a path. The history still shows the commit that wrote a real prefix
+          and the one that took it out, which is why it was rotated rather
+          than only deleted.
     checkpoint: >-
       You have your own copy of the table, filled in from `docker ps` and
       the compose files, with one sentence for each internet-facing row on
@@ -1105,12 +1118,13 @@ lessons:
           door. Failing closed turns a forgotten setting into refused reports,
           which is loud and harmless, instead of letting the internet write a
           robot's state.
-      - q: The fleet view's path was unlisted. Why is that no longer a control?
+      - q: The fleet view's first path was in the repository when it went public. Why was it rotated, not just deleted from the file?
         a: >-
-          The path is in the repository, and the repository is public.
-          Obscurity works only while the thing is unknown, and publishing the
-          source published it. Rotate the path, and give the read side real
-          access control if what it shows ever matters.
+          Deleting it changes the file but not the history, and the history
+          is public too. Obscurity works only while the thing is unknown, so
+          the old path is burned for good. A new one lives only on the server,
+          and if what the view shows ever matters, the read side needs real
+          access control rather than a better-hidden path.
     exercise:
       task: >-
         Make the collector check the token the robot already sends, with TLS
