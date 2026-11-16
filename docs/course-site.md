@@ -93,69 +93,30 @@ login, and nothing behind it is secret.
 
 ## Deploying it
 
-> The secret path is **not in this repository and must not be**. This
-> repository is private today, but it was public and may be again, and
-> anything committed stays in its history. Delivery Manager's path was
-> kept out of git for the same reason — see
-> `3vnsystems-infrastructure/ARCHITECTURE.md`.
+The image is built and deployed from **3vn-infra**, not from here:
+Actions → **Course site** → Run workflow in that repo
+(`.github/workflows/robotics-course.yml`), with a commit from this
+repo's main (blank means the tip of main).
 
-That file also says, and it is load bearing:
+That run checks this repo out, takes the newest commit at or before the
+one given that changed the site, and runs the same stages as every
+other product: scan, build `docker/Dockerfile.site`, push
+`ghcr.io/narsi97/robotics-course-site:sha-<commit>`, then deploy it to
+the shared host, health-checked and rolled back if it isn't healthy. A
+commit already in the registry is deployed as is, not rebuilt. **Going
+back** is the same button with the previous good commit.
 
-> Never copy a local infra file over the VPS one; you will delete live
-> config. Patch the VPS copies in place, and back them up first.
+Why there: this repository is public, and GitHub lets a private repo's
+reusable workflows be called only from private repos, so this repo
+can't call 3vn-infra's pipeline. It also means nothing in this public
+repo can reach a host. What runs here
+(`.github/workflows/course-site.yml`) is the check on every PR and
+merge that touches the site: `make course-check`, `make site`, and a
+`docker build` of the image that is never pushed. No secrets, so fork
+PRs are safe to run.
 
-So this is a patch, applied on the box, by hand. Three edits.
-
-**1. `docker/compose.prod.yml`** — add the service:
-
-```yaml
-  robotics-course:
-    build:
-      context: ${ROBOTICS_REPO_PATH}
-      dockerfile: docker/Dockerfile.site
-      args:
-        THREEVN_GIT_COMMIT: "${ROBOTICS_GIT_COMMIT:-unknown}"
-    image: threevn-robotics-course:local
-    restart: unless-stopped
-    expose:
-      - "80"
-```
-
-A few MB of nginx. It carries no ROS: the dev image is several GB and
-this box has 2 GB of RAM and about ten containers on it already, which
-is exactly why the site is a separate image.
-
-**2. `caddy/Caddyfile`** — add inside the `{$DOMAIN}` block, next to the
-other products:
-
-```
-	# --- 3vn-robotics course (unlisted) ---
-	handle_path /rc-<secret>/* {
-		reverse_proxy robotics-course:80
-	}
-```
-
-`handle_path` strips the prefix, which is what lets the site be built
-with relative links and know nothing about where it is mounted.
-
-**3. `deploy.sh`** — add the pull, alongside the others:
-
-```sh
-pull_if_tracked "${ROBOTICS_REPO_PATH}" "3vn-robotics"
-```
-
-and set `ROBOTICS_REPO_PATH` in the compose `.env` on the box.
-
-### Before any of that
-
-```bash
-cp caddy/Caddyfile caddy/Caddyfile.bak.$(date +%F)
-cp docker/compose.prod.yml docker/compose.prod.yml.bak.$(date +%F)
-```
-
-Then `docker compose -f docker/compose.prod.yml up -d --build robotics-course`
-and reload Caddy. Check the backup still contains Delivery Manager's
-path and the client-site paths before reloading — if it does not, stop.
+The service (`robotics-course-site` in 3vn-infra's
+`docker/compose.prod.yml`) and its Caddy route live in 3vn-infra too.
 
 ## What is NOT served
 
