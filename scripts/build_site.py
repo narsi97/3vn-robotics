@@ -30,6 +30,17 @@ the Makefile has no `foo`, or to read a doc that has been renamed, is a
 broken lesson that looks finished. Every error is reported at once, not
 the first: a curriculum with three problems should be fixed in one pass.
 
+Every lesson carries topic TAGS from the fixed list in course/tags.yaml.
+Each tag gets a page (tags/<slug>/index.html) listing every lesson that
+carries it, across the whole syllabus, and what to read alongside it.
+Those pages are the only ones below the site root; their links are
+written as if they were at the root and re-rooted on the way out.
+
+A lesson about something else can also MENTION a topic by quoting the
+one passage that touches it. The topic page links straight to that
+passage with a URL text fragment, and validation fails if the quote is
+no longer in the lesson.
+
 Three constraints come from where this is served -- behind the shared
 3VNSYSTEMS Caddy, on an unlisted path:
 
@@ -54,6 +65,7 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.parse
 
 import yaml
 
@@ -108,9 +120,17 @@ CURRICULUM = [
 #: a field some page renders as a hole.
 STAGE_FIELDS = ('id', 'number', 'kind', 'title', 'price', 'summary',
                 'outcomes', 'lessons', 'project')
-LESSON_FIELDS = ('id', 'title', 'minutes', 'objective', 'body', 'steps',
-                 'checkpoint')
+LESSON_FIELDS = ('id', 'title', 'tags', 'minutes', 'objective', 'body',
+                 'steps', 'checkpoint')
 PROJECT_FIELDS = ('title', 'minutes', 'brief', 'tasks', 'done_when')
+TAG_FIELDS = ('slug', 'label', 'description')
+
+#: The topic vocabulary, in course/ beside the stages but not one of them.
+TAGS_FILE = 'tags.yaml'
+
+#: How many "often studied alongside" lessons a topic page recommends,
+#: after every lesson its own lessons build on.
+RELATED_PICKS = 4
 
 STYLE = """
 :root {
@@ -257,6 +277,32 @@ ul.checklist li { padding-left: 28px; position: relative; margin: 8px 0; }
 ul.checklist li::before { content: "\\2610"; position: absolute; left: 2px;
                           color: var(--good); }
 table.syllabus td.m { white-space: nowrap; color: var(--dim); }
+
+/* --- topics --- */
+ul.tags { list-style: none; display: flex; flex-wrap: wrap; gap: 6px;
+          padding: 0; margin: 8px 0 0; }
+ul.tags li, .stage ul.tags li { margin: 0; }
+.tag { display: inline-block; font-size: 12.5px; line-height: 1.3;
+       padding: 3px 10px; border: 1px solid var(--line); border-radius: 999px;
+       background: var(--panel); color: var(--accent); text-decoration: none; }
+.tag:hover { border-color: var(--accent); }
+.tag.on { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+.tag .count { color: var(--dim); background: var(--line); border-radius: 999px;
+              font-size: 11px; padding: 0 6px; margin-left: 6px; }
+.objective + ul.tags { margin: -8px 0 18px; }
+.builds { color: var(--dim); font-size: 14.5px; margin: 0 0 18px; }
+ul.picks { list-style: none; padding: 0; margin: 0; }
+ul.picks > li { border-bottom: 1px solid var(--line); padding: 12px 2px; }
+ul.picks > li:last-child { border-bottom: 0; }
+ul.picks .title { font-weight: 600; }
+.why { color: var(--dim); font-size: 13.5px; display: block; margin-top: 2px; }
+.quote { display: block; margin-top: 6px; padding-left: 12px; font-size: 14.5px;
+         border-left: 3px solid var(--line); color: var(--ink); }
+h2.stage-head { font-size: 17px; }
+h2.stage-head a { color: var(--ink); text-decoration: none; }
+h2.stage-head a:hover { color: var(--accent); }
+h2.stage-head .n { color: var(--dim); font-size: 12px; letter-spacing: .1em;
+                   text-transform: uppercase; margin-right: 8px; }
 """
 
 PAGE = """<!DOCTYPE html>
@@ -270,7 +316,7 @@ PAGE = """<!DOCTYPE html>
 </head>
 <body>
 <header class="site"><div class="wrap">
-  <div class="brand"><a href="index.html">3VN Robotics</a><span class="badge">preview</span></div>
+  <div class="brand"><a href="{home}">3VN Robotics</a><span class="badge">preview</span></div>
   <div class="meta">{meta}</div>
 </div></header>
 <div class="wrap">
@@ -337,6 +383,20 @@ def rewrite_links(html):
     return re.sub(r'<a href="\.\./[^"]*">(.*?)</a>', r'\1', html)
 
 
+def rebase(html, prefix):
+    """
+    Re-root a page's relative links for a page `prefix` deep, e.g. '../../'.
+
+    Pages are written as if they all sat at the site root, so every helper
+    can say `lesson-x.html`. The topic pages sit two directories down;
+    this is what keeps that true for them without a second set of helpers.
+    Absolute URLs, scheme links and in-page anchors are left alone.
+    """
+    if not prefix:
+        return html
+    return re.sub(r'(\shref=")(?![a-z][a-z0-9+.-]*:|/|#)', r'\g<1>' + prefix, html)
+
+
 def doc_page(name):
     """Map a docs-relative path to the page it renders as."""
     path = pathlib.PurePosixPath(name)
@@ -385,7 +445,8 @@ def load_course(root):
     course = root / 'course'
     if not course.is_dir():
         return []
-    stages = [yaml.safe_load(f.read_text()) for f in sorted(course.glob('*.yaml'))]
+    stages = [yaml.safe_load(f.read_text()) for f in sorted(course.glob('*.yaml'))
+              if f.name != TAGS_FILE]
     number = 0
     for stage in stages:
         lessons = stage.get('lessons') or []
@@ -400,6 +461,22 @@ def load_course(root):
             sum(int(le.get('minutes') or 0) for le in lessons)
             + int((stage.get('project') or {}).get('minutes') or 0))
     return stages
+
+
+def load_tags(root):
+    """
+    Load the topic vocabulary from course/tags.yaml, in file order.
+
+    Returns None when the file is missing, which validation reports: a
+    lesson's tags mean nothing without the list they are checked against.
+    """
+    path = root / 'course' / TAGS_FILE
+    if not path.exists():
+        return None
+    data = yaml.safe_load(path.read_text()) or {}
+    if not isinstance(data, dict):
+        return []
+    return data.get('tags') or []
 
 
 def make_targets(root):
@@ -439,20 +516,53 @@ def doc_links(text):
             yield target
 
 
+def plain(text):
+    """
+    Markdown reduced to the words a reader sees, whitespace collapsed.
+
+    Good enough to find a quoted passage: drops emphasis and code marks
+    and keeps a link's text. Needs no renderer, so `--check` can use it.
+    """
+    text = re.sub(r'\[([^\]]*)\]\([^)]*\)', r'\1', str(text))
+    text = re.sub(r'\*+|`+', '', text)
+    return ' '.join(text.split())
+
+
+def lesson_text(lesson):
+    """Everything a lesson page shows in prose, as plain text."""
+    parts = [lesson.get('objective'), lesson.get('body'), lesson.get('checkpoint')]
+    for step in lesson.get('steps') or []:
+        if isinstance(step, dict):
+            parts += [step.get('do'), step.get('expect')]
+    for pit in lesson.get('pitfalls') or []:
+        parts += [pit.get('symptom'), pit.get('cause'), pit.get('fix')]
+    for concept in lesson.get('concepts') or []:
+        parts += [concept.get('term'), concept.get('meaning')]
+    for item in lesson.get('quiz') or []:
+        parts += [item.get('q'), item.get('a')]
+    exercise = lesson.get('exercise')
+    if isinstance(exercise, dict):
+        parts += [exercise.get('task'), exercise.get('hint'), exercise.get('answer')]
+    return plain(' '.join(str(part) for part in parts if part))
+
+
 # ------------------------------------------------------------- validation
 
-def validate(stages, root):
+def validate(stages, root, tags=None):
     """
     Return every problem with the curriculum, as a list of strings.
 
     Empty means valid. Checks the shape of each stage, lesson and project,
     and -- more usefully -- that what a lesson points at exists: Make
-    targets, docs, and the uniqueness of ids and glossary terms.
+    targets, docs, topic tags, the lessons it builds on, and the
+    uniqueness of ids and glossary terms.
     """
     errors = []
     docs = root / 'docs'
     targets = make_targets(root)
     seen_ids, seen_terms = {}, {}
+    order = {le.get('id'): le.get('index')
+             for st in stages for le in (st.get('lessons') or [])}
 
     def need(where, data, fields):
         for name in fields:
@@ -482,6 +592,23 @@ def validate(stages, root):
     if not stages:
         return ['course/: no stages found']
 
+    known, used = {}, set()
+    if tags is None:
+        errors.append(f'course/{TAGS_FILE}: missing -- every lesson needs tags from it')
+    for i, tag in enumerate(tags or [], 1):
+        if not isinstance(tag, dict):
+            errors.append(f'course/{TAGS_FILE}: entry {i} is not a slug/label/description')
+            continue
+        twhere = f'tag {tag.get("slug", i)}'
+        need(twhere, tag, TAG_FIELDS)
+        name = str(tag.get('slug', ''))
+        if name and not re.fullmatch(r'[a-z0-9]+(?:-[a-z0-9]+)*', name):
+            errors.append(f'{twhere}: a slug is lower-case letters, digits and hyphens '
+                          f'(it is part of a URL)')
+        if name in known:
+            errors.append(f'{twhere}: listed twice in course/{TAGS_FILE}')
+        known[name] = tag
+
     for expected, stage in enumerate(stages, 1):
         where = f'stage {stage.get("id", expected)}'
         need(where, stage, STAGE_FIELDS)
@@ -504,6 +631,51 @@ def validate(stages, root):
             seen_ids[lid] = stage.get('id')
             if not isinstance(lesson.get('minutes'), int) or lesson['minutes'] <= 0:
                 errors.append(f'{lwhere}: `minutes` must be a positive integer')
+
+            lesson_tags = lesson.get('tags') or []
+            if not isinstance(lesson_tags, list):
+                errors.append(f'{lwhere}: `tags` must be a list')
+                lesson_tags = []
+            for tag in lesson_tags:
+                if tags is not None and tag not in known:
+                    errors.append(f'{lwhere}: tag {tag!r} is not in course/{TAGS_FILE} '
+                                  f'(known: {", ".join(known)})')
+            if len(set(map(str, lesson_tags))) != len(lesson_tags):
+                errors.append(f'{lwhere}: lists the same tag twice')
+            used.update(map(str, lesson_tags))
+
+            builds_on = lesson.get('builds_on') or []
+            if not isinstance(builds_on, list):
+                errors.append(f'{lwhere}: `builds_on` must be a list of lesson ids')
+                builds_on = []
+            for dep in builds_on:
+                if dep not in order:
+                    errors.append(f'{lwhere}: builds on {dep!r}, which is not a lesson')
+                elif order[dep] >= lesson.get('index', 0):
+                    errors.append(f'{lwhere}: builds on {dep!r}, which does not come '
+                                  f'before it in the syllabus')
+
+            mentions = lesson.get('mentions') or []
+            if not isinstance(mentions, list):
+                errors.append(f'{lwhere}: `mentions` must be a list of tag and quote')
+                mentions = []
+            text = lesson_text(lesson) if mentions else ''
+            for i, mention in enumerate(mentions, 1):
+                mwhere = f'{lwhere} mention {i}'
+                if not isinstance(mention, dict) or not mention.get('tag') \
+                        or not mention.get('quote'):
+                    errors.append(f'{mwhere}: needs both `tag` and `quote`')
+                    continue
+                tag, quote = mention['tag'], plain(mention['quote'])
+                if tags is not None and tag not in known:
+                    errors.append(f'{mwhere}: tag {tag!r} is not in course/{TAGS_FILE}')
+                if tag in lesson_tags:
+                    errors.append(f'{mwhere}: the lesson is already tagged {tag!r}')
+                if len(quote.split()) < 4:
+                    errors.append(f'{mwhere}: quote at least four words, so the link '
+                                  f'finds the right passage')
+                elif quote not in text:
+                    errors.append(f'{mwhere}: quote {quote!r} is not in the lesson')
 
             for i, step in enumerate(lesson.get('steps') or [], 1):
                 if not isinstance(step, dict) or not step.get('do'):
@@ -559,6 +731,10 @@ def validate(stages, root):
                 check_shell(f'{pwhere} task {i}', code_in(text or ''))
             for name in project.get('read') or []:
                 check_doc(pwhere, name)
+
+    for name in known:
+        if name not in used:
+            errors.append(f'tag {name}: in course/{TAGS_FILE}, but no lesson carries it')
     return errors
 
 
@@ -587,6 +763,122 @@ def price_badge(stage):
     paid = stage.get('price', 'free') != 'free'
     label = stage['price'] + (' &#128274;' if paid else '')
     return f'<span class="price {"paid" if paid else "free"}">{label}</span>'
+
+
+def tag_href(name):
+    """Where a topic's page lives, from the site root."""
+    return f'tags/{name}/index.html'
+
+
+def tag_chips(names, vocab, current=None, counts=None):
+    """
+    Render tags as links to their topic pages.
+
+    Always in the vocabulary's order, so a tag sits in the same place on
+    every page. `current` marks the topic whose page this is; `counts`
+    adds how many lessons carry each tag.
+    """
+    order = list(vocab)
+    items = []
+    for name in sorted(names, key=order.index):
+        on = name == current
+        attrs = ' class="tag on" aria-current="page"' if on else ' class="tag"'
+        count = f'<span class="count">{counts[name]}</span>' if counts else ''
+        items.append(f'<li><a{attrs} href="{tag_href(name)}">'
+                     f'{esc(vocab[name]["label"])}{count}</a></li>')
+    return f'<ul class="tags" aria-label="Topics">{"".join(items)}</ul>'
+
+
+def lesson_link(lesson):
+    """A lesson's title as a link."""
+    return f'<a href="lesson-{lesson["id"]}.html">{esc(lesson["title"])}</a>'
+
+
+def passage_href(lesson, quote):
+    """
+    Link to the passage a quote comes from, as a URL text fragment.
+
+    `#:~:text=` scrolls to and highlights the passage in current Chrome,
+    Edge, Safari and Firefox, with no script and no anchor to maintain.
+    A browser without it opens the lesson at the top. `-`, `,` and `&`
+    mean something inside a text fragment, so they are escaped too.
+    """
+    words = urllib.parse.quote(plain(quote), safe='').replace('-', '%2D')
+    return f'lesson-{lesson["id"]}.html#:~:text={words}'
+
+
+def mentioning(name, stages):
+    """[(lesson, quote)] for every lesson that mentions a topic, in order."""
+    return [(le, m['quote']) for st in stages for le in st['lessons']
+            for m in le.get('mentions') or [] if m['tag'] == name]
+
+
+def where(lesson):
+    """Where a lesson sits: stage, position, length."""
+    stage = lesson['stage']
+    return (f'{stage_word(stage)} {stage["number"]} &middot; lesson '
+            f'{lesson["position"]} &middot; {lesson["minutes"]} min')
+
+
+def said(items):
+    """Join a short list the way a sentence would: a, b and c."""
+    items = list(items)
+    return items[0] if len(items) == 1 else ', '.join(items[:-1]) + ' and ' + items[-1]
+
+
+def recommend(name, stages, picks=RELATED_PICKS):
+    """
+    What to read alongside a topic's lessons, none of which carry the tag.
+
+    Two lists, in this order, and the topic page says so:
+
+      1. Every lesson the topic's lessons BUILD ON (their `builds_on`),
+         in syllabus order -- the gaps a reader jumping straight to a
+         topic would otherwise fall into.
+      2. Up to `picks` lessons that share at least TWO topics with this
+         topic's lessons -- one shared tag is too weak a link, and on a
+         small topic it only ever picks the course's biggest tag. A lesson
+         scores, for each of its tags, the number of this topic's lessons
+         that also carry it; ties go to the lesson sharing more reference
+         reading (`read`) with them, then to the earlier one.
+
+    Lessons that only MENTION the topic are listed separately and never
+    recommended as well. Returns [(lesson, [lessons that build on it])]
+    and [(lesson, [the tags it shares, most shared first])].
+    """
+    lessons = [le for st in stages for le in st['lessons']]
+    tagged = [le for le in lessons if name in le['tags']]
+    inside = {le['id'] for le in tagged}
+    # Listed under "Also mentioned in" already; never twice on one page.
+    inside |= {le['id'] for le, _ in mentioning(name, stages)}
+
+    needed_by = {}
+    for le in tagged:
+        for dep in le.get('builds_on') or []:
+            if dep not in inside:
+                needed_by.setdefault(dep, []).append(le)
+    first = [(le, needed_by[le['id']]) for le in lessons if le['id'] in needed_by]
+
+    together = {}
+    for le in tagged:
+        for tag in le['tags']:
+            if tag != name:
+                together[tag] = together.get(tag, 0) + 1
+    reading = {doc for le in tagged for doc in le.get('read') or []}
+    scored = []
+    for le in lessons:
+        if le['id'] in inside or le['id'] in needed_by:
+            continue
+        shares = [tag for tag in le['tags'] if tag in together]
+        if len(shares) >= 2:
+            score = sum(together[tag] for tag in shares)
+            overlap = len(reading.intersection(le.get('read') or []))
+            scored.append((-score, -overlap, le['index'], le))
+    scored.sort(key=lambda item: item[:3])
+    alongside = [(le, sorted((t for t in le['tags'] if t in together),
+                             key=lambda t: -together[t]))
+                 for *_, le in scored[:picks]]
+    return first, alongside
 
 
 def code_block(text):
@@ -625,7 +917,7 @@ def crumbs(stage):
 
 # ------------------------------------------------------------------ pages
 
-def lesson_page(lesson, sequence, position):
+def lesson_page(lesson, sequence, position, vocab, by_id):
     """
     Render one lesson.
 
@@ -642,8 +934,21 @@ def lesson_page(lesson, sequence, position):
         f'{hours(lesson["minutes"])}</div>',
         f'<h1>{esc(lesson["title"])}</h1>',
         f'<p class="objective"><b>You will:</b> {inline(lesson["objective"])}</p>',
-        rewrite_links(render(lesson.get('body', ''))),
+        tag_chips(lesson['tags'], vocab),
     ]
+    if lesson.get('builds_on'):
+        parts.append('<p class="builds">Builds on '
+                     + said(lesson_link(by_id[dep]) for dep in lesson['builds_on'])
+                     + '.</p>')
+    touched = []
+    for mention in lesson.get('mentions') or []:
+        if mention['tag'] not in touched:
+            touched.append(mention['tag'])
+    if touched:
+        parts.append('<p class="builds">Also touches on '
+                     + said(f'<a href="{tag_href(t)}">{esc(vocab[t]["label"])}</a>'
+                            for t in touched) + '.</p>')
+    parts.append(rewrite_links(render(lesson.get('body', ''))))
 
     parts.append('<h2>Do it</h2><ol class="steps">')
     for step in lesson['steps']:
@@ -736,7 +1041,7 @@ def project_page(stage, sequence, position):
     return '\n'.join(parts)
 
 
-def stage_page(stage, sequence):
+def stage_page(stage, sequence, vocab):
     """Render a stage overview: outcomes, prerequisites, syllabus, project."""
     lessons = stage['lessons']
     parts = [
@@ -762,7 +1067,8 @@ def stage_page(stage, sequence):
         parts.append(
             f'<tr><td>{lesson["position"]}</td><td><a href="lesson-{lesson["id"]}.html">'
             f'{esc(lesson["title"])}</a><span class="obj">{inline(lesson["objective"])}'
-            f'</span></td><td class="m">{lesson["minutes"]} min</td></tr>')
+            f'</span>{tag_chips(lesson["tags"], vocab)}</td>'
+            f'<td class="m">{lesson["minutes"]} min</td></tr>')
     project = stage['project']
     parts.append(
         f'<tr><td>&#9670;</td><td><a href="project-{stage["id"]}.html">Project: '
@@ -797,6 +1103,102 @@ def glossary_page(stages):
     return '\n'.join(parts)
 
 
+def tag_page(tag, stages, vocab):
+    """
+    One topic: every lesson that carries it, in syllabus order and grouped
+    by stage, then what to read alongside them.
+    """
+    name = tag['slug']
+    tagged = [le for st in stages for le in st['lessons'] if name in le['tags']]
+    groups = [(st, [le for le in st['lessons'] if name in le['tags']]) for st in stages]
+    groups = [(st, rows) for st, rows in groups if rows]
+    minutes = sum(le['minutes'] for le in tagged)
+    lessons_word = 'lesson' if len(tagged) == 1 else 'lessons'
+    stages_word = 'stage' if len(groups) == 1 else 'stages'
+    parts = [
+        '<div class="crumbs"><a href="index.html">The course</a> / '
+        '<a href="tags/index.html">Topics</a></div>',
+        f'<div class="lesson-head">Topic &middot; {len(tagged)} {lessons_word} in '
+        f'{len(groups)} {stages_word} &middot; {hours(minutes)}</div>',
+        f'<h1>{esc(tag["label"])}</h1>',
+        f'<p class="objective">{inline(tag["description"])}</p>',
+    ]
+    for stage, rows in groups:
+        parts.append(
+            f'<h2 class="stage-head"><span class="n">{stage_word(stage)} '
+            f'{stage["number"]}</span><a href="stage-{stage["id"]}.html">'
+            f'{esc(stage["title"])}</a></h2><ul class="picks">')
+        for le in rows:
+            parts.append(
+                f'<li><span class="title">{lesson_link(le)}</span>'
+                f'<span class="mins">lesson {le["position"]} &middot; {le["minutes"]} min</span>'
+                f'<span class="obj">{inline(le["objective"])}</span>'
+                f'{tag_chips(le["tags"], vocab, current=name)}</li>')
+        parts.append('</ul>')
+
+    mentions = mentioning(name, stages)
+    if mentions:
+        parts.append('<h2>Also mentioned in</h2>')
+        parts.append(render(
+            f'Lessons about something else that touch on {tag["label"]} in one '
+            'passage. Each link opens the lesson at that passage.'))
+        parts.append('<ul class="picks">')
+        for le, quote in mentions:
+            parts.append(
+                f'<li><span class="title"><a href="{passage_href(le, quote)}">'
+                f'{esc(le["title"])}</a></span><span class="why">{where(le)}</span>'
+                f'<span class="quote">&ldquo;{esc(plain(quote))}&rdquo;</span></li>')
+        parts.append('</ul>')
+
+    first, alongside = recommend(name, stages)
+    if first or alongside:
+        parts.append('<h2>Recommended</h2>')
+        parts.append(render(
+            f'Not tagged {tag["label"]}, but worth reading with it: first the '
+            'lessons the ones above **build on**, in syllabus order, then the '
+            'lessons whose topics **most often appear alongside** this one.'))
+        parts.append('<ul class="picks">')
+        for le, needers in first:
+            parts.append(
+                f'<li><span class="title">{lesson_link(le)}</span>'
+                f'<span class="why">{where(le)} &middot; '
+                f'{said(esc(n["title"]) for n in needers)} '
+                f'build{"s" if len(needers) == 1 else ""} on it</span></li>')
+        for le, shared in alongside:
+            parts.append(
+                f'<li><span class="title">{lesson_link(le)}</span>'
+                f'<span class="why">{where(le)} &middot; shares '
+                f'{said(esc(vocab[t]["label"]) for t in shared)}</span></li>')
+        parts.append('</ul>')
+
+    parts.append('<h2>Every topic</h2>')
+    parts.append(tag_chips(list(vocab), vocab, current=name))
+    return '\n'.join(parts)
+
+
+def tags_index(stages, vocab):
+    """Every topic, with how many lessons carry it."""
+    counts = {name: 0 for name in vocab}
+    for st in stages:
+        for le in st['lessons']:
+            for tag in le['tags']:
+                counts[tag] += 1
+    parts = ['<div class="crumbs"><a href="index.html">The course</a></div>',
+             '<h1>Topics</h1>',
+             render(f'Every lesson carries one or more of these {len(vocab)} '
+                    'topics. Each topic page lists every lesson that carries it, '
+                    'across the whole course, and what to read alongside them.'),
+             '<ul class="picks">']
+    for name, tag in vocab.items():
+        word = 'lesson' if counts[name] == 1 else 'lessons'
+        parts.append(
+            f'<li><span class="title"><a href="{tag_href(name)}">{esc(tag["label"])}</a>'
+            f'</span><span class="mins">{counts[name]} {word}</span>'
+            f'<span class="obj">{inline(tag["description"])}</span></li>')
+    parts.append('</ul>')
+    return '\n'.join(parts)
+
+
 def ladder_html(stages):
     """Render the stage/tier ladder: what you get, and what it costs."""
     out = []
@@ -820,7 +1222,7 @@ def ladder_html(stages):
     return '\n'.join(out)
 
 
-def index_html(docs, written, stages):
+def index_html(docs, written, stages, vocab):
     """Render the front page: the course first, the manual second."""
     lessons = [le for st in stages for le in st['lessons']]
     total_minutes = sum(st['minutes'] for st in stages)
@@ -878,6 +1280,17 @@ def index_html(docs, written, stages):
     parts.append('<p><a href="glossary.html">Glossary of every term the course '
                  'introduces &rarr;</a></p>')
 
+    counts = {name: 0 for name in vocab}
+    for le in lessons:
+        for tag in le['tags']:
+            counts[tag] += 1
+    parts.append('<h2>Topics</h2>')
+    parts.append(render(
+        'Every lesson is tagged. Pick a topic to see each lesson that covers '
+        'it, wherever it sits in the course, and what to read alongside.'))
+    parts.append(tag_chips(list(vocab), vocab, counts=counts))
+    parts.append('<p><a href="tags/index.html">Every topic, described &rarr;</a></p>')
+
     table = phase_table(docs)
     if table:
         parts.append('<h2>The real project, honestly</h2>')
@@ -916,7 +1329,7 @@ def index_html(docs, written, stages):
 
 # ------------------------------------------------------------------ build
 
-def build(root, out, stages):
+def build(root, out, stages, tags):
     """Render the whole site into `out`. Returns the page count."""
     docs = root / 'docs'
     out.mkdir(parents=True, exist_ok=True)
@@ -929,8 +1342,16 @@ def build(root, out, stages):
     meta = f'v{version} · {commit or "no commit"} · built {datetime.date.today().isoformat()}'
 
     def write(name, title, body):
-        (out / name).write_text(PAGE.format(
-            title=esc(title), style=STYLE, meta=meta, body=body, stamp=stamp))
+        # `name` may be a path: the topic pages sit in tags/<slug>/.
+        prefix = '../' * name.count('/')
+        path = out / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(PAGE.format(
+            title=esc(title), style=STYLE, meta=meta, stamp=stamp,
+            home=prefix + 'index.html', body=rebase(body, prefix)))
+
+    vocab = {tag['slug']: tag for tag in tags}
+    by_id = {le['id']: le for st in stages for le in st['lessons']}
 
     written = []
     for source in sorted(docs.glob('*.md')):
@@ -952,18 +1373,23 @@ def build(root, out, stages):
     for position, (kind, obj) in enumerate(sequence):
         if kind == 'lesson':
             write(f'lesson-{obj["id"]}.html', obj['title'],
-                  lesson_page(obj, sequence, position))
+                  lesson_page(obj, sequence, position, vocab, by_id))
         else:
             write(f'project-{obj["stage"]["id"]}.html', f'Project: {obj["title"]}',
                   project_page(obj['stage'], sequence, position))
 
     for stage in stages:
-        write(f'stage-{stage["id"]}.html', stage['title'], stage_page(stage, sequence))
+        write(f'stage-{stage["id"]}.html', stage['title'],
+              stage_page(stage, sequence, vocab))
+
+    for tag in tags:
+        write(tag_href(tag['slug']), f'Topic: {tag["label"]}', tag_page(tag, stages, vocab))
+    write('tags/index.html', 'Topics', tags_index(stages, vocab))
 
     write('glossary.html', 'Glossary', glossary_page(stages))
-    write('index.html', 'The course', index_html(docs, written, stages))
+    write('index.html', 'The course', index_html(docs, written, stages, vocab))
     (out / 'robots.txt').write_text('User-agent: *\nDisallow: /\n')
-    return len(list(out.glob('*.html')))
+    return len(list(out.rglob('*.html')))
 
 
 def main(argv=None):
@@ -979,7 +1405,8 @@ def main(argv=None):
 
     root = pathlib.Path(args.root).resolve()
     stages = load_course(root)
-    errors = validate(stages, root)
+    tags = load_tags(root)
+    errors = validate(stages, root, tags)
     if errors:
         print(f'  course/ has {len(errors)} problem(s):', file=sys.stderr)
         for error in errors:
@@ -989,14 +1416,14 @@ def main(argv=None):
     lessons = sum(len(st['lessons']) for st in stages)
     minutes = sum(st['minutes'] for st in stages)
     print(f'  course ok: {len(stages)} stages, {lessons} lessons, '
-          f'{len(stages)} projects, {hours(minutes)}')
+          f'{len(stages)} projects, {len(tags)} topics, {hours(minutes)}')
     if args.check:
         return 0
 
     out = pathlib.Path(args.out).resolve()
     if args.clean and out.exists():
         shutil.rmtree(out)
-    count = build(root, out, stages)
+    count = build(root, out, stages, tags)
     print(f'  {count} pages -> {out}')
     return 0
 

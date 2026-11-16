@@ -27,6 +27,8 @@ prerequisites:
 lessons:
   - id: esp32-is-a-driver
     title: The microcontroller is a dumb driver
+    tags: [hardware, architecture]
+    builds_on: [the-seam]
     minutes: 25
     objective: Understand why the control loop stays on the host, and where the ESP32's job ends.
     body: |
@@ -117,6 +119,8 @@ lessons:
 
   - id: protocol-on-a-laptop
     title: A wire protocol you can test on your laptop
+    tags: [hardware, testing]
+    builds_on: [esp32-is-a-driver]
     minutes: 35
     objective: Test framing, checksums and failure handling with no hardware attached.
     body: |
@@ -213,6 +217,8 @@ lessons:
 
   - id: decide-how-it-fails
     title: Decide how it fails before it fails
+    tags: [hardware, safety, testing]
+    builds_on: [protocol-on-a-laptop]
     minutes: 30
     objective: Specify — and test natively — what the firmware does when things go wrong.
     body: |
@@ -312,6 +318,8 @@ lessons:
 
   - id: where-safety-lives
     title: Where safety actually lives
+    tags: [safety, hardware]
+    builds_on: [limits-from-the-datasheet, integration-without-physics, decide-how-it-fails]
     minutes: 35
     objective: Name every layer that enforces a limit, what each one survives, and why none is a safety system.
     body: |
@@ -417,6 +425,8 @@ lessons:
 
   - id: cad-from-the-same-yaml
     title: Parts generated from the same numbers
+    tags: [hardware, ros2]
+    builds_on: [one-source-of-truth]
     minutes: 40
     objective: Generate printable parts from the robot profile, and let the CAD correct the model.
     body: |
@@ -513,6 +523,8 @@ lessons:
 
   - id: decide-with-numbers
     title: A decision with a number attached
+    tags: [hardware]
+    builds_on: [cad-from-the-same-yaml]
     minutes: 35
     objective: Make a mechanical decision with measured evidence, and price the robot honestly.
     body: |
@@ -605,6 +617,8 @@ lessons:
 
   - id: roll-back-with-a-pull
     title: Deploy, and roll back with a pull
+    tags: [robops, devops, security]
+    builds_on: [releases-are-evidence, gate-the-motors]
     minutes: 30
     objective: Ship the robot image by digest, and make rollback something that cannot fail to build.
     body: |
@@ -694,6 +708,7 @@ lessons:
 
   - id: alive-is-not-ready
     title: Alive is not the same as ready
+    tags: [robops]
     minutes: 35
     objective: Separate liveness from readiness, and make a dashboard that cannot report stale state as current.
     body: |
@@ -804,6 +819,8 @@ lessons:
 
   - id: what-happened-when-you-were-away
     title: Metrics from a robot behind a home router
+    tags: [robops, security]
+    builds_on: [alive-is-not-ready]
     minutes: 35
     objective: Get metrics off a robot into one place, and avoid the traps that make a working pipeline show nothing.
     body: |

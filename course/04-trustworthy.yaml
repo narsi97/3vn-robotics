@@ -28,6 +28,8 @@ prerequisites:
 lessons:
   - id: test-layers
     title: Four layers of test, and what each is for
+    tags: [testing]
+    builds_on: [fast-tests-or-no-tests, scenarios-are-tests]
     minutes: 30
     objective: Know which layer should catch a given bug, and why that layer and not another.
     body: |
@@ -115,6 +117,8 @@ lessons:
 
   - id: tests-that-cannot-lie
     title: Tests that cannot pass by accident
+    tags: [testing]
+    builds_on: [test-layers]
     minutes: 40
     objective: Recognise and write tests that cannot go green for the wrong reason.
     body: |
@@ -214,6 +218,8 @@ lessons:
 
   - id: the-budget
     title: Keeping the suite fast is a feature you maintain
+    tags: [testing, devops]
+    builds_on: [test-layers]
     minutes: 30
     objective: Keep a suite inside its time budget structurally, and catch the day it drifts out.
     body: |
@@ -296,6 +302,8 @@ lessons:
 
   - id: integration-without-physics
     title: Integration tests without physics
+    tags: [testing, safety, ros2]
+    builds_on: [the-seam, test-layers, limits-from-the-datasheet]
     minutes: 35
     objective: Test interface contracts and limit enforcement against a real ROS graph, with mock hardware.
     body: |
@@ -397,6 +405,8 @@ lessons:
 
   - id: images-that-ship
     title: An image that carries no simulator
+    tags: [devops, robops, security]
+    builds_on: [docker-and-nothing-else]
     minutes: 35
     objective: Build the image that would go on a robot, and verify what it does not contain.
     body: |
@@ -498,6 +508,8 @@ lessons:
 
   - id: ci-runs-what-you-run
     title: CI that runs what you run
+    tags: [devops, testing]
+    builds_on: [headless-by-default, the-budget]
     minutes: 40
     objective: Make CI execute exactly what you run locally, and make it check decisions as well as tests.
     body: |
@@ -598,6 +610,8 @@ lessons:
 
   - id: releases-are-evidence
     title: A release is a tag plus evidence
+    tags: [devops, security]
+    builds_on: [images-that-ship, ci-runs-what-you-run]
     minutes: 30
     objective: Cut a release whose tag, version file and image provably agree.
     body: |
@@ -697,6 +711,8 @@ lessons:
 
   - id: gate-the-motors
     title: A pipeline for a machine with motors
+    tags: [robops, devops, safety, security]
+    builds_on: [releases-are-evidence]
     minutes: 25
     objective: Design a deploy gate for a target that can physically move.
     body: |

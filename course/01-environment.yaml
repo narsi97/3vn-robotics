@@ -23,6 +23,7 @@ prerequisites:
 lessons:
   - id: docker-and-nothing-else
     title: Docker, and nothing else
+    tags: [devops, security]
     minutes: 40
     objective: Run a complete robotics toolchain without installing any of it.
     body: |
@@ -129,6 +130,8 @@ lessons:
 
   - id: inside-the-container
     title: Living inside the container
+    tags: [devops, ros2]
+    builds_on: [docker-and-nothing-else]
     minutes: 30
     objective: Know where your code, your build output and your shell actually live, and which edits need a rebuild.
     body: |
@@ -256,6 +259,8 @@ lessons:
 
   - id: fast-tests-or-no-tests
     title: A test suite people actually run
+    tags: [testing, ros2]
+    builds_on: [inside-the-container]
     minutes: 30
     objective: Prove the robot description is sound, in under a minute, with no simulator running.
     body: |
@@ -369,6 +374,7 @@ lessons:
 
   - id: the-seam
     title: The decision everything else rests on
+    tags: [architecture, ros2, simulation]
     minutes: 30
     objective: Understand — and prove — why the same code can drive a simulator, a mock or a motor.
     body: |
@@ -479,6 +485,7 @@ lessons:
 
   - id: names-and-licences
     title: Before the first line, a licence and a name
+    tags: [security, hardware]
     minutes: 25
     objective: Check a licence and a naming rule before either becomes expensive, and record the decision.
     body: |
@@ -576,6 +583,8 @@ lessons:
 
   - id: symptoms-that-lie
     title: Symptoms that lie
+    tags: [devops, simulation]
+    builds_on: [docker-and-nothing-else]
     minutes: 25
     objective: Map the misleading failures of a robotics environment to their real causes.
     body: |
