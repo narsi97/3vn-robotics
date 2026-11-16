@@ -51,6 +51,9 @@ lessons:
       Read its output even when it passes. What it checks is a list of what
       usually goes wrong.
     steps:
+      - do: Get the code, and work from inside it for the rest of the course.
+        run: git clone https://github.com/narsi97/3vn-robotics.git && cd 3vn-robotics
+        expect: A `3vn-robotics` folder with a `Makefile` at the top.
       - do: See what the project can do. The Makefile is the interface; nothing below needs typing twice.
         run: make
         expect: A list of targets, from `doctor` and `setup` to `play`, `train` and `site`.

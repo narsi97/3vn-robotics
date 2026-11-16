@@ -2,7 +2,9 @@ id: real
 number: 5
 kind: tier
 title: Make it real
-price: "$5"
+# Planned as a $5 tier once the course matures; free for everyone until
+# then (decided 2026-11-15). Put the price back when payment opens.
+price: free
 summary: >-
   Firmware you can test on a laptop, safety that is layered and honest
   about its limits, parts generated from the same numbers as the
