@@ -34,8 +34,14 @@ import subprocess
 import time
 
 import pytest
+from threevn_robot_description.describe import robot_facts
 
 pytestmark = pytest.mark.slow
+
+#: The robot under test, chosen by `make test-sim PROFILE=...`, and what
+#: its description says about it. Nothing below names a joint.
+PROFILE = os.environ.get('THREEVN_PROFILE', 'threevn_arm_v1')
+ROBOT = robot_facts(PROFILE, target='gz')
 
 #: Gazebo, the bridge and three spawners have to come up in sequence.
 STARTUP_TIMEOUT = 120.0
@@ -79,7 +85,8 @@ def simulator():
     """
     env = dict(os.environ)
     proc = subprocess.Popen(
-        ['ros2', 'launch', 'threevn_sim', 'sim.launch.py'],
+        ['ros2', 'launch', 'threevn_sim', 'sim.launch.py',
+         f'profile:={PROFILE}'],
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, env=env, start_new_session=True)
 
@@ -122,7 +129,9 @@ def test_hardware_component_is_active(simulator):
     """The ros2_control hardware component is loaded and active."""
     code, out = _run(['ros2', 'control', 'list_hardware_components'])
     assert code == 0, out
-    assert 'threevn_arm' in out
+    for component in ROBOT['hardware']:
+        assert f'name: {component}' in out, \
+            f'hardware component {component} is not loaded:\n{out}'
     assert 'label=active' in out
 
 
@@ -136,8 +145,7 @@ def test_all_command_interfaces_are_claimed(simulator):
     """
     code, out = _run(['ros2', 'control', 'list_hardware_components'])
     assert code == 0, out
-    for joint in ('shoulder_pan_joint', 'shoulder_lift_joint',
-                  'elbow_joint', 'wrist_joint', 'gripper_left_finger_joint'):
+    for joint in ROBOT['arm_joints'] + [ROBOT['gripper_joint']]:
         assert f'{joint}/position [available] [claimed]' in out, \
             f'{joint} command interface not claimed'
 

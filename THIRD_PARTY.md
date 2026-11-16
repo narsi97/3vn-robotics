@@ -147,7 +147,7 @@ entering this repository or a paid course built on it.
 | Author | The Robot Studio / Hugging Face (LeRobot) |
 | Source | https://github.com/TheRobotStudio/SO-ARM100 |
 | Licence | Apache-2.0 — commercial use permitted |
-| Status | **Spiked, and it ran.** Fetched on demand into `vendor/`, gitignored. |
+| Status | **A second robot, in simulation.** Fetched on demand into `vendor/`, gitignored, pinned to upstream commit `5f6d2b87` with the URDF checksummed. |
 
 Licence-clean and technically better: bus servos with real position
 feedback via magnetic encoders, rather than open-loop hobby servos. But
@@ -164,14 +164,25 @@ gripper action all worked unchanged. One constant did not: `POSES` is a
 dict of four-element lists, so `move_to_named()` raises on a 5-DOF arm.
 See [docs/so101-spike.md](docs/so101-spike.md).
 
+That constant has since moved into the robot profiles, and the SO-101
+runs the full scenario suite on mock and in Gazebo from a profile of its
+own. See [docs/so101.md](docs/so101.md).
+
 A plugin does not even need writing: `so_arm_100_hardware` on the ROS
 index is an Apache-2.0 `ros2_control` SystemInterface released for Jazzy.
+One was written anyway (`threevn_hardware/FeetechSystemInterface`),
+because it is a lesson the course wants and because it could be built
+and tested against a simulated servo bus before any hardware existed.
+The profile names the plugin, so using the community one instead is a
+one-line change.
 
 Apache-2.0 obligations — attribution, preserving notices, stating changes
 — are met by `scripts/fetch_so101.sh`, which pulls the files unmodified
-and writes a NOTICE beside them; 3VN's additions live in a separate
-wrapper rather than as edits. Not committed here because the description
-needs 13 STL meshes and this repository carries no binary blobs.
+and writes a NOTICE beside them, naming the commit; 3VN's additions are
+an overlay applied in memory at launch
+(`src/threevn_robot_description/config/so101_follower.yaml`) rather than
+edits. Not committed here because the description needs 13 STL meshes
+and this repository carries no binary blobs.
 
 ---
 

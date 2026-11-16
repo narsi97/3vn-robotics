@@ -48,6 +48,7 @@
   <xacro:include filename="$(find threevn_robot_description)/urdf/arm/arm_macro.xacro"/>
   <xacro:include filename="$(find threevn_robot_description)/urdf/arm/gripper_macro.xacro"/>
   <xacro:include filename="$(find threevn_robot_description)/urdf/arm/sensor_mounts.xacro"/>
+  <xacro:include filename="$(find threevn_robot_description)/urdf/arm/semantics.xacro"/>
   <xacro:include filename="$(find threevn_robot_description)/urdf/ros2_control/arm.ros2_control.xacro"/>
   <xacro:include filename="$(find threevn_robot_description)/urdf/gazebo/materials.gazebo.xacro"/>
   <xacro:include filename="$(find threevn_robot_description)/urdf/gazebo/camera.gazebo.xacro"/>
@@ -101,6 +102,7 @@
     <xacro:threevn_gripper        parent="${prefix}wrist_link"     prefix="${prefix}"/>
     <xacro:threevn_sensor_mounts                                   prefix="${prefix}"/>
     <xacro:threevn_arm_ros2_control                                prefix="${prefix}"/>
+    <xacro:threevn_arm_semantics                                   prefix="${prefix}"/>
     <xacro:if value="${'$(arg target)' == 'gz'}">
       <xacro:threevn_gazebo_materials prefix="${prefix}"/>
       <xacro:if value="${cfg['sensors']['camera']['enabled']}">

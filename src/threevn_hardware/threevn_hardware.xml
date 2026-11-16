@@ -11,4 +11,18 @@
       been since Phase 1, which is what made Phase 5 purely additive.
     </description>
   </class>
+  <class name="threevn_hardware/FeetechSystemInterface"
+         type="threevn::hardware::FeetechSystemInterface"
+         base_class_type="hardware_interface::SystemInterface">
+    <description>
+      Drives an arm built from Feetech STS-series bus servos (the SO-101)
+      over their half-duplex serial protocol, through a serial port or a
+      TCP socket. There is no firmware of ours on the far side: the
+      servos are the closed-loop controllers, and this reads their
+      positions and writes their goals at the control rate.
+
+      The class name is the one so101_follower.yaml has named since the
+      profile was written, which is what made adding it additive.
+    </description>
+  </class>
 </library>

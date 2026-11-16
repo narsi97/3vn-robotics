@@ -1024,7 +1024,7 @@ lessons:
   - id: somebody-elses-robot
     title: Somebody else's robot
     minutes: 35
-    objective: Run the whole stack against a robot nobody here designed, and find the assumption that breaks.
+    objective: Run the whole stack against a robot nobody here designed, and see what it took to make that true.
     body: |
       Every earlier test of the central claim swapped the execution *target*
       — mock, Gazebo, ESP32 — under one robot this project designed. That is
@@ -1032,24 +1032,45 @@ lessons:
 
       The SO-101 is an open arm by another team: five joints and a jaw, bus
       servos with real position feedback, Apache-2.0. It was deliberately
-      *not* re-authored into a profile here — that would have tested this
-      project's xacro rather than its stack. Its description is used exactly
-      as it ships, fetched on demand and never committed. The launch file
-      adds only what Gazebo needs: a control block naming its joints with the
-      same simulator plugin, and an anchor to the world, because a free
-      632 g arm topples the moment a joint moves.
+      *not* re-authored into a profile of lengths and masses — that would
+      have tested this project's xacro rather than its stack. Its description
+      is used exactly as it ships, fetched on demand at a pinned commit and
+      never committed.
 
-      It spawned, every controller came up, and the client — unchanged —
-      discovered its five joint names from the controller, read its state and
-      limits, resolved its transforms, **moved it**, and opened its jaw.
+      The first attempt was a spike: one launch file that added what Gazebo
+      needs — a control block naming its joints, and an anchor to the world,
+      because a free 632 g arm topples the moment a joint moves. It spawned,
+      every controller came up, and the client — unchanged — discovered its
+      five joint names from the controller, read its state and limits,
+      resolved its transforms, **moved it**, and opened its jaw.
 
       **One constant broke.** The named poses — `home`, `ready` and the rest —
-      are a dictionary of four-element lists in the client. A five-joint arm
+      were a dictionary of four-element lists in the client. A five-joint arm
       cannot take a four-joint pose, and every scenario starts with `home()`,
-      so every scenario stops there. Joint names had been made discoverable;
-      the poses those joints are sent to had not. The fix is to move named
-      poses into the robot profile, where every other physical fact about a
-      robot already lives.
+      so every scenario stopped there: `expected 5 joint positions, got 4`.
+      Joint names had been made discoverable; the poses those joints are sent
+      to had not.
+
+      The fix was to move named poses into the robot profile, where every
+      other physical fact about a robot already lives, and to carry them in
+      the description so the client reads them off whichever robot it is
+      attached to. The SO-101 got a profile of its own — an *overlay* that
+      names its arm joints, its gripper's travel and its poses, and restates
+      none of its geometry. The spike's launch file is gone. `PROFILE` is now
+      the only thing that says which robot this is.
+
+      Getting past `home()` found things the spike could not. Upstream's
+      collision meshes are its full visual meshes, and the simulation ran at
+      an eighth of real time until the overlay swapped them for bounding
+      boxes. And one scenario, which jogged each joint and left it there,
+      drove the longer arm's gripper into the bench. The mock target passed
+      it; only physics noticed.
+
+      A third took a check that did not exist. Closed while it pointed down,
+      the frictionless jaw ran into its hard stop and never opened again —
+      and `pick_and_place` kept passing, because its release step asserted
+      nothing. The step has a post-condition now, and the joints have the
+      friction a gearbox has.
 
       The other result is a refusal. The inverse-kinematics guard would not
       solve the SO-101, and said exactly why: five driven joints where its
@@ -1065,7 +1086,7 @@ lessons:
     steps:
       - do: Fetch the foreign description, once. It lands in a gitignored directory with a NOTICE.
         run: make so101-fetch
-      - do: Spawn it under this project's controllers.
+      - do: Spawn it under this project's controllers. This is `make sim PROFILE=so101_follower`.
         run: make so101
       - do: In a second terminal, ask what the controller drives.
         run: |
@@ -1073,20 +1094,34 @@ lessons:
           ros2 control list_controllers
           ros2 param get /arm_controller joints
         expect: Five joint names nobody here chose.
-      - do: Run the simplest scenario, and read the failure.
-        run: make scenario NAME=home
-        expect: A failure about joint counts — `expected 5 joint positions, got 4`.
+      - do: Find the poses the spike tripped over, where they live now — in the description the robot is running.
+        run: make urdf PROFILE=so101_follower | grep -A9 threevn_semantics
+        expect: Five numbers per pose, and a gripper that opens to an angle, not a width.
+      - do: Run every scenario. The same six, unchanged.
+        run: make scenario NAME=all
+        expect: '`6/6 scenarios passed`. The `gripper` scenario has no "both fingers" step — one jaw has nothing to mirror.'
+      - do: Stop the simulator, then run the integration tier against this robot.
+        run: |
+          make stop
+          make test-ros PROFILE=so101_follower
+        expect: >-
+          Every test passes but one, which is skipped with its reason — a
+          hand-computed position exists only for an arm whose lengths you can
+          add up.
     checkpoint: >-
-      The foreign arm runs under these controllers, and you can name the
-      single constant that stops the scenarios and where it should live
-      instead.
+      The foreign arm passes the same scenarios and the same integration
+      tests as the arm this project designed, and you can say which facts
+      about a robot had to move out of code to make that so.
     pitfalls:
       - symptom: '`make so101` fails because the description is missing.'
         cause: It is fetched on demand, not committed.
         fix: '`make so101-fetch` first.'
       - symptom: The arm collapses as soon as it moves.
         cause: The upstream description has no world anchor.
-        fix: The launch file adds one. If you write your own, add a fixed joint to `world`.
+        fix: The profile's overlay adds one. If you describe another arm, give it an `anchor`.
+      - symptom: '`make so101-fetch` refuses to install, with a checksum mismatch.'
+        cause: The upstream file at the pinned commit is not the one this repository was tested against.
+        fix: Nothing was installed. Do not edit the checksum to make it pass — find out what changed.
     concepts:
       - term: Spike
         meaning: >-
@@ -1108,10 +1143,13 @@ lessons:
           the guard working.
     exercise:
       task: >-
-        Sketch the change that moves named poses into the profile: the YAML
-        shape, how the client would read it, and the test that would have
-        caught the four-element assumption before the spike did.
+        Add a pose to `so101_follower.yaml` that reaches down toward the
+        bench, with four numbers instead of five. Run `make test` and read
+        which test refuses it. Fix the count, lower the reach until a second
+        test refuses it, and say what each of the two checked that the other
+        could not.
     read:
+      - so101.md
       - so101-spike.md
       - manipulation.md
 

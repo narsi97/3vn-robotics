@@ -23,6 +23,9 @@ if(BUILD_TESTING)
   # Also fast: pure config arithmetic, no robot, no simulator.
   ament_add_pytest_test(bringup_velocity_ceilings
     test/test_velocity_ceilings.py TIMEOUT 60)
+  # Also fast: two YAML files compared, per robot.
+  ament_add_pytest_test(bringup_profile_controllers
+    test/test_profile_controllers_agree.py TIMEOUT 60)
 endif()
 
 ament_package()

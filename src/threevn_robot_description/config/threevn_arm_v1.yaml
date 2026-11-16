@@ -297,6 +297,49 @@ joints:
     # commanded.
     mimic: {joint: gripper_left_finger_joint, multiplier: 1.0, offset: 0.0}
 
+# What the APPLICATION needs to know about this robot, and a URDF has no
+# place for: which joints are the arm, how far the gripper opens, and the
+# named poses the scenarios drive it to.
+#
+# The poses used to be a module constant in robot_client.py -- the one
+# hardcoded fact about this robot left in code that looked general. It
+# held until the stack was run against a five-joint arm, where every
+# scenario stopped at home() with "expected 5 joint positions, got 4".
+# See docs/so101-spike.md.
+#
+# xacro copies this block into the description as <threevn_semantics>
+# (urdf/arm/semantics.xacro), and the client reads it back from
+# /robot_description. So a client attached to a running robot gets THAT
+# robot's poses, whichever profile launched it, without being told.
+arm:
+  # In the order arm_controller drives them.
+  joints:
+    - shoulder_pan_joint
+    - shoulder_lift_joint
+    - elbow_joint
+    - wrist_joint
+  base_frame: base_link
+  # Where the object goes: the point the inverse kinematics places, and
+  # the lowest the arm reaches. tool0 is the flange the gripper bolts to.
+  tool_frame: grasp_frame
+
+gripper:
+  # The commanded finger. The other follows through <mimic>.
+  joint: gripper_left_finger_joint
+  # Metres: this gripper is prismatic. Another robot's may be revolute,
+  # and radians; nothing above the profile needs to know which.
+  open: 0.018
+  closed: 0.0
+
+# Named joint-space poses. Radians, in the order of arm.joints.
+poses:
+  # All joints at zero: the arm straight up. This is the reference
+  # configuration, not a rest position - an unpowered arm falls.
+  home:  [0.0, 0.0, 0.0, 0.0]
+  ready: [0.0, 0.5, -0.4, 0.0]
+  pick:  [0.6, 0.9, -0.7, 0.2]
+  place: [-0.6, 0.9, -0.7, 0.2]
+
 # Fixed attachment points. No mass, no geometry -- pure frames.
 frames:
   tool0:

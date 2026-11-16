@@ -1,0 +1,237 @@
+# SO-101 follower arm -- a robot this project did not design.
+#
+# The arm is TheRobotStudio's SO-ARM100 / SO-101, Apache-2.0. Its
+# description is NOT in this file and NOT in this repository: it is the
+# upstream URDF, fetched unmodified into vendor/ by `make so101-fetch`
+# and pinned there to one upstream commit.
+#
+# So this profile is an OVERLAY, and that is the difference from
+# threevn_arm_v1.yaml. That file is the single source of the 3VN arm's
+# physical truth, and the URDF is generated from it. Here the upstream
+# URDF is the source of kinematic truth, and this file adds only what a
+# URDF has no place for and this stack needs:
+#
+#   * which joints are the arm and which is the gripper
+#   * the named poses the scenarios drive it to
+#   * what its servos can physically deliver, from their datasheet
+#   * how the three execution targets differ (mock, gz, feetech)
+#
+# Nothing here restates a link length, an origin or a joint axis. If one
+# appeared, upstream and this file could disagree, and nothing would say
+# which was right.
+#
+# The filename deliberately does not start with `threevn_`. The scripts
+# and tests that glob `threevn_*.yaml` build each profile from our own
+# xacro; this one is assembled by threevn_robot_description/describe.py.
+
+meta:
+  model: so101_follower
+  # A robot whose description comes from somebody else. The shared
+  # machinery (launch files, the test suite) uses this to choose the
+  # overlay generator instead of a xacro entry point.
+  kind: vendor_arm
+  display_name: "SO-101 follower"
+  dof: 5
+  revision: 1
+
+description:
+  # Relative to the vendor root (/ws/vendor in the container, override
+  # with THREEVN_VENDOR_DIR). Fetched, checksummed and never committed:
+  # see scripts/fetch_so101.sh, which also records the upstream commit.
+  urdf: so101/so101.urdf
+  licence: Apache-2.0
+  source: https://github.com/TheRobotStudio/SO-ARM100
+  # What to run when the description is not there yet. Quoted in the
+  # error a fresh clone gets, so the fix is in the message.
+  fetch: make so101-fetch
+  # The upstream URDF has no `world` link, so base_link is a free body
+  # and a 632 g arm topples the first time a joint moves. A real SO-101
+  # is clamped to a bench; this is that clamp. Simulator and mock only
+  # differ from hardware in whether the bench exists, so the anchor is
+  # emitted for every target and the TF tree is the same everywhere.
+  anchor:
+    parent: world
+    child: base_link
+    xyz: [0.0, 0.0, 0.0]
+    rpy: [0.0, 0.0, 0.0]
+  # Collision geometry, per link: mesh | box | none.
+  #
+  # Upstream's collision meshes ARE its visual meshes: every printed
+  # part and every servo at full resolution, most of them tens of
+  # thousands of triangles. Measured in the dev container (CPU physics,
+  # no GPU), the arm as shipped runs at a real-time factor of 0.11 to
+  # 0.13. With each mesh swapped for its own bounding box it runs at 0.9
+  # to 1.0 -- and the simulator tier of the test suite refuses anything
+  # under 0.3, because below that, timing results stop meaning anything.
+  #
+  # A bounding box is never smaller than the part it replaces, so this
+  # errs toward reporting a contact that would not quite have happened.
+  # It is too coarse for the jaws to close on a small object: the grasp
+  # lesson will want `mesh` on gripper_link and moving_jaw_so101_v1_link,
+  # and should measure what that costs.
+  collision:
+    default: box
+
+arm:
+  # In the order arm_controller drives them. threevn_bringup's
+  # so101_controllers.yaml must list the same names in the same order;
+  # test_profile_semantics.py compares the two.
+  joints:
+    - shoulder_pan
+    - shoulder_lift
+    - elbow_flex
+    - wrist_flex
+    - wrist_roll
+  base_frame: base_link
+  # Upstream's own tool frame: the tip of the fixed jaw.
+  tool_frame: gripper_frame_link
+
+gripper:
+  # One servo, one moving jaw, a REVOLUTE joint: positions are radians.
+  # The 3VN arm's gripper is prismatic and its positions are metres. The
+  # application never needs to know which, as long as it takes "open"
+  # and "closed" from here instead of typing 0.018.
+  joint: gripper
+  # Upstream's limits are -10 deg to +100 deg. Zero is jaws touching;
+  # the ten degrees below it are calibration slack, not travel to use.
+  open: 1.4
+  closed: 0.0
+
+# Named joint-space poses. Radians, in the order of arm.joints.
+#
+# These used to be a module constant in robot_client.py: a dictionary of
+# FOUR-element lists. Joint names were discovered at runtime and the
+# poses those joints were sent to were not, so the first five-joint arm
+# stopped every scenario at home() with "expected 5 joint positions,
+# got 4". See docs/so101-spike.md.
+#
+# Each pose is checked in the fast suite: inside the joint limits with
+# margin, and with the tool clear of the bench.
+poses:
+  # All joints at zero: upstream's calibration pose. Upper arm vertical,
+  # forearm and gripper level, pointing forward.
+  home:  [0.0, 0.0, 0.0, 0.0, 0.0]
+  # Tucked back over the base, gripper tilted down at the work area.
+  ready: [0.0, -0.6, 0.8, 0.5, 0.0]
+  # Reaching down and to one side, tool a few centimetres off the bench.
+  pick:  [-0.6, -0.2, 0.5, 0.9, 0.0]
+  place: [0.6, -0.2, 0.5, 0.9, 0.0]
+  # Folded. Bus servos go limp when torque is disabled, so a real arm is
+  # driven here before it is powered down. It is what `home` is not: a
+  # pose the arm can be left in.
+  rest:  [0.0, -1.55, 1.5, 0.7, 0.0]
+
+# Servo datasheet values. The same rule as the 3VN arm: joint effort and
+# velocity limits are DERIVED from these, not taken on trust.
+#
+# Upstream's URDF declares effort="10" velocity="10" on every joint.
+# Those are placeholders: 10 N.m is about five times what this servo
+# stalls at. Left alone, the simulated arm lifts loads the real one
+# cannot, and the motion succeeds in Gazebo and stalls on the bench --
+# the exact mismatch this platform exists to catch. describe.py rewrites
+# both attributes from the numbers below.
+servos:
+  sts3215:
+    # Feetech STS3215, the 7.4 V "C001" variant, 1:345 gearing.
+    voltage: 7.4
+    stall_torque_nm: 1.912      # 19.5 kg.cm
+    no_load_speed_rads: 4.712   # 0.222 s/60deg, 45 rpm
+    mass_kg: 0.055
+    # Seller listings disagree about whether 19.5 kg.cm is the 6 V or
+    # the 7.4 V figure, and quote 0.19 to 0.22 s/60deg. These are the
+    # conservative reading. The servo reports its own load and speed, so
+    # the first session on the physical arm can replace this with a
+    # measurement, and then this line changes to `measured`.
+    provenance: datasheet
+    resolution_counts: 4096     # per revolution, 12-bit magnetic encoder
+    feedback: [position, velocity, load, voltage, temperature]
+
+defaults:
+  # Joint damping (N.m.s/rad) and Coulomb friction (N.m), added to
+  # every servo-driven joint. Upstream declares neither.
+  #
+  # FOUND BY RUNNING IT. With frictionless joints, closing the jaw while
+  # the gripper pointed down did not stop at closed: it ran on at exactly
+  # the velocity limit into the hard stop, and then never moved again.
+  # Gravity was helping the jaw along; that held it AT its velocity
+  # limit; and the physics engine (DART) gives each joint one constraint,
+  # in the order position limit, velocity limit, servo -- so a joint on
+  # a limit is not being driven at all. With the gripper level, gravity
+  # does not act about that axis, and everything worked. Mock has no
+  # gravity and no limits, and passed throughout.
+  #
+  # Damping is what lets the joint fall back below the limit so the
+  # servo takes over again. It is also simply true: a geared servo
+  # resists being turned.
+  #
+  # provenance: estimated. These are the 3VN arm's values, not a
+  # measurement of an STS3215. Session R4 measures them.
+  joint_damping: 0.05
+  joint_friction: 0.01
+
+limit_derate:
+  # The official bill of materials powers these 7.4 V servos from a 5 V
+  # supply. Torque and speed fall roughly with voltage, so the usable
+  # share of the 7.4 V datasheet figure is about 5 / 7.4.
+  # provenance: estimated. Measure it on the bench.
+  effort: 0.68
+  # 55% of no-load, as on the 3VN arm, on top of the same supply ratio.
+  velocity: 0.37
+
+joints:
+  # Which servo drives each joint, its bus id, and its calibration.
+  #
+  # The ids are the LeRobot convention, 1 at the base to 6 at the jaw,
+  # which is also the order the motors are numbered during assembly.
+  #
+  # zero_count and direction are how one servo's encoder counts map onto
+  # one joint's radians: the count it reads when the joint is at the
+  # URDF's zero, and whether the servo turns the way the joint's axis
+  # does. They are facts about an ASSEMBLED arm -- which tooth the horn
+  # went on, which way round the servo sits -- so they cannot be known
+  # before there is one.
+  #
+  # provenance: assumed. 2048 is mid-travel and +1 is a guess. These are
+  # what a perfectly centred arm with every servo the right way round
+  # would have, and no real arm is that. The first thing a wrong
+  # direction does is drive a joint the wrong way, so the first motion
+  # on the physical arm is small and slow. Session R2 measures all
+  # twelve.
+  shoulder_pan:  {servo: sts3215, id: 1, zero_count: 2048, direction: 1}
+  shoulder_lift: {servo: sts3215, id: 2, zero_count: 2048, direction: 1}
+  elbow_flex:    {servo: sts3215, id: 3, zero_count: 2048, direction: 1}
+  wrist_flex:    {servo: sts3215, id: 4, zero_count: 2048, direction: 1}
+  wrist_roll:    {servo: sts3215, id: 5, zero_count: 2048, direction: 1}
+  gripper:       {servo: sts3215, id: 6, zero_count: 2048, direction: 1}
+
+control:
+  # A file in threevn_bringup/config/. NAMED here and resolved by the
+  # launch files, so this package still never looks up a package that
+  # depends on it.
+  controllers: so101_controllers.yaml
+
+hardware:
+  # The swap point. `target:=feetech` selects this block, and nothing
+  # above the hardware seam changes: same controllers, same topics, same
+  # actions, same scenarios.
+  #
+  # The interface is threevn_hardware's FeetechSystemInterface. It has
+  # been run against a SIMULATED servo bus and nothing else: no real
+  # servo has answered it yet. The plugin is named here rather than in
+  # code, so that swapping in a community driver is a one-line change.
+  feetech:
+    plugin: threevn_hardware/FeetechSystemInterface
+    # The Waveshare bus servo adapter enumerates as a CDC serial device.
+    # Docker Desktop on macOS cannot pass USB through, so on a Mac this
+    # becomes a TCP endpoint served from the host. Either can be given
+    # for one run without editing this file:
+    #
+    #   make robot PROFILE=so101_follower TRANSPORT=tcp ENDPOINT=host:port
+    transport: serial        # serial | tcp
+    endpoint: /dev/ttyACM0
+    baud: 1000000
+    control_rate_hz: 50
+    # How long a servo has to answer a request. A reply is ten bytes at
+    # a megabaud; the wait is for the USB adapter, whose latency timer
+    # is commonly 16 ms and needs lowering. provenance: estimated.
+    response_timeout_ms: 10

@@ -60,6 +60,10 @@ from threevn_control.kinematics import (
 )
 from trajectory_msgs.msg import JointTrajectoryPoint
 
+#: The 3VN arm's own joint names. NOT what the client drives -- that is
+#: asked of the controller, see arm_joints() -- but the names a robot
+#: answers to when its controller cannot be reached, and the reference
+#: joint_prefix() compares against to find a composed robot's prefix.
 ARM_JOINTS = [
     'shoulder_pan_joint',
     'shoulder_lift_joint',
@@ -67,15 +71,16 @@ ARM_JOINTS = [
     'wrist_joint',
 ]
 
-#: Joint-space poses used by the scenarios. Radians.
-POSES = {
-    #: All joints at zero: the arm straight up. This is the reference
-    #: configuration, not a rest position - an unpowered arm falls.
-    'home': [0.0, 0.0, 0.0, 0.0],
-    'ready': [0.0, 0.5, -0.4, 0.0],
-    'pick': [0.6, 0.9, -0.7, 0.2],
-    'place': [-0.6, 0.9, -0.7, 0.2],
-}
+# There is deliberately no POSES here any more.
+#
+# It was a dictionary of four-element lists: `home`, `ready`, `pick` and
+# `place` for one particular arm, in a module that discovered everything
+# else about the robot at runtime. The first five-joint arm stopped at
+# home() with "expected 5 joint positions, got 4".
+#
+# Named poses are a fact about a robot, so they live in its profile, and
+# the description carries them to whoever is driving it. See
+# named_poses() below and urdf/arm/semantics.xacro.
 
 
 def fetch_controller_param(node, controller, name, timeout=3.0):
@@ -178,6 +183,12 @@ class RobotClient(Node):
 
         #: joint name -> (lower, upper), parsed from /robot_description.
         self._limits = {}
+        #: The <threevn_semantics> block of the running description: the
+        #: arm's joints, the gripper's travel and the named poses. None
+        #: until the description arrives, {} if it carries no such block.
+        self._semantics = None
+        #: follower joint -> the joint it mimics.
+        self._mimics = {}
         self.create_subscription(
             String, '/robot_description', self._on_description,
             QoSProfile(depth=1,
@@ -208,6 +219,134 @@ class RobotClient(Node):
             lower, upper = limit.get('lower'), limit.get('upper')
             if lower is not None and upper is not None:
                 self._limits[name] = (float(lower), float(upper))
+        for joint in root.iter('joint'):
+            mimic = joint.find('mimic')
+            if mimic is not None and joint.get('name'):
+                self._mimics[joint.get('name')] = mimic.get('joint')
+        self._semantics = self._parse_semantics(root)
+
+    @staticmethod
+    def _parse_semantics(root):
+        """
+        Read the <threevn_semantics> block out of a parsed description.
+
+        Returns {} for a description without one, which is a legitimate
+        robot: it can be moved joint by joint, it just has no named poses.
+        """
+        block = root.find('threevn_semantics')
+        if block is None:
+            return {}
+        semantics = {'profile': block.get('profile'), 'poses': {}}
+        arm = block.find('arm')
+        if arm is not None:
+            semantics['arm_joints'] = (arm.get('joints') or '').split()
+            semantics['base_frame'] = arm.get('base_frame')
+            semantics['tool_frame'] = arm.get('tool_frame')
+        gripper = block.find('gripper')
+        if gripper is not None:
+            semantics['gripper'] = {
+                'joint': gripper.get('joint'),
+                'open': float(gripper.get('open')),
+                'closed': float(gripper.get('closed')),
+            }
+        for pose in block.findall('pose'):
+            semantics['poses'][pose.get('name')] = [
+                float(v) for v in (pose.get('positions') or '').split()]
+        return semantics
+
+    def semantics(self):
+        """
+        Return what the running description says about itself.
+
+        Waits for /robot_description if it has not arrived: the topic is
+        latched, so on a robot that is up this returns at once.
+        """
+        if self._semantics is None:
+            import rclpy
+            deadline = time.monotonic() + self._timeout
+            while self._semantics is None and time.monotonic() < deadline:
+                rclpy.spin_once(self, timeout_sec=0.1)
+        if self._semantics is None:
+            raise RobotNotReady('no /robot_description received yet')
+        return self._semantics
+
+    def profile(self):
+        """Return the name of the profile this robot was built from, or None."""
+        return self.semantics().get('profile')
+
+    def named_poses(self):
+        """
+        Return this robot's named poses: name -> positions, in arm_joints() order.
+
+        Read from the description the robot is RUNNING, for the same
+        reason the limits are: a client attached to a robot gets that
+        robot's poses, whichever profile launched it.
+
+        The profile lists positions in the order of ITS `arm.joints`,
+        and the controller drives them in the order of its own `joints`
+        parameter. Those are two files, so the mapping goes by name
+        rather than by position -- and a pose for joints the controller
+        does not drive is an error that names both lists, instead of a
+        trajectory sent to the wrong joints.
+        """
+        semantics = self.semantics()
+        declared = semantics.get('arm_joints') or []
+        driven = self.arm_joints()
+        poses = {}
+        for name, positions in semantics.get('poses', {}).items():
+            if len(positions) != len(declared):
+                raise ValueError(
+                    f'pose {name!r} has {len(positions)} positions for '
+                    f'{len(declared)} arm joints {declared}')
+            by_joint = dict(zip(declared, positions))
+            if set(by_joint) != set(driven):
+                raise ValueError(
+                    f'the poses in the description are for joints {declared}, '
+                    f'but arm_controller drives {driven}')
+            poses[name] = [by_joint[j] for j in driven]
+        return poses
+
+    def pose(self, pose_name):
+        """Return one named pose, in arm_joints() order."""
+        poses = self.named_poses()
+        if not poses:
+            raise ValueError(
+                'the description of this robot declares no named poses; add a '
+                '`poses:` block to its profile')
+        if pose_name not in poses:
+            raise ValueError(
+                f'unknown pose {pose_name!r}; one of {sorted(poses)}')
+        return poses[pose_name]
+
+    def gripper_joint(self):
+        """Return the joint the gripper is commanded and read through."""
+        gripper = self.semantics().get('gripper')
+        if gripper and gripper.get('joint'):
+            return gripper['joint']
+        return self.resolve('gripper_left_finger_joint')
+
+    def gripper_travel(self):
+        """
+        Return the gripper's (closed, open) positions, in its joint's own unit.
+
+        Metres on a prismatic gripper and radians on a revolute one. A
+        caller that takes both ends from here never has to know which.
+        Falls back to the joint's limits for a description that does not
+        say.
+        """
+        gripper = self.semantics().get('gripper')
+        if gripper:
+            return gripper['closed'], gripper['open']
+        limits = self.get_limits(self.gripper_joint())
+        if limits is None:
+            raise RobotNotReady('the gripper joint has no limits to open to')
+        return limits
+
+    def gripper_followers(self):
+        """Return the joints that mimic the gripper joint, if any."""
+        commanded = self.gripper_joint()
+        return sorted(follower for follower, leader in self._mimics.items()
+                      if leader == commanded)
 
     # -- validation ----------------------------------------------------
 
@@ -384,12 +523,19 @@ class RobotClient(Node):
         frames carry a prefix.
         """
         if self._geometry is None:
-            if self._description is None:
-                raise RobotNotReady('no /robot_description received yet')
+            # The frames come from the description, so that on an arm
+            # this closed form does not fit, arm_geometry() gets as far
+            # as the structure and refuses for the true reason -- rather
+            # than failing to find a frame name that was only ever the
+            # 3VN arm's. semantics() also waits for the description,
+            # and raises RobotNotReady if it never arrives.
+            semantics = self.semantics()
             self._geometry = arm_geometry(
                 self._description,
-                target=self.resolve('grasp_frame'),
-                base=self.resolve('base_link'))
+                target=(semantics.get('tool_frame')
+                        or self.resolve('grasp_frame')),
+                base=(semantics.get('base_frame')
+                      or self.resolve('base_link')))
         return self._geometry
 
     def approach_pitch(self, position, prefer='middle'):
@@ -529,7 +675,7 @@ class RobotClient(Node):
         return worst if worst != float('inf') else 0.0
 
     def _gripper_feedback_joint(self):
-        return self.resolve('gripper_left_finger_joint')
+        return self.gripper_joint()
 
     def grasp_at(self, position, approach=0.06, pitch=None, duration=2.0):
         """
@@ -616,10 +762,8 @@ class RobotClient(Node):
         return self.move_joints(target, duration)
 
     def move_to_named(self, pose_name, duration=2.0):
-        """Move to one of the named poses in POSES."""
-        if pose_name not in POSES:
-            raise ValueError(f'unknown pose {pose_name!r}; one of {sorted(POSES)}')
-        return self.move_joints(POSES[pose_name], duration)
+        """Move to one of this robot's named poses. See named_poses()."""
+        return self.move_joints(self.pose(pose_name), duration)
 
     def home(self, duration=2.5):
         """Move to the reference configuration."""
@@ -628,7 +772,13 @@ class RobotClient(Node):
     # -- gripper -------------------------------------------------------
 
     def set_gripper(self, position, max_effort=5.0):
-        """Command the gripper to an opening in metres (0 = closed)."""
+        """
+        Command the gripper joint to `position`.
+
+        In the joint's own unit: an opening in metres on the 3VN arm's
+        prismatic gripper, an angle in radians on a revolute jaw. Take
+        the ends of the range from gripper_travel().
+        """
         goal = GripperCommand.Goal()
         goal.command.position = float(position)
         goal.command.max_effort = float(max_effort)
@@ -636,7 +786,7 @@ class RobotClient(Node):
 
     def open_gripper(self):
         """Open the gripper fully."""
-        return self.set_gripper(0.018)
+        return self.set_gripper(self.gripper_travel()[1])
 
     def close_gripper(self, max_effort=5.0):
         """
@@ -646,7 +796,7 @@ class RobotClient(Node):
         object succeeds rather than timing out - which is the whole point
         of a gripper.
         """
-        return self.set_gripper(0.0, max_effort)
+        return self.set_gripper(self.gripper_travel()[0], max_effort)
 
     # -- internals -----------------------------------------------------
 
