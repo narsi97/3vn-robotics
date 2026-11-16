@@ -1056,7 +1056,7 @@ lessons:
     builds_on: [the-seam, solve-the-arm]
     mentions:
       - tag: security
-        quote: Its description is used exactly as it ships, fetched on demand and never committed
+        quote: fetched on demand at a pinned commit and never committed
     minutes: 35
     objective: Run the whole stack against a robot nobody here designed, and see what it took to make that true.
     body: |
