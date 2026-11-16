@@ -247,18 +247,18 @@ Lesson: *A test suite people actually run*.
 time make test
 ```
 
-Forty-nine seconds in a new clone. Play the middle at eight times
+About fifty seconds in a new clone. Play the middle at eight times
 speed, and slow down for the last three lines:
 
 ```
-Summary: 11 packages finished [38.3s]
+Summary: 11 packages finished [42.8s]
   1 package had stderr output: threevn_control
-Summary: 928 tests, 0 errors, 0 failures, 31 skipped
+Summary: 938 tests, 0 errors, 0 failures, 31 skipped
 ```
 
 The `stderr output` line is there on every run and is not a failure.
 In a folder where `make so101-fetch` has been run, eleven more tests
-run: `20 skipped`, and 54 to 56 seconds.
+run: `20 skipped`, and the run is a few seconds longer.
 
 > About nine hundred checks, in under a minute. There is no simulator
 > running, and there is no robot.
@@ -287,7 +287,7 @@ Save. Back in the terminal:
 make test
 ```
 
-Forty-one seconds, and it ends in red. Speed through the run again and
+About fifty seconds, and it ends in red. Speed through the run again and
 stop on these lines, which are near the end:
 
 ```
@@ -299,7 +299,7 @@ AssertionError: model '3vn_arm_v1' is not a legal ROS identifier -- it must star
 ```
 
 ```
-Summary: 928 tests, 0 errors, 2 failures, 31 skipped
+Summary: 938 tests, 0 errors, 2 failures, 31 skipped
 make: *** [test] Error 1
 ```
 
@@ -323,7 +323,7 @@ make test
 ```
 
 Under a minute again, ending
-`Summary: 928 tests, 0 errors, 0 failures, 31 skipped`. Speed through
+`Summary: 938 tests, 0 errors, 0 failures, 31 skipped`. Speed through
 it, and say nothing until the summary is on screen.
 
 > Back to green.
@@ -533,7 +533,7 @@ works today; the lessons are not changed by this file.
 |---|---|---|---|
 | 1 | `make` lists targets "from `doctor` and `setup` to `play`, `train` and `site`" | `train` is a target and is not in the list | says "from `make doctor` to `make nuke`" |
 | 2 | `docker volume ls \| grep 3vn-robotics` shows three volumes | It prints nothing. The volumes are `docker_build`, `docker_install` and `docker_log`: Compose names them after the `docker/` folder, not the repository | matches the three endings |
-| 3 | "Several hundred" assertions, "well under a minute" | 928 tests, about 900 of them run in a new clone, in 41 to 56 seconds against a limit of 60 | says "about nine hundred" and "under a minute" |
+| 3 | "Several hundred" assertions, "well under a minute" | 938 tests, about 900 of them run in a new clone, in 49 to 59 seconds against a limit of 60 | says "about nine hundred" and "under a minute" |
 | 4 | `make urdf TARGET=gz \| grep -c …` prints `1` | It does, after about 290 lines of build output | adds `2>/dev/null` |
 | 4 | `grep -n "xacro:if" …`: "three branches and no others" | It prints fourteen lines: the three targets, four joint-type conditions, and every closing tag | matches the three target lines |
 | 6 | `make shell`, then the `grep -c`, expecting `0` | `0`, and then `make: *** [shell] Error 1` when the shell is left | keeps the error and explains it |
@@ -545,7 +545,9 @@ behind. Lesson 1 sends a learner who is out of disk to `make nuke`.
 
 ## What was checked
 
-On 2026-11-16, on `main` at `99cb2a4`:
+On 2026-11-16. The test runs and the four counts in segment 4 are from
+`main` at `531010b`. Everything else was run at `99cb2a4`, two merges
+earlier, and none of the files those commands read changed in between.
 
 - `git clone`, `make` and `make doctor` were run in a new, empty
   folder.
@@ -553,10 +555,11 @@ On 2026-11-16, on `main` at `99cb2a4`:
   a checkout whose `src/` is `main`'s plus one RViz file from the pilot
   branch. The outputs and timings quoted are from those runs. The
   commands inside `make shell` went to a real interactive shell.
-- The fault in segment 3 was planted and reverted for real, twice. With
-  the SO-101 description absent, as in a new clone: 0 failures in 49
-  seconds, then 2 failures naming the rule in 41. With it fetched: 0
-  failures in 56 seconds, 2 failures in 54, and 0 again in 54.
+- The fault in segment 3 was planted and reverted for real. With the
+  SO-101 description absent, as in a new clone: 0 failures in 53
+  seconds, 2 failures naming the rule in 50, and 0 again in 49. With it
+  fetched: 0 failures in 59 seconds, on the first run after the source
+  changed, which includes compiling it.
 
 Not checked:
 
