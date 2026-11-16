@@ -53,7 +53,7 @@ tags:
 
   - slug: security
     label: Security
-    description: Supply chain and access, covering auditable base images, licences, what an image ships, digests, approval gates and robots behind home routers.
+    description: Supply chain and access, covering what an image is built from and ships, licences, digests and provenance, auditing a deploy gate, and every port a robot leaves open, with the gaps named as gaps.
 
   - slug: safety
     label: Safety
