@@ -26,22 +26,19 @@ Marked `ros` and run by `make test-ros`.
 import math
 import time
 
-from conftest import run as _run
+from conftest import (
+    joint_positions,
+    legal_targets,
+    ROBOT,
+    run as _run,
+    send_arm_goal,
+)
 import pytest
 
 pytestmark = pytest.mark.ros
 
-STARTUP_TIMEOUT = 90.0
-POLL = 2.0
-
-EXPECTED_CONTROLLERS = {
-    'joint_state_broadcaster',
-    'arm_controller',
-    'gripper_controller',
-}
-
-ARM_JOINTS = ['shoulder_pan_joint', 'shoulder_lift_joint',
-              'elbow_joint', 'wrist_joint']
+#: Read from the description of the robot under test -- see conftest.
+ARM_JOINTS = ROBOT['arm_joints']
 
 
 # -- node startup ------------------------------------------------------
@@ -106,47 +103,21 @@ def test_joint_states_publishes_every_actuated_joint(robot):
     """
     Every commandable joint appears in /joint_states.
 
-    The mimic joint deliberately does not - it has no ros2_control
-    interface - so it is excluded here and checked through TF instead.
+    A mimic joint deliberately does not - it has no ros2_control
+    interface - so on a gripper that has one it is excluded here and
+    checked through TF instead. A single-jaw gripper has none, and the
+    second half of this test then has nothing to assert.
     """
     code, out = _run(['timeout', '6', 'ros2', 'topic', 'echo',
                       '/joint_states', '--once'], timeout=15)
-    for joint in ARM_JOINTS + ['gripper_left_finger_joint']:
+    for joint in ARM_JOINTS + [ROBOT['gripper_joint']]:
         assert joint in out, f'{joint} missing from /joint_states'
-    assert 'gripper_right_finger_joint' not in out, \
-        'the mimic joint should not be in /joint_states'
+    for follower in ROBOT['gripper_followers']:
+        assert follower not in out, \
+            f'the mimic joint {follower} should not be in /joint_states'
 
 
 # -- limit enforcement, the Phase 2 finding, now closed ----------------
-
-def _send_arm_goal(positions, seconds=2):
-    joints = ', '.join(ARM_JOINTS)
-    pos = ', '.join(str(p) for p in positions)
-    goal = (f'{{trajectory: {{joint_names: [{joints}], '
-            f'points: [{{positions: [{pos}], '
-            f'time_from_start: {{sec: {seconds}}}}}]}}}}')
-    return _run(['ros2', 'action', 'send_goal',
-                 '/arm_controller/follow_joint_trajectory',
-                 'control_msgs/action/FollowJointTrajectory', goal],
-                timeout=60)
-
-
-def _joint_position(name):
-    code, out = _run(['timeout', '6', 'ros2', 'topic', 'echo',
-                      '/joint_states', '--once'], timeout=15)
-    lines = out.splitlines()
-    names_idx = next(i for i, ln in enumerate(lines) if ln.startswith('name:'))
-    pos_idx = next(i for i, ln in enumerate(lines) if ln.startswith('position:'))
-    names = [ln.strip('- ').strip() for ln in lines[names_idx + 1:pos_idx]]
-    rest = lines[pos_idx + 1:]
-    values = []
-    for ln in rest:
-        stripped = ln.strip()
-        if not stripped.startswith('- '):
-            break
-        values.append(float(stripped[2:]))
-    return dict(zip(names, values))[name]
-
 
 def test_out_of_limit_command_is_clamped_below_the_seam(robot):
     """
@@ -166,20 +137,33 @@ def test_out_of_limit_command_is_clamped_below_the_seam(robot):
     Deliberately sent straight to the action, bypassing RobotClient: the
     client's own validation is a separate layer and would mask whether
     this one works.
+
+    The joint is the robot's first, and the limit is its own: a quarter
+    turn past wherever this arm's pan stops.
     """
-    _send_arm_goal([0.0, 0.0, 0.0, 0.0])
+    joint = ARM_JOINTS[0]
+    limit = ROBOT['limits'][joint][1]
+    zeros = [0.0] * len(ARM_JOINTS)
+
+    send_arm_goal(zeros)
     time.sleep(1.0)
 
-    code, out = _send_arm_goal([math.pi, 0.0, 0.0, 0.0])
+    code, out = send_arm_goal([limit + math.pi / 2] + zeros[1:])
     assert code == 0, out
     time.sleep(1.5)
 
-    actual = _joint_position('shoulder_pan_joint')
-    limit = math.pi / 2
+    actual = joint_positions()[joint]
     assert actual <= limit + 0.01, (
-        f'shoulder_pan_joint reached {actual:.5f} rad '
+        f'{joint} reached {actual:.5f} rad '
         f'({math.degrees(actual):.1f} deg) against a limit of {limit:.5f} rad '
         '- enforce_command_limits is not working'
+    )
+    # And it got THERE, not nowhere. Without this, a controller that
+    # dropped the goal outright would pass a test about clamping.
+    assert actual >= limit - 0.05, (
+        f'{joint} stopped at {actual:.5f} rad, well short of its '
+        f'{limit:.5f} rad limit - the command was not clamped to the '
+        'limit, it was dropped'
     )
 
 
@@ -191,12 +175,39 @@ def test_in_limit_command_is_not_clamped(robot):
     the usable range. Without this, a limiter that clamped everything to
     zero would pass the previous test.
     """
-    target = [0.4, 0.3, -0.2, 0.1]
-    code, out = _send_arm_goal(target)
+    target = legal_targets()
+    code, out = send_arm_goal(target)
     assert code == 0, out
     time.sleep(1.5)
 
+    positions = joint_positions()
     for joint, want in zip(ARM_JOINTS, target):
-        got = _joint_position(joint)
+        got = positions[joint]
         assert abs(got - want) < 0.02, \
             f'{joint}: commanded {want:+.3f}, reached {got:+.3f}'
+
+
+# -- the robot's own facts, through the client -------------------------
+
+@pytest.mark.parametrize('scenario', ['home', 'move_to_position', 'gripper'])
+def test_scenario_passes_against_mock(robot, scenario):
+    """
+    The scenarios that depend on a robot's own facts pass on this robot.
+
+    `home` and `move_to_position` visit every named pose, and `gripper`
+    opens and closes to the travel the profile declares. These are the
+    three that read something a foreign robot has different: the poses
+    were a four-element constant in the client until a five-joint arm
+    stopped every scenario at home(), and the gripper width was 18 mm
+    typed into a method until a gripper measured in radians needed
+    opening.
+
+    Checked here, in the cheapest tier that has a robot at all, so the
+    next such assumption costs a minute to find rather than a simulator
+    run. The full suite still runs against physics in `make test-sim`.
+    """
+    code, out = _run(
+        ['ros2', 'run', 'threevn_control', 'run_scenario', scenario],
+        timeout=120)
+    assert code == 0, f'scenario {scenario} failed:\n{out}'
+    assert 'PASS' in out, out

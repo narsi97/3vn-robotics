@@ -1,0 +1,67 @@
+# Controllers for the SO-101 follower.
+#
+# The same three controllers as controllers.yaml, of the same types, on
+# the same names. That is what keeps the public API identical between
+# two robots that share no part:
+#
+#   topic   /joint_states                            continuous state
+#   service /controller_manager/switch_controller    short command
+#   action  /arm_controller/follow_joint_trajectory  long-running motion
+#   action  /gripper_controller/gripper_cmd          long-running motion
+#
+# What differs is only what a different robot has to differ in: the
+# joint names, and how many there are. And like controllers.yaml, this
+# file is IDENTICAL across the robot's targets (mock, gz, feetech).
+#
+# The joint names repeat so101_follower.yaml's `arm.joints` and
+# `gripper.joint`. test_profile_controllers_agree.py compares the two,
+# because nothing else would notice them drifting apart: the controller
+# rejects a trajectory naming a joint it does not have, and that
+# surfaces as "goal rejected" with no hint that a name is at fault.
+
+controller_manager:
+  ros__parameters:
+    # 50 Hz, matching hardware.feetech.control_rate_hz in the profile.
+    update_rate: 50
+
+    # Clamp every command to the limits in the URDF, below the hardware
+    # seam. Here those limits are upstream's.
+    enforce_command_limits: true
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    arm_controller:
+      type: joint_trajectory_controller/JointTrajectoryController
+
+    gripper_controller:
+      type: position_controllers/GripperActionController
+
+arm_controller:
+  ros__parameters:
+    joints:
+      - shoulder_pan
+      - shoulder_lift
+      - elbow_flex
+      - wrist_flex
+      - wrist_roll
+    command_interfaces:
+      - position
+    state_interfaces:
+      - position
+      - velocity
+    allow_partial_joints_goal: false
+    # Looser than a bus servo needs. They are the 3VN arm's values, kept
+    # until there is a physical SO-101 to tune against: tightening a
+    # tolerance against a simulator proves nothing about the arm.
+    constraints:
+      stopped_velocity_tolerance: 0.05
+      goal_time: 2.0
+
+gripper_controller:
+  ros__parameters:
+    # One servo, one moving jaw. A revolute joint, so the command is an
+    # angle in radians where the 3VN arm's is an opening in metres.
+    joint: gripper
+    allow_stalling: true
+    max_effort: 10.0

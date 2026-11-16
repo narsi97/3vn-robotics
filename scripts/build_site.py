@@ -100,6 +100,7 @@ CURRICULUM = [
         ('firmware.md', 'Firmware'),
         ('safety.md', 'Safety'),
         ('so101-spike.md', 'Spike: a robot we did not design'),
+        ('so101.md', 'The SO-101, as a second robot'),
     ]),
 ]
 

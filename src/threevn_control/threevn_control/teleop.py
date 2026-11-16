@@ -339,8 +339,16 @@ class Teleop(RobotClient):
 
     def _on_gripper(self, direction):
         """Open or close the gripper without waiting for the result."""
-        limits = self.get_limits(self._gripper_joint)
-        span = (limits[1] - limits[0]) if limits else 0.02
+        # Between closed and open as the robot's own description gives
+        # them, NOT between the joint's limits. On the 3VN arm those are
+        # the same two numbers. On a jaw whose limits include slack past
+        # closed and past open they are not, and the difference is not
+        # cosmetic in the simulator: a joint parked exactly on a hard
+        # stop can stay there, because the physics engine stops driving
+        # a joint that is on a limit.
+        travel = self.gripper_travel()
+        limits = (min(travel), max(travel))
+        span = limits[1] - limits[0]
         self._gripper_target = clamp(
             self._gripper_target + direction * span / 4.0, limits)
         goal = GripperCommand.Goal()

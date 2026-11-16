@@ -1,0 +1,57 @@
+<?xml version="1.0"?>
+<!--
+  What the application needs to know about the arm, carried IN the
+  description.
+
+  A URDF says where the joints are and how far they turn. It has no
+  place for "these four joints are the arm", "the gripper is open at
+  18 mm" or "home is all zeros", and those facts used to live in the
+  client as constants. They were this robot's facts in code that claimed
+  to be general, and the first foreign arm found them.
+
+  MoveIt solves the same problem with a second file, the SRDF, and a
+  second topic. This is one element in the file that is already there:
+  the client subscribes to /robot_description for the joint limits, so
+  it reads this from the same message. A client attached to a running
+  robot therefore gets the poses of THAT robot, and nothing has to be
+  told which profile launched it.
+
+  Every parser that consumes the description ignores an element it does
+  not know: urdfdom, sdformat and ros2_control all read past <gazebo>
+  and <ros2_control> on the same terms.
+
+  threevn_robot_description/describe.py emits the identical element for
+  a vendor arm. test_profile_semantics.py holds the two to one shape.
+
+  On the joint list below: (' ' + prefix).join(...) rather than a
+  comprehension, because xacro evaluates expressions with the properties
+  as LOCALS and a comprehension body cannot see locals. The note lives
+  up here because a comment inside a macro body is copied into every
+  description the macro expands into.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- xacro has no loop. A macro that emits one pose and calls itself
+       with the rest is the idiom. -->
+  <xacro:macro name="threevn_named_poses" params="names poses">
+    <xacro:if value="${len(names) > 0}">
+      <pose name="${names[0]}"
+            positions="${' '.join(map(str, map(float, poses[names[0]])))}"/>
+      <xacro:threevn_named_poses names="${names[1:]}" poses="${poses}"/>
+    </xacro:if>
+  </xacro:macro>
+
+  <xacro:macro name="threevn_arm_semantics" params="prefix">
+    <threevn_semantics profile="${cfg['meta']['model']}">
+      <arm joints="${prefix + (' ' + prefix).join(cfg['arm']['joints'])}"
+           base_frame="${prefix}${cfg['arm']['base_frame']}"
+           tool_frame="${prefix}${cfg['arm']['tool_frame']}"/>
+      <gripper joint="${prefix}${cfg['gripper']['joint']}"
+               open="${float(cfg['gripper']['open'])}"
+               closed="${float(cfg['gripper']['closed'])}"/>
+      <xacro:threevn_named_poses names="${list(cfg['poses'].keys())}"
+                                 poses="${cfg['poses']}"/>
+    </threevn_semantics>
+  </xacro:macro>
+
+</robot>

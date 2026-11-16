@@ -64,7 +64,7 @@ help:
 	@echo "  make urdf      Expand the xacro and print the URDF"
 	@echo "  make workspace Where the gripper can reach (PITCH=90 for side-on)"
 	@echo "  make grasp     Grasp the cube and prove it (needs WORLD=grasp_bench)"
-	@echo "  make so101     SPIKE: run our stack against TheRobotStudio SO-101"
+	@echo "  make so101     The SO-101 in Gazebo (= make sim PROFILE=so101_follower)"
 	@echo "  make site      Render the docs into a static course site"
 	@echo "  make course-check  Validate course/*.yaml without rendering"
 	@echo "  make view      RViz + joint sliders            -> $(NOVNC)"
@@ -89,6 +89,7 @@ help:
 	@echo "  make nuke      clean + drop the image and volumes"
 	@echo ""
 	@echo "  Vars: PROFILE=$(PROFILE)  TARGET=$(TARGET)  GUI=$(GUI)"
+	@echo "  Robots: PROFILE=threevn_arm_v1 (default) | so101_follower (make so101-fetch first)"
 	@echo ""
 
 doctor:
@@ -139,14 +140,20 @@ test: build
 # physics. Sits between the fast suite (no ROS at all) and the Gazebo
 # suite (two minutes), and covers every interface contract in about a
 # minute.
+#
+# PROFILE chooses the robot, as it does for `make mock`: the same suite
+# runs against the 3VN arm and, with PROFILE=so101_follower, against an
+# arm with different joints, a different gripper and nothing of ours in
+# its description. -rs prints the reason for every skip, because a test
+# that does not apply to a robot should say so rather than vanish.
 test-ros: build stop
-	$(RUN) "cd /ws/src/threevn_bringup && python3 -m pytest test -m ros -v"
+	$(RUN) "cd /ws/src/threevn_bringup && THREEVN_PROFILE=$(PROFILE) python3 -m pytest test -m ros -v -rs"
 
 # Runs pytest DIRECTLY rather than through colcon: the slow marker is
 # excluded at the CMake level (see threevn_sim/CMakeLists.txt), so colcon
 # would skip exactly the tests this target exists to run.
 test-sim: build stop
-	$(RUN) "cd /ws/src/threevn_sim && python3 -m pytest test -m slow -v"
+	$(RUN) "cd /ws/src/threevn_sim && THREEVN_PROFILE=$(PROFILE) python3 -m pytest test -m slow -v -rs"
 
 # `colcon test-result` reports every XML under build/, not just the tests
 # this invocation ran -- so a failure from an earlier `make test` was
@@ -163,13 +170,10 @@ lint: build
 # wrong-robot bug the description tests now guard against.
 ROBOT   ?= arm
 ifeq ($(ROBOT),base)
-URDF_ENTRY   := threevn_base.urdf.xacro
 URDF_PROFILE := $(BASE_PROFILE)
 else ifeq ($(ROBOT),arm)
-URDF_ENTRY   := threevn_arm.urdf.xacro
 URDF_PROFILE := $(PROFILE)
 else ifeq ($(ROBOT),mm)
-URDF_ENTRY   := threevn_mobile_manipulator.urdf.xacro
 URDF_PROFILE := $(MM_PROFILE)
 else
 $(error ROBOT must be 'arm', 'base' or 'mm', not '$(ROBOT)')
@@ -180,9 +184,14 @@ endif
 # counts only the robot. It used to depend on `build`, whose colcon log
 # and make's own echoed command lines landed on stdout ahead of the XML.
 # The build still runs first; its log goes to stderr, where you see it.
+#
+# `describe` rather than xacro directly: it is what the launch files
+# call, so this prints the description that actually runs. For our own
+# robots that is xacro's output byte for byte; for somebody else's
+# (PROFILE=so101_follower) it is their URDF plus our overlay.
 urdf: up
 	@$(RUN) "(colcon build --symlink-install --event-handlers console_direct+ && $(PRUNE)) 1>&2"
-	@$(RUN) "ros2 run xacro xacro $(SHARE)/urdf/$(URDF_ENTRY) params_file:=$(SHARE)/config/$(URDF_PROFILE).yaml target:=$(TARGET)"
+	@$(RUN) "ros2 run threevn_robot_description describe $(URDF_PROFILE) --target $(TARGET)"
 
 # The course site. Rendered in a throwaway python image rather than the
 # dev container, which has no markdown and does not need one. The
@@ -205,12 +214,21 @@ site-serve: site
 	@docker run --rm -p 127.0.0.1:8109:80 \
 	  -v "$(PWD)/site":/usr/share/nginx/html:ro nginx:alpine
 
-# A spike: somebody else's robot, our controllers. See the launch file.
+# Somebody else's robot, our controllers. It began as a spike with its
+# own launch file; it is now a profile like any other, so every target
+# that takes PROFILE takes this one:
+#
+#   make sim  PROFILE=so101_follower      make mock     PROFILE=so101_follower
+#   make view PROFILE=so101_follower      make test-ros PROFILE=so101_follower
+#
+# `make so101` stays as the short way to say the first of those.
+SO101_PROFILE := so101_follower
+
 so101-fetch:
 	@./scripts/fetch_so101.sh
 
-so101: build stop
-	$(RUN_TTY) "ros2 launch threevn_sim so101_sim.launch.py"
+so101:
+	@$(MAKE) --no-print-directory sim PROFILE=$(SO101_PROFILE)
 
 # Needs a running: make play WORLD=grasp_bench
 grasp: build

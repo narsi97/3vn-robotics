@@ -1,0 +1,69 @@
+# The overlay for fixtures/toy_arm.urdf. The same shape as
+# config/so101_follower.yaml, with numbers chosen to be easy to check.
+meta:
+  model: toy_arm
+  kind: vendor_arm
+  display_name: "Toy arm"
+  dof: 2
+  revision: 1
+
+description:
+  urdf: toy_arm.urdf
+  licence: Apache-2.0
+  source: this repository
+  fetch: make toy-fetch
+  anchor:
+    parent: world
+    child: base_link
+    xyz: [0.0, 0.0, 0.0]
+    rpy: [0.0, 0.0, 0.0]
+  collision:
+    default: box
+    links:
+      link_b: none
+
+arm:
+  joints: [j_a, j_b]
+  base_frame: base_link
+  tool_frame: tip
+
+gripper:
+  joint: j_jaw
+  open: 0.7
+  closed: 0.0
+
+poses:
+  home:  [0.0, 0.0]
+  ready: [0.3, -0.3]
+
+servos:
+  toy:
+    voltage: 6.0
+    stall_torque_nm: 2.0
+    no_load_speed_rads: 4.0
+    mass_kg: 0.05
+    provenance: datasheet
+
+defaults:
+  joint_damping: 0.05
+  joint_friction: 0.01
+
+limit_derate:
+  effort: 0.5
+  velocity: 0.25
+
+joints:
+  j_a:   {servo: toy, id: 1}
+  j_b:   {servo: toy, id: 2}
+  j_jaw: {servo: toy, id: 3}
+
+control:
+  controllers: toy_controllers.yaml
+
+hardware:
+  feetech:
+    plugin: toy_hardware/ToySystemInterface
+    transport: serial
+    endpoint: /dev/null
+    baud: 1000000
+    control_rate_hz: 50
