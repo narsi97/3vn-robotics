@@ -157,7 +157,60 @@ def targets(profile):
     return ['mock', 'gz', 'esp32']
 
 
-def describe(profile, target='mock', controllers='', prefix=''):
+def hardware_target(profile):
+    """
+    Return the name of the target that is this robot's real hardware.
+
+    `esp32` for our own arm, and for a vendor arm whatever its profile
+    declares under `hardware:` -- exactly one, or this refuses to guess.
+    """
+    cfg = load_profile(profile)
+    if cfg['meta']['kind'] not in VENDOR_KINDS:
+        return 'esp32'
+    declared = sorted(cfg.get('hardware') or {})
+    if len(declared) != 1:
+        raise DescriptionUnavailable(
+            f'{cfg["meta"]["model"]} declares {len(declared)} hardware '
+            f'targets ({declared}); name one')
+    return declared[0]
+
+
+def hardware_parameters(profile, target=None, overrides=None):
+    """
+    Return a vendor arm's hardware parameters, with overrides applied.
+
+    The profile says where the robot's bus normally is. `overrides`
+    replaces individual parameters for one run -- the endpoint, most
+    often -- without editing the profile: the simulated bus is on a TCP
+    port, a Mac reaches the real one through another, and a Linux host
+    opens the serial device the profile names.
+
+    An override for a parameter the profile does not declare is refused.
+    A typo would otherwise be passed to the plugin and silently ignored
+    there, and the robot would start on the default it was meant to
+    avoid.
+    """
+    cfg = load_profile(profile)
+    target = target or hardware_target(profile)
+    declared = (cfg.get('hardware') or {}).get(target)
+    if declared is None:
+        raise DescriptionUnavailable(
+            f'{cfg["meta"]["model"]} has no hardware target {target!r}')
+    merged = dict(declared)
+    for key, value in (overrides or {}).items():
+        if value in (None, ''):
+            continue
+        if key not in declared or key == 'plugin':
+            raise DescriptionUnavailable(
+                f'{cfg["meta"]["model"]}: {key!r} is not a parameter of '
+                f'the {target} target; one of '
+                f'{sorted(k for k in declared if k != "plugin")}')
+        merged[key] = value
+    return merged
+
+
+def describe(profile, target='mock', controllers='', prefix='',
+             hardware=None):
     """
     Return the URDF for `profile` on `target`, as a string.
 
@@ -165,16 +218,39 @@ def describe(profile, target='mock', controllers='', prefix=''):
     the gz target uses it, because only there is controller_manager
     hosted by the description (inside the simulator) rather than started
     beside it by the launch file.
+
+    `hardware` overrides individual hardware parameters of a vendor
+    arm's real target for this one description. See
+    hardware_parameters().
     """
     path = profile_path(profile)
     cfg = yaml.safe_load(path.read_text())
     kind = cfg['meta']['kind']
+    overrides = {k: v for k, v in (hardware or {}).items()
+                 if v not in (None, '')}
     if kind in VENDOR_KINDS:
         if prefix:
             raise DescriptionUnavailable(
                 f'{cfg["meta"]["model"]}: a vendor description cannot be '
                 f'prefixed; its frame names belong to upstream')
+        if overrides and target in VENDOR_PLUGINS:
+            raise DescriptionUnavailable(
+                f'{cfg["meta"]["model"]}: hardware parameters '
+                f'{sorted(overrides)} were given for target {target!r}, '
+                f'which has no hardware')
+        if target not in VENDOR_PLUGINS:
+            # Validates the target and the overrides before any file is
+            # read, and hands the merged result on.
+            cfg = dict(cfg)
+            cfg['hardware'] = dict(cfg.get('hardware') or {})
+            if target in cfg['hardware']:
+                cfg['hardware'][target] = hardware_parameters(
+                    path, target, overrides)
         return _describe_vendor(cfg, target, controllers)
+    if overrides:
+        raise DescriptionUnavailable(
+            f'{path.stem}: hardware parameters cannot be overridden for a '
+            f'robot described by xacro; they are read from its profile')
     if kind not in ENTRY_POINTS:
         raise DescriptionUnavailable(
             f'{path.name}: unknown meta.kind {kind!r}')
@@ -459,8 +535,13 @@ def _ros2_control(root, cfg, target, plugin):
                 f'(it has {sorted(limits)})')
         joint = ET.SubElement(block, 'joint', name=name)
         if target not in VENDOR_PLUGINS:
-            # Only real hardware needs to know which servo on the bus.
-            _param(joint, 'id', cfg['joints'][name]['id'])
+            # Only real hardware needs to know which servo on the bus,
+            # and how that servo's counts map onto this joint's radians.
+            spec = cfg['joints'][name]
+            _param(joint, 'id', spec['id'])
+            for key in ('zero_count', 'direction'):
+                if key in spec:
+                    _param(joint, key, spec[key])
         command = ET.SubElement(joint, 'command_interface', name='position')
         _param(command, 'min', limits[name][0])
         _param(command, 'max', limits[name][1])
@@ -580,6 +661,38 @@ def robot_facts(profile, target='mock', controllers=''):
     }
 
 
+def preflight(profile, overrides=None, exists=os.path.exists):
+    """
+    Return None if the robot's hardware can be reached, else why not.
+
+    Asked BEFORE the control stack is launched. Without it, a serial
+    device that is not there surfaces as controller_manager aborting
+    with an uncaught runtime_error, which reads as a crash rather than
+    as "nothing is plugged in".
+
+    Only a serial endpoint can be checked from here: it is a path, and
+    it exists or it does not. A TCP endpoint is checked by connecting,
+    and the plugin does that with a timeout and its own message.
+    """
+    cfg = load_profile(profile)
+    target = hardware_target(profile)
+    params = hardware_parameters(profile, target, overrides)
+    if params.get('transport') != 'serial' or exists(params['endpoint']):
+        return None
+    name = cfg['meta']['display_name']
+    return (
+        f'\n  No device at {params["endpoint"]} inside the container.\n\n'
+        f'  Plug in the servo adapter of the {name}, then pass it through '
+        f'to Docker.\n'
+        f'  On macOS, Docker Desktop cannot forward USB directly: serve the '
+        f'adapter\n'
+        f'  from the host as a TCP port and use  TRANSPORT=tcp '
+        f'ENDPOINT=host.docker.internal:<port>\n'
+        f'  Override the path with:              ENDPOINT=/dev/ttyUSB0\n'
+        f'  Rehearse with nothing plugged in:    make fake-bus   then   '
+        f'make robot PROFILE={pathlib.Path(str(profile)).stem} BUS=fake\n')
+
+
 def main(argv=None):
     """Print a profile's URDF and nothing else, so it can be piped."""
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
@@ -588,11 +701,30 @@ def main(argv=None):
     parser.add_argument('--controllers', default='',
                         help='ros2_control parameters file (gz target)')
     parser.add_argument('--prefix', default='')
+    parser.add_argument('--transport', default='',
+                        help='override the hardware transport for this run')
+    parser.add_argument('--endpoint', default='',
+                        help='override the hardware endpoint for this run')
+    parser.add_argument('--hardware-target', action='store_true',
+                        help='print the name of the real-hardware target')
+    parser.add_argument('--preflight', action='store_true',
+                        help='check the hardware is reachable; print nothing '
+                             'and exit 0 if it is')
     args = parser.parse_args(argv if argv is not None else sys.argv[1:])
+    overrides = {'transport': args.transport, 'endpoint': args.endpoint}
     try:
+        if args.hardware_target:
+            print(hardware_target(args.profile))
+            return 0
+        if args.preflight:
+            problem = preflight(args.profile, overrides)
+            if problem:
+                print(problem, file=sys.stderr)
+                return 1
+            return 0
         sys.stdout.write(describe(args.profile, target=args.target,
                                   controllers=args.controllers,
-                                  prefix=args.prefix))
+                                  prefix=args.prefix, hardware=overrides))
     except DescriptionUnavailable as exc:
         print(f'describe: {exc}', file=sys.stderr)
         return 1

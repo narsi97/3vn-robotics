@@ -44,7 +44,7 @@ RVIZ    ?= 1
 .PHONY: help doctor setup up down shell build test test-sim lint urdf \
         view mock sim robot stop scenario dash acceptance clean nuke test-ros \
         cad cad-test cad-masses play drive vnc foxglove workspace grasp \
-        so101 so101-fetch site site-serve course-check
+        so101 so101-fetch site site-serve course-check fake-bus
 
 help:
 	@echo ""
@@ -76,6 +76,7 @@ help:
 	@echo "  make sim       Run the stack in Gazebo (GUI=1 for pixels)"
 	@echo "  make base-sim  Run the MOBILE BASE in Gazebo (GUI=1 for pixels)"
 	@echo "  make robot     Run against real hardware        (Phase 5)"
+	@echo "  make fake-bus  A simulated SO-101 servo bus (then: make robot PROFILE=so101_follower BUS=fake)"
 	@echo ""
 	@echo "  make dash      Live dashboard             -> $(DASH)"
 	@echo "  make scenario  Run a scenario (NAME=home, or NAME=all)"
@@ -146,8 +147,13 @@ test: build
 # arm with different joints, a different gripper and nothing of ours in
 # its description. -rs prints the reason for every skip, because a test
 # that does not apply to a robot should say so rather than vanish.
+#
+# TARGET chooses what executes it. `mock` by default. With the robot's
+# hardware target -- TARGET=feetech for the SO-101 -- the suite starts a
+# simulated servo bus and runs the real hardware interface against it,
+# over the same TCP transport a Mac uses to reach the physical one.
 test-ros: build stop
-	$(RUN) "cd /ws/src/threevn_bringup && THREEVN_PROFILE=$(PROFILE) python3 -m pytest test -m ros -v -rs"
+	$(RUN) "cd /ws/src/threevn_bringup && THREEVN_PROFILE=$(PROFILE) THREEVN_TARGET=$(TARGET) python3 -m pytest test -m ros -v -rs"
 
 # Runs pytest DIRECTLY rather than through colcon: the slow marker is
 # excluded at the CMake level (see threevn_sim/CMakeLists.txt), so colcon
@@ -262,6 +268,37 @@ sim: build stop
 # with an uncaught runtime_error and exit code -6, which reads as a crash
 # rather than "nothing is plugged in".
 ESP32_PORT ?= /dev/ttyUSB0
+
+# -- real hardware, per robot ------------------------------------------
+#
+# `make robot` runs a profile's own hardware target: esp32 for the 3VN
+# arm, feetech for the SO-101. Which one is a fact about the profile;
+# HW_TARGET is here only so it can be seen and overridden.
+#
+#   make robot PROFILE=so101_follower              its serial device
+#   make robot PROFILE=so101_follower BUS=fake     a simulated bus: no arm
+#   make robot PROFILE=so101_follower TRANSPORT=tcp ENDPOINT=host:port
+#
+# BUS=fake is the rehearsal. Start `make fake-bus` in another terminal
+# first. Everything is the real thing except the six servos: the same
+# plugin, protocol, transport, controllers and scenarios.
+HW_TARGET ?= $(if $(filter so101_%,$(PROFILE)),feetech,esp32)
+BUS_PORT  ?= 6560
+ifeq ($(BUS),fake)
+TRANSPORT := tcp
+ENDPOINT  := 127.0.0.1:$(BUS_PORT)
+endif
+HW_ARGS   := $(if $(TRANSPORT),--transport $(TRANSPORT),) $(if $(ENDPOINT),--endpoint $(ENDPOINT),)
+HW_LAUNCH := $(if $(TRANSPORT),transport:=$(TRANSPORT),) $(if $(ENDPOINT),endpoint:=$(ENDPOINT),)
+
+# Six simulated STS3215s behind a TCP port. Test equipment: it is built
+# with the tests and is not in the image that ships to a robot.
+fake-bus: build
+	@echo ""
+	@echo "  Simulated servo bus on 127.0.0.1:$(BUS_PORT) (inside the container)."
+	@echo "  In a SECOND terminal:  make robot PROFILE=so101_follower BUS=fake"
+	@echo ""
+	$(RUN_TTY) "ros2 run threevn_hardware fake_feetech_bus --port $(BUS_PORT)"
 # The mobile base, standalone. Phase 11 composes it with the arm; until
 # then they are separate robots with separate controllers.
 base-sim: build stop
@@ -404,6 +441,16 @@ cad-test:
 	$(CAD_RUN) "cd /ws/cad && \$$CAD_PYTHON -m pytest tests -q"
 
 
+ifneq ($(HW_TARGET),esp32)
+# The preflight asks the profile where the hardware is, applies any
+# override, and refuses with a reason if a serial device is not there.
+# `stop` is not a prerequisite here: it would kill a fake bus started
+# for exactly this run.
+robot: build
+	-@$(RUN) "pkill -9 -f 'ros2 laun[c]h' ; pkill -9 -f 'robot_state_pub[l]isher' ; pkill -9 -f 'ros2_control_no[d]e' ; true" 2>/dev/null
+	@$(RUN) "ros2 run threevn_robot_description describe $(PROFILE) --preflight $(HW_ARGS)" || exit 1
+	$(RUN_TTY) "ros2 launch threevn_bringup robot.launch.py target:=$(HW_TARGET) profile:=$(PROFILE) $(HW_LAUNCH)"
+else
 robot: build stop
 	@$(RUN) "test -e $(ESP32_PORT)" 2>/dev/null || { \
 	  echo ""; \
@@ -415,6 +462,7 @@ robot: build stop
 	  echo ""; \
 	  exit 1; }
 	$(RUN_TTY) "ros2 launch threevn_bringup robot.launch.py target:=esp32 profile:=$(PROFILE)"
+endif
 
 # Stop any previously launched stack.
 #

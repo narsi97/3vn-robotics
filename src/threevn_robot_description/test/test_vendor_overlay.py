@@ -209,6 +209,120 @@ def test_only_real_hardware_is_told_the_servo_ids():
     assert ids('mock') == {} and ids('gz') == {}
 
 
+def test_only_real_hardware_is_told_the_calibration():
+    """
+    Each servo's zero and direction reach the hardware target, as declared.
+
+    They are how counts become radians on an assembled arm. The fixture
+    gives one joint a reversed servo and an offset zero, and leaves one
+    with none at all: a joint that declares no calibration gets no
+    parameter, and the plugin's own default applies.
+    """
+    def calibration(target):
+        return {j.get('name'): {p.get('name'): p.text for p in j.findall('param')
+                                if p.get('name') in ('zero_count', 'direction')}
+                for j in _control(_root(target)).findall('joint')}
+
+    assert calibration('feetech') == {
+        'j_a': {'zero_count': '2048', 'direction': '1'},
+        'j_b': {'zero_count': '2100', 'direction': '-1'},
+        'j_jaw': {},
+    }
+    assert calibration('mock') == {'j_a': {}, 'j_b': {}, 'j_jaw': {}}
+
+
+def test_where_the_hardware_is_can_be_overridden_for_one_run():
+    """
+    Transport and endpoint can be replaced without editing the profile.
+
+    One profile then reaches a serial device on a Linux host, the same
+    bus through a TCP port on a Mac, and a simulated bus with nothing
+    plugged in.
+    """
+    text = describing.describe(TOY, target='feetech', hardware={
+        'transport': 'tcp', 'endpoint': '127.0.0.1:6560'})
+    hardware = _control(ET.fromstring(text)).find('hardware')
+    params = {p.get('name'): p.text for p in hardware.findall('param')}
+    assert params['transport'] == 'tcp'
+    assert params['endpoint'] == '127.0.0.1:6560'
+    assert params['baud'] == '1000000', 'what was not overridden is kept'
+
+
+def test_an_empty_override_means_use_the_profile():
+    """A launch argument left at its default changes nothing."""
+    assert describing.describe(TOY, target='feetech', hardware={
+        'transport': '', 'endpoint': ''}) == \
+        describing.describe(TOY, target='feetech')
+
+
+def test_an_override_the_profile_does_not_declare_is_refused():
+    """
+    A misspelt parameter is an error here, not a default over there.
+
+    Passed through, `endpiont` would be ignored by the plugin, and the
+    robot would start on the very device the override was meant to
+    avoid.
+    """
+    with pytest.raises(describing.DescriptionUnavailable) as excinfo:
+        describing.describe(TOY, target='feetech',
+                            hardware={'endpiont': '127.0.0.1:6560'})
+    assert 'endpoint' in str(excinfo.value)
+    with pytest.raises(describing.DescriptionUnavailable):
+        describing.describe(TOY, target='feetech',
+                            hardware={'plugin': 'other/Plugin'})
+
+
+def test_hardware_overrides_on_a_target_with_no_hardware_are_refused():
+    """`endpoint:=...` with target:=mock is a mistake, and says so."""
+    with pytest.raises(describing.DescriptionUnavailable):
+        describing.describe(TOY, target='mock',
+                            hardware={'endpoint': '127.0.0.1:6560'})
+
+
+def test_the_hardware_target_is_the_one_the_profile_declares():
+    """A vendor arm's real target is read from its profile; ours is esp32."""
+    assert describing.hardware_target(TOY) == 'feetech'
+    assert describing.hardware_target('threevn_arm_v1') == 'esp32'
+
+
+# -- preflight ----------------------------------------------------------
+
+def test_preflight_names_a_serial_device_that_is_not_there():
+    """
+    A missing device is reported before anything is launched.
+
+    Without this it surfaces as controller_manager aborting, which
+    reads as a crash rather than as "nothing is plugged in".
+    """
+    problem = describing.preflight(TOY, exists=lambda path: False)
+    assert 'No device at /dev/null inside the container' in problem
+    assert 'BUS=fake' in problem, 'the message should offer the rehearsal'
+
+
+def test_preflight_is_silent_when_the_device_exists():
+    """Nothing to say is None."""
+    assert describing.preflight(TOY, exists=lambda path: True) is None
+
+
+def test_preflight_cannot_judge_a_tcp_endpoint_and_does_not_pretend_to():
+    """A socket is checked by connecting, which is the plugin's job."""
+    assert describing.preflight(
+        TOY, {'transport': 'tcp', 'endpoint': '127.0.0.1:6560'},
+        exists=lambda path: False) is None
+
+
+def test_preflight_checks_the_overridden_path_not_the_profiles():
+    """`ENDPOINT=/dev/ttyUSB0` is the path that has to exist."""
+    seen = []
+
+    def exists(path):
+        seen.append(path)
+        return False
+
+    describing.preflight(TOY, {'endpoint': '/dev/ttyUSB7'}, exists=exists)
+    assert seen == ['/dev/ttyUSB7']
+
+
 def test_hardware_parameters_come_from_the_profile():
     """Endpoint, baud and rate are passed through; the plugin name is not."""
     hardware = _control(_root('feetech')).find('hardware')

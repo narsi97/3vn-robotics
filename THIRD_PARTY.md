@@ -170,6 +170,11 @@ own. See [docs/so101.md](docs/so101.md).
 
 A plugin does not even need writing: `so_arm_100_hardware` on the ROS
 index is an Apache-2.0 `ros2_control` SystemInterface released for Jazzy.
+One was written anyway (`threevn_hardware/FeetechSystemInterface`),
+because it is a lesson the course wants and because it could be built
+and tested against a simulated servo bus before any hardware existed.
+The profile names the plugin, so using the community one instead is a
+one-line change.
 
 Apache-2.0 obligations — attribution, preserving notices, stating changes
 — are met by `scripts/fetch_so101.sh`, which pulls the files unmodified

@@ -53,6 +53,15 @@ else
   ok "threevn_sim not installed"
 fi
 
+# The simulated servo bus is test equipment. It is built only with the
+# tests, and the robot image is built without them; this is the check
+# that the two halves of that sentence are still both true.
+if docker run --rm "$IMAGE" bash -lc 'find /opt/threevn -name "fake_*" | grep -q .'; then
+  bad "simulated hardware (fake_*) was installed into the robot image"
+else
+  ok "no simulated hardware"
+fi
+
 # --- version identity --------------------------------------------------
 echo ""
 echo "  identity"

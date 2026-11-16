@@ -70,10 +70,11 @@ def test_it_restates_no_kinematics():
     would be a second copy that could disagree with the first, with
     nothing to say which was right.
     """
+    allowed = {'servo', 'id', 'zero_count', 'direction'}
     assert 'links' not in CFG and 'frames' not in CFG
     for name, joint in CFG['joints'].items():
-        assert set(joint) <= {'servo', 'id'}, (
-            f'{name} declares {sorted(set(joint) - {"servo", "id"})}; '
+        assert set(joint) <= allowed, (
+            f'{name} declares {sorted(set(joint) - allowed)}; '
             'geometry and limits belong to the upstream URDF')
 
 
@@ -121,20 +122,37 @@ def test_limits_never_exceed_what_the_servo_can_deliver():
         assert 0 < velocity <= servo['no_load_speed_rads'], name
 
 
-def test_the_hardware_target_is_declared_before_it_exists():
+def test_the_hardware_target_says_where_the_bus_is():
     """
     `feetech` has a plugin name, an endpoint, a baud rate and a loop rate.
 
-    The interface is not written yet. Fixing its name and parameters
-    now is what makes writing it an addition to one package instead of
-    a change to everything that launches the robot.
+    The name and the parameters were fixed before the interface was
+    written, which is what made writing it an addition to one package
+    instead of a change to everything that launches the robot.
     """
     assert describing.targets(PROFILE) == ['mock', 'gz', 'feetech']
+    assert describing.hardware_target(PROFILE) == 'feetech'
     feetech = CFG['hardware']['feetech']
     assert '/' in feetech['plugin']
     assert feetech['transport'] in {'serial', 'tcp'}
     assert feetech['baud'] == 1000000
     assert feetech['control_rate_hz'] > 0
+    assert 0 < feetech['response_timeout_ms'] < 1000 / feetech['control_rate_hz'], (
+        'waiting longer than one control period for a reply stalls the loop')
+
+
+def test_every_servo_has_a_calibration_and_it_is_a_possible_one():
+    """
+    Each commanded joint declares a zero inside the encoder and a sign.
+
+    The values are placeholders until a real arm is measured. What can
+    be checked now is that they are values a servo could have: a zero
+    count the 12-bit encoder can read, and a direction that is a sign.
+    """
+    for name in describing.controlled_joints(CFG):
+        joint = CFG['joints'][name]
+        assert 0 <= joint['zero_count'] <= 4095, name
+        assert joint['direction'] in (1, -1), name
 
 
 # -- against the fetched description -----------------------------------

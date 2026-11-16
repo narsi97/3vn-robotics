@@ -22,6 +22,10 @@ make scenario NAME=all                   # the same six scenarios, unchanged
 make test-ros PROFILE=so101_follower     # the integration tier against it
 make test-sim PROFILE=so101_follower     # the Gazebo tier against it
 make urdf     PROFILE=so101_follower     # the description that actually runs
+
+make fake-bus                                         # six simulated servos, on a TCP port
+make robot    PROFILE=so101_follower BUS=fake         # the real hardware interface, against them
+make test-ros PROFILE=so101_follower TARGET=feetech   # the integration tier, through that interface
 ```
 
 What was built to get there:
@@ -34,21 +38,39 @@ What was built to get there:
 | Controllers for the SO-101, on the same names and types as the 3VN arm's | `src/threevn_bringup/config/so101_controllers.yaml` |
 | Scenarios that name no joint, pose value or gripper width | `threevn_control/scenarios/arm.py` |
 | The upstream description pinned to a commit and checksummed | `scripts/fetch_so101.sh` |
+| The servo protocol, checked against packets worked out by hand | `threevn_hardware/feetech_protocol.hpp` |
+| `FeetechSystemInterface`: the `feetech` target | `threevn_hardware/src/feetech_system_interface.cpp` |
+| A simulated servo bus: six STS3215s, in-process for unit tests and behind TCP for the whole stack | `threevn_hardware/test/support/fake_feetech_bus.hpp`, `make fake-bus` |
+| A TCP transport, which is also how a Mac reaches the real bus | `threevn_hardware/src/tcp_transport.cpp` |
 
-Measured in this container on 2026-11-15 (Apple Silicon, CPU physics):
+Measured in this container on 2026-11-15 (Apple Silicon, CPU physics),
+on the final code, by exit code:
 
 | | Result |
 |---|---|
-| `make test` | 800 tests, 0 failures, 9 skipped (cppcheck, as before), exit 0 |
-| `make test-ros PROFILE=so101_follower` | 14 passed, 1 skipped with its reason, exit 0, 99 s |
-| `make test-ros` (3VN arm, after the change) | 18 passed, exit 0, 159 s (15 passed before; 3 scenario tests added) |
-| `make test-sim PROFILE=so101_follower` | 12 passed, exit 0, 116 s |
-| `make test-sim` (3VN arm, after the change) | 12 passed, exit 0, 130 s |
-| `make lint` | 362 tests, 0 failures; 15 of 15 descriptions through `check_urdf`; exit 0 |
+| `make test` | 928 tests, 0 failures, 20 skipped (cppcheck, which skips itself), exit 0 |
+| `make test-ros PROFILE=so101_follower` | 14 passed, 1 skipped with its reason, exit 0 |
+| `make test-ros PROFILE=so101_follower TARGET=feetech` | 14 passed, 1 skipped, exit 0: the same tests, through the real hardware interface and a simulated servo bus |
+| `make test-ros` (3VN arm) | 18 passed, exit 0 (15 before this work; 3 scenario tests added) |
+| `make test-sim PROFILE=so101_follower` | 12 passed, exit 0 |
+| `make test-sim` (3VN arm) | 12 passed, exit 0 |
+| `make lint` | 384 tests, 0 failures; 15 of 15 descriptions through `check_urdf`; exit 0 |
+| `make runtime-verify` | exit 0 on the image built from this code: no simulator, no simulated hardware, control stack active, `home` passes inside it. Three later rebuilds stopped before building, on Docker failing to pull its own Dockerfile frontend. |
 | Real-time factor at idle, upstream collision meshes | 0.11 to 0.13 (three samples) |
 | Real-time factor at idle, bounding-box collisions | 0.91 to 1.03 (four samples) |
 
-Four things the virtual arm found that reading would not have:
+Those are quiet-machine results, and that qualification is real. With
+another session building in a second container (host load average 14 to
+31 on 8 cores) the integration tiers failed five times: twice a CLI
+helper heard no `/joint_states` inside its timeout, once the same for
+`/clock`, and once each the simulator's real-time-factor floor and its
+publish-rate floor tripped. Every one passed when re-run alone. The
+`/joint_states` helper now asks three times and fails with a message
+instead of a `StopIteration`; the timing floors were left as they are,
+because a simulator at a quarter of real time is exactly what they are
+there to refuse.
+
+Five things the virtual arm found that reading would not have:
 
 1. **Upstream's collision meshes are its visual meshes.** As shipped the
    simulation runs at about an eighth of real time, under the 0.3 floor
@@ -79,11 +101,26 @@ Four things the virtual arm found that reading would not have:
    limit. A finger pushed onto its stop by the cube would behave exactly
    like this. Not tested there.
 
+5. **The 3VN arm's hardware interface never reaches the controllers.**
+   Found while writing the SO-101's, by asking the same question of the
+   ESP32 one. `Esp32SystemInterface` keeps positions and commands in its
+   own vectors and never passes them to the framework's handles. Driven
+   against a fake device: the device reports 0.4 rad and the state
+   handle reads NaN; a controller commands 0.9 rad and the frame sent to
+   the device carries 0.4, its "hold where you are" fallback. On the
+   physical 3VN arm, `/joint_states` would be empty of meaning and the
+   arm would never move. Its 14 unit tests pass because they count
+   frames and never go through a handle. **Not fixed here**: it is the
+   3VN arm's code and a change of its own. The SO-101 interface's tests
+   read and write through the handles for exactly this reason.
+
 Not done, and not claimed:
 
-- The `feetech` target is declared and described. **No hardware
-  interface exists**, so `target:=feetech` fails at plugin load, as
-  `esp32` did before Phase 5.
+- **No real servo has answered any of this.** The hardware interface
+  runs against a simulated bus written from the same reading of the
+  protocol, so the two agree by construction. Register addresses, byte
+  order, and each joint's zero and direction are assumptions until R1
+  and R2.
 - The servo figures are datasheet values that sellers disagree on, and
   the 5 V supply derating is an estimate. Both are marked in the profile.
 - Nothing here runs in CI. `make test` skips the tests that need the
@@ -116,7 +153,7 @@ is expected to work.
 | 1 | Docker, and nothing else | Runs | robot-agnostic |
 | 2 | Living inside the container | Runs | robot-agnostic |
 | 3 | A test suite people actually run | Runs | `make test` |
-| 4 | The decision everything else rests on | Version: `TARGET=feetech` and `FeetechSystemInterface` in place of `esp32` | the four `make urdf` greps |
+| 4 | The decision everything else rests on | Version: `TARGET=feetech` and `FeetechSystemInterface` in place of `esp32`. The plugin now exists. | the four `make urdf` greps |
 | 5 | Before the first line, a licence and a name | Runs. It is the SO-101's licence story. | text only |
 | 6 | Symptoms that lie | Runs | robot-agnostic |
 
@@ -161,9 +198,9 @@ is expected to work.
 
 | # | Lesson | On the SO-101 | Checked |
 |---|---|---|---|
-| 29 | The microcontroller is a dumb driver | New: the servo is the driver. See R3. | |
-| 30 | A wire protocol you can test on your laptop | New: the Feetech protocol against a fake bus | |
-| 31 | Decide how it fails before it fails | New: what a bus servo does when the host goes quiet | |
+| 29 | The microcontroller is a dumb driver | New lesson; the code exists. The servo is the driver, and the interface is a third the size of the ESP32's. | the interface's 23 unit tests |
+| 30 | A wire protocol you can test on your laptop | New lesson; the code exists. Somebody else's protocol, checked against packets worked out by hand, then against a simulated bus. | 24 protocol tests, 16 on the simulated bus |
+| 31 | Decide how it fails before it fails | New lesson; half the code exists: a missing servo, a quiet servo, a corrupt reply and torque-on are decided and tested. What a servo does when the HOST goes quiet is not. | the Link and Activate tests |
 | 32 | Where safety actually lives | Version: joint names in the hand-sent goal | `safety_limit`, and the clamp test in `test-ros` |
 | 33 | Parts generated from the same numbers | Not on this path: the SO-101's parts are upstream's STLs | |
 | 34 | A decision with a number attached | Not on this path | |
@@ -191,17 +228,16 @@ one, apart from `make play`.
 
 In the order that unblocks the most lessons:
 
-1. **A fake servo bus, and the `feetech` hardware interface against
-   it.** This is the virtual arm one layer down: the interface is
-   written and tested against a bus that answers like six STS3215s,
-   before a real one is plugged in. It is lesson 30 for this robot, and
-   it is what makes session R3 a swap and not a debugging session.
-   `THIRD_PARTY.md` already names a community Apache-2.0 plugin
-   (`so_arm_100_hardware`); adopt or write is open, and the profile
-   names the plugin so the choice is one line.
-2. **A transport the Mac can reach.** Docker Desktop cannot pass USB
-   through. The profile already carries `transport: serial | tcp`. A
-   host-side serial-to-TCP bridge serves both robots.
+1. ~~A fake servo bus, and the `feetech` hardware interface against
+   it.~~ **Done.** All six scenarios pass through the real plugin
+   against the simulated bus, and the integration tier runs with
+   `TARGET=feetech`. Lessons 29 to 31 now have code and tests to be
+   written around.
+2. **A transport the Mac can reach.** Half done: the container's end
+   (the TCP transport) exists and is what the simulated bus is reached
+   through. The host's end, a serial-to-TCP bridge for the real adapter
+   on macOS, does not. It has to exist before R1 if R1 is recorded on
+   the Mac. The 3VN arm's interface still refuses `tcp`.
 3. **`make play` for an arm-only profile**: simulator plus RViz, so
    lessons 14 to 16 run.
 4. **The SO-101 tiers in CI**: fetch the pinned description, run
@@ -232,9 +268,10 @@ usually the lesson.
 Before assembly, because a servo can only be given its id while it is
 alone on the bus.
 
-- **Rehearse:** nothing to simulate yet. This session is why item 1
-  above (the fake bus) should exist first: the id-and-ping tool is then
-  already tested.
+- **Rehearse:** the simulated bus already renumbers a servo when its id
+  register is written, as a real one does. What is missing is the small
+  tool that does the writing: set an id, ping it, read it back. Build
+  and test it against `make fake-bus` first.
 - **On camera:** the adapter board, power, one servo at a time. Set ids
   1 to 6 in the order of `joints:` in the profile. Read back position,
   voltage and temperature from each.
@@ -242,7 +279,9 @@ alone on the bus.
 - **Evidence:** a table of six ids with their replies, and the supply
   voltage the servos report. That number settles whether
   `limit_derate.effort` (0.68, an estimate for a 5 V supply) is even the
-  right question.
+  right question. This is also the first time the register table in
+  `feetech_protocol.hpp` meets a servo: a wrong address shows up here
+  as a voltage of 200 V or a temperature of zero.
 - **Stop if:** a servo does not answer at its id, or two answer at one.
 
 ### R2. Assemble, and find zero
@@ -254,8 +293,9 @@ alone on the bus.
 - **On camera:** assembly (timelapse), then calibration: the arm held in
   the zero pose and each encoder's offset read.
 - **Swap:** none yet. The offsets are what will make the swap honest.
-- **Evidence:** a `calibration:` block in the profile, one offset and
-  one direction per joint, `provenance: measured`.
+- **Evidence:** `zero_count` and `direction` for each of the six joints
+  in the profile, changed from `assumed` to `measured`. They are 2048
+  and +1 everywhere today.
 - **Stop if:** a joint cannot reach both of upstream's limits by hand
   with power off. That is an assembly fault, not a software one.
 
@@ -266,20 +306,24 @@ arm, with one argument changed.
 
 - **Rehearse:**
   ```bash
-  make mock PROFILE=so101_follower   &&  make scenario NAME=home
-  make sim  PROFILE=so101_follower   &&  make scenario NAME=all
+  make mock  PROFILE=so101_follower            &&  make scenario NAME=home
+  make sim   PROFILE=so101_follower            &&  make scenario NAME=all
+  make robot PROFILE=so101_follower BUS=fake   &&  make scenario NAME=all
   ```
-  Both pass today.
-- **Swap:** `target:=feetech`. Same launch file, same controllers file,
-  same topics and actions, same six scenarios. Nothing above the
-  hardware seam is edited on camera.
+  All three pass today. The third is the real hardware interface with
+  six simulated servos behind it.
+- **Swap:** drop `BUS=fake`. Same target, same plugin, same launch
+  file, same controllers file, same topics and actions, same six
+  scenarios. Nothing above the transport is edited on camera.
 - **On camera:** `home`, then `ready`, at three times the usual
   duration. Then `make scenario NAME=all`.
 - **Evidence:** the scenario report from the real arm, committed beside
   the two from the virtual one.
 - **Stop if:** the first `home` moves any joint the wrong way. That is a
   direction sign from R2, and it is fixed in the profile, not in code.
-- **Needs first:** items 1 and 2 of section 3.
+- **Before the take ends:** drive to `rest`. Stopping the stack releases
+  the servos, and the arm goes limp where it is.
+- **Needs first:** R1 and R2, and on a Mac the host-side bridge.
 
 ### R4. What the datasheet promised
 
@@ -308,10 +352,9 @@ R1 to R3 are "the first few". R4 and R5 follow as soon as R3 passes.
 
 ## 5. Decisions that are yours
 
-1. **Adopt a community Feetech plugin, or write one.** Writing one is
-   the better lesson; adopting one is faster and depends on somebody
-   else's releases. Recommendation: write it against the fake bus, and
-   keep the adoption as a documented alternative.
+1. ~~Adopt a community Feetech plugin, or write one.~~ Written, on
+   your go-ahead of 2026-11-15. The profile names the plugin, so the
+   community one remains a one-line alternative.
 2. **Where the real arm plugs in.** A Linux host reaches USB directly;
    the Mac needs the TCP bridge. If the sessions are recorded on the
    Mac, the bridge has to exist before R1.
@@ -319,3 +362,12 @@ R1 to R3 are "the first few". R4 and R5 follow as soon as R3 passes.
    without a push, so they are not in this change.
 4. **Which supply the servos get.** The profile assumes the official
    5 V. If the order was for 7.4 V, `limit_derate` changes.
+5. **Whether the arm goes limp on stop.** Deactivating the hardware
+   releases the servos, as the 3VN arm's interface does. The
+   alternative is to hold the last pose with nothing controlling it.
+   Released is the default because it is the safer failure for a person
+   near the arm, and the less safe one for the arm.
+6. **Cross-checking the simulated bus against Feetech's own SDK.** It
+   would be an independent reading of the protocol, before any servo
+   arrives. It means installing a third-party package in the dev
+   container, so it has not been done.

@@ -18,7 +18,13 @@ Bring up a robot against a real execution target.
   make mock      target:=mock    no simulator, no hardware
   make robot     target:=esp32   the physical 3VN arm (Phase 5)
 
-  make mock PROFILE=so101_follower     the same, for the SO-101
+  make mock  PROFILE=so101_follower     the same, for the SO-101
+  make robot PROFILE=so101_follower     target:=feetech, its servo bus
+
+`transport` and `endpoint` say where a robot's hardware is for THIS run,
+over what its profile says. They are how one profile reaches a serial
+device on a Linux host, the same bus through a TCP port on a Mac, and
+a simulated bus with nothing plugged in at all.
 
 For Gazebo use `make sim`, which launches threevn_sim -- the simulator
 hosts controller_manager in its own process, so it needs a different
@@ -74,7 +80,10 @@ def _bring_up(context, *args, **kwargs):
     )
 
     robot_description = ParameterValue(
-        describe(profile, target=target),
+        describe(profile, target=target, hardware={
+            'transport': LaunchConfiguration('transport').perform(context),
+            'endpoint': LaunchConfiguration('endpoint').perform(context),
+        }),
         # The description is URDF XML. Without value_type=str, launch
         # tries to parse it as YAML and fails at startup.
         value_type=str,
@@ -133,6 +142,20 @@ def generate_launch_description():
                 "('esp32' for the 3VN arm, 'feetech' for the SO-101). "
                 "'gz' is intentionally absent here -- use threevn_sim for "
                 'Gazebo, which hosts controller_manager itself.'
+            ),
+        ),
+        DeclareLaunchArgument(
+            'transport', default_value='',
+            description=(
+                "Override the hardware transport: 'serial' or 'tcp'. "
+                "Empty uses the profile's."
+            ),
+        ),
+        DeclareLaunchArgument(
+            'endpoint', default_value='',
+            description=(
+                'Override where the hardware is: a serial device, or '
+                "host:port for tcp. Empty uses the profile's."
             ),
         ),
         OpaqueFunction(function=_bring_up),

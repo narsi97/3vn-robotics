@@ -179,15 +179,30 @@ limit_derate:
   velocity: 0.37
 
 joints:
-  # Which servo drives each joint, and its bus id. The ids are the
-  # LeRobot convention, 1 at the base to 6 at the jaw, which is also the
-  # order the motors are numbered during assembly.
-  shoulder_pan:  {servo: sts3215, id: 1}
-  shoulder_lift: {servo: sts3215, id: 2}
-  elbow_flex:    {servo: sts3215, id: 3}
-  wrist_flex:    {servo: sts3215, id: 4}
-  wrist_roll:    {servo: sts3215, id: 5}
-  gripper:       {servo: sts3215, id: 6}
+  # Which servo drives each joint, its bus id, and its calibration.
+  #
+  # The ids are the LeRobot convention, 1 at the base to 6 at the jaw,
+  # which is also the order the motors are numbered during assembly.
+  #
+  # zero_count and direction are how one servo's encoder counts map onto
+  # one joint's radians: the count it reads when the joint is at the
+  # URDF's zero, and whether the servo turns the way the joint's axis
+  # does. They are facts about an ASSEMBLED arm -- which tooth the horn
+  # went on, which way round the servo sits -- so they cannot be known
+  # before there is one.
+  #
+  # provenance: assumed. 2048 is mid-travel and +1 is a guess. These are
+  # what a perfectly centred arm with every servo the right way round
+  # would have, and no real arm is that. The first thing a wrong
+  # direction does is drive a joint the wrong way, so the first motion
+  # on the physical arm is small and slow. Session R2 measures all
+  # twelve.
+  shoulder_pan:  {servo: sts3215, id: 1, zero_count: 2048, direction: 1}
+  shoulder_lift: {servo: sts3215, id: 2, zero_count: 2048, direction: 1}
+  elbow_flex:    {servo: sts3215, id: 3, zero_count: 2048, direction: 1}
+  wrist_flex:    {servo: sts3215, id: 4, zero_count: 2048, direction: 1}
+  wrist_roll:    {servo: sts3215, id: 5, zero_count: 2048, direction: 1}
+  gripper:       {servo: sts3215, id: 6, zero_count: 2048, direction: 1}
 
 control:
   # A file in threevn_bringup/config/. NAMED here and resolved by the
@@ -200,17 +215,23 @@ hardware:
   # above the hardware seam changes: same controllers, same topics, same
   # actions, same scenarios.
   #
-  # The interface does not exist yet, exactly as `esp32` did not before
-  # Phase 5. The target name and the parameters are fixed NOW so that
-  # adding it is confined to one plugin. The plugin is named here rather
-  # than in code so that choosing a community driver over writing our
-  # own is a one-line change.
+  # The interface is threevn_hardware's FeetechSystemInterface. It has
+  # been run against a SIMULATED servo bus and nothing else: no real
+  # servo has answered it yet. The plugin is named here rather than in
+  # code, so that swapping in a community driver is a one-line change.
   feetech:
     plugin: threevn_hardware/FeetechSystemInterface
     # The Waveshare bus servo adapter enumerates as a CDC serial device.
     # Docker Desktop on macOS cannot pass USB through, so on a Mac this
-    # becomes a TCP endpoint served from the host. See docs/so101.md.
+    # becomes a TCP endpoint served from the host. Either can be given
+    # for one run without editing this file:
+    #
+    #   make robot PROFILE=so101_follower TRANSPORT=tcp ENDPOINT=host:port
     transport: serial        # serial | tcp
     endpoint: /dev/ttyACM0
     baud: 1000000
     control_rate_hz: 50
+    # How long a servo has to answer a request. A reply is ten bytes at
+    # a megabaud; the wait is for the USB adapter, whose latency timer
+    # is commonly 16 ms and needs lowering. provenance: estimated.
+    response_timeout_ms: 10
