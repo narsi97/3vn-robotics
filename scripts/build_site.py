@@ -577,7 +577,7 @@ def phase_table(docs):
 
 
 def stage_word(stage):
-    """Free stages are stages; paid ones are tiers."""
+    """`kind: tier` marks the stages planned as paid; free or not, they keep the name."""
     return 'Tier' if stage.get('kind') == 'tier' else 'Stage'
 
 
@@ -834,6 +834,13 @@ def index_html(docs, written, stages):
         'testing, CI and observability. This is those skills, pointed at '
         'a machine that moves.')]
 
+    if paid:
+        price_stat = (f'<div class="stat"><b>{len(free)} free</b><span>then '
+                      f'{paid[0]["price"]} per tier, {cost} for all</span></div>')
+    else:
+        price_stat = (f'<div class="stat"><b>Free</b><span>all {len(stages)} '
+                      'stages, for now</span></div>')
+
     parts.append(
         '<div class="stats">'
         f'<div class="stat"><b>{len(lessons)}</b><span>lessons</span></div>'
@@ -841,8 +848,7 @@ def index_html(docs, written, stages):
         '<span>stages, each ending in a project</span></div>'
         f'<div class="stat"><b>~{round(total_minutes / 60)} h</b>'
         '<span>of hands-on work</span></div>'
-        f'<div class="stat"><b>{len(free)} free</b><span>then {paid[0]["price"] if paid else "-"} '
-        f'per tier, {cost} for all</span></div>'
+        f'{price_stat}'
         '</div>')
 
     parts.append(

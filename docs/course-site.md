@@ -7,8 +7,10 @@ make site-serve    # and look at it: http://localhost:8109/
 
 ## What it is
 
-A course, not a manual. Six stages: the first three free, then three
-tiers at $5 each. Every stage opens with what you will be able to do by
+A course, not a manual. Six stages, all free for now. Stages 4–6 are
+tiers, planned at $5 each once the course matures; their YAML records
+that next to `price: free`, and putting the price back is all it takes
+to show it again. Every stage opens with what you will be able to do by
 the end, and closes with a **project** that has a definition of done.
 
 Every lesson has the same shape, so a student learns where to look:

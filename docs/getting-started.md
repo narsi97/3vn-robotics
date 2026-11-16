@@ -3,7 +3,17 @@
 You need **Docker and nothing else**. No ROS, no colcon, no Gazebo, no
 Python on your machine.
 
-## 1. Check the machine
+## 1. Get the code
+
+```bash
+git clone https://github.com/narsi97/3vn-robotics.git
+cd 3vn-robotics
+```
+
+Every command below runs from this folder. The Makefile at its top is
+the interface to everything in the course.
+
+## 2. Check the machine
 
 ```bash
 make doctor
@@ -18,7 +28,7 @@ memory than Gazebo needs. Set **Settings → Resources → Memory to 6 GB or
 more**. Below that, Gazebo is OOM-killed by the VM and the symptom looks
 like a Gazebo bug rather than a resource limit.
 
-## 2. Build
+## 3. Build
 
 ```bash
 make setup
@@ -28,7 +38,7 @@ Builds the image (ROS 2 Jazzy + Gazebo Harmonic, several GB — this takes a
 while the first time) and then the ROS workspace. Subsequent runs are
 cached.
 
-## 3. Prove it works
+## 4. Prove it works
 
 ```bash
 make test
@@ -38,7 +48,7 @@ The description test suite. No simulator, no hardware, budgeted to stay
 under 60 seconds — because a slow suite is a suite nobody runs before
 committing.
 
-## 4. Look at the robot
+## 5. Look at the robot
 
 ```bash
 make view
@@ -53,7 +63,7 @@ is virtual, rendered in software, and served to your browser. See
 [ADR-0002](decisions/0002-dev-environment.md) for why this rather than
 XQuartz.
 
-## 5. Drive the whole robot
+## 6. Drive the whole robot
 
 `make view` shows the arm alone. For the robot this project actually
 builds towards -- arm on a mobile base, with a camera:
@@ -71,7 +81,7 @@ It runs at roughly **a third of real time** on an M1 with no GPU. That is
 CPU physics, not a fault. If the view itself is laggy that is a separate
 problem with a better fix -- see [viewing.md](viewing.md).
 
-## 6. See the seam
+## 7. See the seam
 
 The point of the whole architecture:
 
