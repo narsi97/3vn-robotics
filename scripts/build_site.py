@@ -269,7 +269,7 @@ PAGE = """<!DOCTYPE html>
 </head>
 <body>
 <header class="site"><div class="wrap">
-  <div class="brand"><a href="index.html">3VN Robotics</a><span class="badge">unlisted preview</span></div>
+  <div class="brand"><a href="index.html">3VN Robotics</a><span class="badge">preview</span></div>
   <div class="meta">{meta}</div>
 </div></header>
 <div class="wrap">
