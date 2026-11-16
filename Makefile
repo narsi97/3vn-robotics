@@ -548,7 +548,17 @@ scenario: build
 clean:
 	-$(RUN) "rm -rf /ws/build/* /ws/install/* /ws/log/*"
 
-nuke: down
-	-docker volume rm 3vn-robotics_build 3vn-robotics_install 3vn-robotics_log
+# `down --volumes` removes the container and the named volumes this
+# compose file declares, under whatever project name Compose gave them.
+# No volume name is written here on purpose. This target used to remove
+# 3vn-robotics_build, _install and _log, which never existed: Compose
+# names a project after the folder its file is in, so the volumes are
+# docker_build, docker_install and docker_log. The leading `-` hid the
+# error, and `make nuke` left the volumes behind.
+#
+# The build cache is Docker's, not this project's: the prune below
+# applies to every project on the machine.
+nuke:
+	$(COMPOSE) down --volumes
 	-docker image rm threevn-robotics-dev:local
 	-docker builder prune -f

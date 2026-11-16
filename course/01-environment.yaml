@@ -11,7 +11,7 @@ summary: >-
 outcomes:
   - Build and run a ROS 2 and Gazebo toolchain from one Dockerfile, with nothing installed on your machine but Docker.
   - Say, for any file in the project, whether changing it needs a rebuild — and why.
-  - Run several hundred checks against a robot that does not exist yet, in under a minute.
+  - Run about nine hundred checks against a robot that does not exist yet, in under a minute.
   - Explain the hardware seam, and prove it with two commands rather than a diagram.
   - Check a licence and a naming rule before they become expensive, and record the decision as an ADR.
   - Recognise the environment failures that disguise themselves as robotics bugs.
@@ -57,12 +57,17 @@ lessons:
         expect: A `3vn-robotics` folder with a `Makefile` at the top.
       - do: See what the project can do. The Makefile is the interface; nothing below needs typing twice.
         run: make
-        expect: A list of targets, from `doctor` and `setup` to `play`, `train` and `site`.
+        expect: >-
+          A list of the everyday targets, from `doctor` and `setup` at the
+          top to `clean` and `nuke` at the bottom. It is not every target:
+          later tiers bring their own, such as `make train`.
       - do: Check the machine before building anything.
         run: make doctor
         expect: >-
           A line per check — daemon, architecture, memory, CPUs, free disk,
-          port 8106, git. Any failure names the exact setting to change.
+          port 8106, git, gh. Any failure names the exact setting to change.
+          A yellow `warn` is not a failure. Without the GitHub CLI the `gh`
+          line is one, and nothing in this stage uses it.
       - do: >-
           If memory failed, fix it now: **Docker Desktop → Settings →
           Resources → Memory**, 6 GB or more. Then run `make doctor` again.
@@ -75,8 +80,8 @@ lessons:
           `arm64` on Apple Silicon, `amd64` on most other machines. No
           platform is pinned anywhere, so neither is emulated.
     checkpoint: >-
-      `make doctor` prints a green line for every check, and `make setup`
-      finishes with a built workspace.
+      `make doctor` prints no `FAIL` line and ends with `Environment looks
+      good`, and `make setup` finishes with a built workspace.
     pitfalls:
       - symptom: '`make setup` fails partway with "no space left on device".'
         cause: >-
@@ -84,7 +89,8 @@ lessons:
           Budget about 10 GB.
         fix: >-
           `docker system df` shows where the space went. `make nuke` removes
-          this project's image, volumes and build cache.
+          this project's container, image and volumes, and prunes Docker's
+          build cache, which every project on the machine shares.
       - symptom: Everything works, but builds and runs are several times slower than expected.
         cause: >-
           The image is being emulated — an `amd64` image on an Apple Silicon
@@ -183,8 +189,12 @@ lessons:
           exit
         expect: '`LOCALHOST`.'
       - do: From the host, find the named volumes that hold the build.
-        run: docker volume ls | grep 3vn-robotics
-        expect: Three volumes, ending in `_build`, `_install` and `_log`.
+        run: docker volume ls | grep -E "_(build|install|log)$"
+        expect: >-
+          Three volumes: `docker_build`, `docker_install` and `docker_log`.
+          The prefix is Compose's project name, and Compose takes that
+          from the folder the compose file is in, `docker/`, not from the
+          repository.
     checkpoint: >-
       You can say, for any file in the repository, whether changing it needs
       `make build`, a relaunch, or nothing.
@@ -274,8 +284,8 @@ lessons:
       and does not belong in the loop you run every few minutes.
 
       It is worth noticing what can be tested at this stage. There is no
-      robot, no hardware and no simulator — and there are still several
-      hundred assertions worth making:
+      robot, no hardware and no simulator — and there are still about nine
+      hundred checks worth making:
 
       - **configuration** — every mass says where its number came from,
         every name is legal, no dimension is zero or negative
@@ -289,8 +299,9 @@ lessons:
         package that runs on the robot cannot depend on one
 
       Plus C++ tests for the wire protocol and the firmware's safety logic,
-      which you will meet in Tier 5. Robotics has far more that can be
-      checked cheaply than its reputation suggests.
+      which you will meet in Tier 5, and the linters, which the summary
+      counts too. Robotics has far more that can be checked cheaply than
+      its reputation suggests.
 
       Every test also runs against **every** robot profile and every
       hardware target. Add a profile and the matrix widens by itself.
@@ -298,8 +309,12 @@ lessons:
       - do: Run the suite, and time it.
         run: time make test
         expect: >-
-          A summary ending `0 errors, 0 failures` with a handful skipped, in
-          well under a minute once the workspace is built.
+          A final `Summary:` line with about nine hundred tests,
+          `0 errors, 0 failures`, and a few dozen skipped, in under a
+          minute once the workspace is built. The skipped ones are
+          `cppcheck`, which ROS will not run in the version this image
+          has, and the tests for a robot description you have not fetched
+          yet.
       - do: Read the one test that is the architecture. It is short.
         run: less src/threevn_robot_description/test/test_ros2_control_targets.py
       - do: >-
@@ -310,7 +325,9 @@ lessons:
         run: make test
         expect: >-
           A failure in `test_model_name_is_ros_legal`, with a message saying
-          why. You will see why that rule exists two lessons from now.
+          why. You will see why that rule exists two lessons from now. The
+          summary counts the one fault as `2 failures`: the test itself,
+          and the CTest entry that ran it.
       - do: Put it back, and confirm green.
         run: |
           git checkout src/threevn_robot_description/config/threevn_arm_v1.yaml
@@ -417,20 +434,25 @@ lessons:
       substitution.
     steps:
       - do: Expand the robot description for Gazebo and count the simulator plugin.
-        run: make urdf TARGET=gz | grep -c GazeboSimSystem
-        expect: '`1`.'
+        run: make urdf TARGET=gz 2>/dev/null | grep -c GazeboSimSystem
+        expect: >-
+          `1`. `make urdf` checks the workspace first and sends that build
+          log to stderr; `2>/dev/null` drops it, so the count is all you
+          see. If this prints `0`, run it without `2>/dev/null` and read
+          what it hid: an error also counts as zero.
       - do: Expand it for the mock and count any reference to the Gazebo bridge.
-        run: make urdf TARGET=mock | grep -c gz_ros2_control
+        run: make urdf TARGET=mock 2>/dev/null | grep -c gz_ros2_control
         expect: >-
           `0`. The hardware build does not merely avoid the simulator; it
           cannot reach it.
       - do: Do the same for the real-hardware target, and find its plugin.
         run: |
-          make urdf TARGET=esp32 | grep -c "<gazebo"
-          make urdf TARGET=esp32 | grep -c Esp32SystemInterface
+          make urdf TARGET=esp32 2>/dev/null | grep -c "<gazebo"
+          make urdf TARGET=esp32 2>/dev/null | grep -c Esp32SystemInterface
         expect: '`0`, then `1`.'
       - do: Find where the choice is made. There are three branches and no others.
-        run: grep -n "xacro:if" src/threevn_robot_description/urdf/ros2_control/arm.ros2_control.xacro
+        run: grep -n "xacro:if.*target" src/threevn_robot_description/urdf/ros2_control/arm.ros2_control.xacro
+        expect: Three lines, one each for `mock`, `gz` and `esp32`.
       - do: Read the boundary test — the package that runs on the robot may never depend on Gazebo.
         run: less src/threevn_bringup/test/test_package_dependencies.py
     checkpoint: >-
@@ -623,11 +645,19 @@ lessons:
       - do: See what, if anything, is holding the project's port.
         run: lsof -nP -iTCP:8106 -sTCP:LISTEN
         expect: Docker's process, if the container is up; otherwise nothing.
-      - do: Confirm Gazebo comes from exactly one apt source.
+      - do: Confirm Gazebo comes from exactly one apt source, then leave the shell.
         run: |
           make shell
           apt-cache policy ros-jazzy-gz-sim-vendor | grep -c osrfoundation
-        expect: '`0`. Anything else is the segfault waiting to happen.'
+          exit
+        expect: >-
+          `0`. Anything else is the segfault waiting to happen. Then, as
+          the shell closes, a line like `make: *** [shell] Error 1`, and
+          Docker Desktop may add a hint about debugging a Compose error.
+          Nothing failed. `grep -c` exits with status 1 when it counts no
+          matches, `exit` hands the shell's last status to `make`, and
+          `make` reports any status but zero as an error. That is a
+          symptom that lies, in the lesson about them.
     checkpoint: >-
       For each row of the table, you can name the real cause and the command
       that would confirm it.
