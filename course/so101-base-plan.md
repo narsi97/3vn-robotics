@@ -127,9 +127,11 @@ Not done, and not claimed:
   fetched description, and says so; the two integration tiers are still
   run by hand.
 - `make play` is wired to the mobile manipulator, and `make drive`
-  needs a terminal: neither was run against the SO-101. The teleop's
-  gripper keys were changed to use the gripper's named travel, untested
-  beyond its unit tests.
+  needs a terminal: neither was run against the SO-101. `make watch`
+  (RViz attached to whatever robot is running) now gives the SO-101 a
+  moving picture on every backend. The teleop's gripper keys were
+  changed to use the gripper's named travel, untested beyond its unit
+  tests.
 - A joint commanded exactly onto a hard stop in Gazebo can stay there.
   Seen on the jaw's upper limit. The likely fix is to put the
   simulator's stops a little outside the command limits.
@@ -173,8 +175,8 @@ is expected to work.
 
 | # | Lesson | On the SO-101 | Checked |
 |---|---|---|---|
-| 14 | A simulator that runs in CI | Version: `make play` is wired to the mobile manipulator. `make sim` runs, without RViz. | `make sim` |
-| 15 | Three ways to watch | Version: depends on `make play` | no |
+| 14 | A simulator that runs in CI | Version: `make play` is wired to the mobile manipulator. `make sim` then `make watch` is the SO-101's equivalent. | `make sim`, `make watch` |
+| 15 | Three ways to watch | Version: written around `make play`; `make watch` is a fourth way and is not in the lesson | `make watch` only |
 | 16 | Drive it yourself | Version: the teleop reads its joints from the controller, so it should work against `make sim`. Needs a terminal; not run. | no |
 | 17 | Topics, services and actions | Runs, except the `/base_controller` step | graph checks in `test-ros` |
 | 18 | Two clocks, and the bug they cause | Runs | `/clock` in `test-sim` |
@@ -222,7 +224,7 @@ is expected to work.
 **Count:** 17 run, 19 need a version, 6 need a new lesson, 6 are not on
 this path. The free stages (1 to 3) are 8 runs and 11 versions with no
 new lessons, so a free SO-101 track is a writing job, not a building
-one, apart from `make play`.
+one.
 
 ## 3. What to build next on the virtual arm
 
@@ -238,8 +240,11 @@ In the order that unblocks the most lessons:
    through. The host's end, a serial-to-TCP bridge for the real adapter
    on macOS, does not. It has to exist before R1 if R1 is recorded on
    the Mac. The 3VN arm's interface still refuses `tcp`.
-3. **`make play` for an arm-only profile**: simulator plus RViz, so
-   lessons 14 to 16 run.
+3. ~~`make play` for an arm-only profile.~~ **Done differently**, as
+   `make watch`: RViz attached to whatever robot is running, so it is
+   one picture across mock, Gazebo and the servo bus. Checked on all
+   three with the SO-101 and on mock with the 3VN arm. The first
+   recording script is `recordings/pilot-one-command-three-backends.md`.
 4. **The SO-101 tiers in CI**: fetch the pinned description, run
    `test-ros` and `test-sim` for both profiles. `make test-ros` is not
    in CI for either robot today.
