@@ -20,6 +20,7 @@ outcomes:
   - Build a robot image about a quarter the size of the development image, and verify what it does not contain.
   - Run CI that executes exactly what you run locally, on two architectures.
   - Cut a release whose tag, version and image provably agree, and gate a deploy that can move motors.
+  - Trace every input of the robot image to whoever can change it, and audit a deploy gate for what it only appears to guarantee.
 
 prerequisites:
   - Stage 3 complete — you have run `make test`, `make mock` and `make sim`.
@@ -784,6 +785,353 @@ lessons:
         gate in the same shape: what a human must type, who must approve,
         what is pinned before approval, and what the deploy waits on before
         calling itself done.
+    read:
+      - cicd.md
+      - deployment.md
+
+  - id: every-input-is-a-dependency
+    title: Every input is a dependency
+    tags: [security, devops]
+    builds_on: [names-and-licences, images-that-ship, releases-are-evidence]
+    minutes: 40
+    objective: >-
+      List everything the robot image is built from, and say for each input
+      whether it is verified, only pinned, or open.
+    body: |
+      Earlier lessons each secured one link: a licence checked before the
+      first line, an image that provably carries no simulator, a release
+      whose tag and digest agree. This one walks the whole chain from a
+      commit to a robot and asks one question of every link: **who, or
+      what, can change this without anyone here deciding to?**
+
+      There are three possible answers, and only the first is comforting:
+
+      - **Verified.** Something checks the input and refuses a different one.
+      - **Pinned.** The input is named exactly, but nothing checks what arrives.
+      - **Open.** The input is whatever its publisher says it is today.
+
+      | link | what this repository uses | state |
+      |---|---|---|
+      | the SO-101 description | one upstream commit, the URDF checked against a SHA-256 | the URDF verified; its meshes pinned by the commit alone |
+      | Python packages for the site | `markdown==3.7`, `pyyaml==6.0.2` | pinned by version, not by hash |
+      | base images | `ros:jazzy-ros-base`, `python:3.12-alpine`, `nginx:1.30-alpine`, `golang:1.23-alpine`, `alpine:3.20` | open: every one is a tag |
+      | CI actions | `actions/checkout@v4` and eight more | open: a tag its owner can move |
+      | Ubuntu and Alpine packages | whatever the mirror serves at build time | open; the site image runs `apk upgrade`, the robot image never upgrades |
+      | what the robot image contains | the no-simulator, no-copyleft check on every build | verified, by package name |
+      | the published image | a digest per architecture, OCI labels, a provenance attestation | identified, but nothing signs it |
+
+      Two of those are worth a closer look, because they are better and
+      worse than they first seem.
+
+      **The provenance is real, and unsigned.** Every image CI pushes carries
+      an attestation BuildKit writes by default. They are the
+      `unknown/unknown` entries the deploy workflow filters out when it
+      lists architectures. It records the build's arguments and the base
+      image **by digest**, so although the Dockerfile says only
+      `ros:jazzy-ros-base`, you can find out afterwards exactly which base a
+      given robot image was built on. What it cannot do is prove who wrote
+      it. It is a statement the build made about itself, not a signature,
+      and anyone able to push to the registry can push a statement too.
+
+      **A tag is a decision to take updates.** `nginx:1.30-alpine` moves with
+      every patch release, and that is deliberate: security fixes arrive on
+      a rebuild without anyone editing a file. Pinning by digest stops the
+      tag moving under you, and stops the fixes with it. The honest pattern
+      is both at once: a digest in the file, and a scheduled job that bumps
+      it and runs the tests, so updates arrive as reviewed changes. This
+      repository does neither half yet.
+
+      What is missing, stated as missing:
+
+      - **No vulnerability scan of the robot image** in this repository. The
+        course-site image is scanned, by the private pipeline that deploys
+        it, not here.
+      - **No SBOM.** Asked for one, the registry returns an empty object.
+      - **Nothing is signed**, so nothing on a robot could check a signature
+        even if it wanted to.
+      - **No branch protection on `main`, and Dependabot off.** These are
+        repository settings rather than files, and both were unset as of
+        November 2026.
+
+      One thing is on: GitHub's secret scanning and push protection. They
+      are settings too, and settings belong to a repository, not to its
+      files, so check your own copy's rather than assuming them.
+    steps:
+      - do: List the base images. Most lines name an earlier stage; the rest name someone else's image.
+        run: grep -n "^FROM" docker/Dockerfile docker/Dockerfile.site vps/fleet/cloud/Dockerfile
+        expect: >-
+          Eleven lines. Five name an image from outside this repository, and
+          every one of the five ends in a tag, never a digest.
+      - do: Count the actions CI runs, and how each one is referenced.
+        run: grep -hE '^\s*(- )?uses:' .github/workflows/*.yml | sort | uniq -c
+        expect: Nine actions, each pinned to a major-version tag such as `@v4`, not to a commit.
+      - do: Make the one verified input refuse. Give the SO-101 fetch a wrong checksum.
+        run: SO101_URDF_SHA256=0000 make so101-fetch
+        expect: >-
+          `so101.urdf does not match its pinned checksum`, both checksums
+          printed, and `Nothing was installed.`
+      - do: Now fetch it properly.
+        run: make so101-fetch
+      - do: Ask the registry what the published robot image is made of.
+        run: docker buildx imagetools inspect ghcr.io/narsi97/3vn-robotics:latest
+        expect: >-
+          Four manifests: `linux/arm64`, `linux/amd64`, and two
+          `unknown/unknown` entries whose reference type is
+          `attestation-manifest`, one per architecture.
+      - do: Read which base the provenance recorded, then compare it with what that tag points at today.
+        run: |
+          docker buildx imagetools inspect ghcr.io/narsi97/3vn-robotics:latest --format '{{json .Provenance}}' | grep -B3 '"uri": "pkg:docker/ros@'
+          docker buildx imagetools inspect ros:jazzy-ros-base | head -3
+        expect: >-
+          The same `sha256` in both, for now. The day upstream republishes
+          `jazzy-ros-base`, the second changes and the first does not, and a
+          rebuild of the same commit produces a different image.
+      - do: Ask for the image's SBOM, then read its labels.
+        run: |
+          docker buildx imagetools inspect ghcr.io/narsi97/3vn-robotics:latest --format '{{json .SBOM}}'
+          docker buildx imagetools inspect ghcr.io/narsi97/3vn-robotics:latest --format '{{json (index .Image "linux/amd64").Config.Labels}}'
+        expect: >-
+          `{}` for the SBOM. Among the labels, `org.opencontainers.image.version`
+          says `24.04`. Nobody here set it: it is inherited from the Ubuntu
+          base, and it is wrong about what this image is.
+    checkpoint: >-
+      You have a table of every input to the robot image, each marked
+      verified, pinned or open, with the one you would close first and what
+      closing it would cost.
+    pitfalls:
+      - symptom: You pin every base image by digest, and six months later the robot image is full of known vulnerabilities.
+        cause: A digest never moves, so it never takes a fix either.
+        fix: Pin and refresh together. A scheduled job bumps the digest and runs the tests, so updates arrive as reviewed changes.
+      - symptom: '`docker buildx imagetools inspect ghcr.io/narsi97/3vn-robotics:main` says not found.'
+        cause: The image is tagged `latest`, `sha-<commit>` and `v<version>`, never with a branch name.
+        fix: Use `latest`, or a `sha-` tag from the Docker workflow's summary.
+      - symptom: Someone cites the provenance as proof that an image came from CI.
+        cause: It is an unsigned statement the build wrote about itself.
+        fix: >-
+          Treat it as a record, not as evidence. Proof needs a signature
+          checked against an identity you trust, which this repository does
+          not have yet.
+    concepts:
+      - term: Software supply chain
+        meaning: >-
+          Everything in what you ship that you did not write (base images,
+          packages, actions, third-party files) plus the systems that build
+          and carry it. Each is a place where someone else can change your
+          product.
+      - term: Pin versus checksum
+        meaning: >-
+          A pin names an input exactly: a version, a commit, a digest. A
+          checksum checks what actually arrived. A pinned input from a
+          compromised source still arrives; a checksummed one is refused.
+      - term: Build provenance
+        meaning: >-
+          A record, written by the build, of what was built from what.
+          BuildKit attaches one to every pushed image by default. Unless it
+          is signed, it says what happened, not who vouches for it.
+      - term: SBOM
+        meaning: >-
+          Software bill of materials: a list of every package inside an
+          artefact, so that a newly published vulnerability can be matched to
+          the images that contain it without unpacking them.
+    quiz:
+      - q: The SO-101 URDF is checked against a SHA-256, but its meshes are not. What protects the meshes, and how well?
+        a: >-
+          The commit in the URL. A file fetched at a fixed commit cannot
+          change without the commit changing, so the pin holds. But it trusts
+          GitHub to serve that commit faithfully, and nothing here checks the
+          bytes that arrive.
+      - q: Why is `nginx:1.30-alpine` not really pinned, and why is that partly deliberate?
+        a: >-
+          The tag moves with every patch release, so two builds of the same
+          commit can differ. That is also how security fixes arrive without
+          anyone editing a file. A digest would stop both.
+      - q: What does the image's provenance prove, and what does it not?
+        a: >-
+          It records what the build says it used, including the base image
+          by digest. It does not prove who wrote it: it is unsigned, and
+          anyone who can push to the registry can push one.
+    exercise:
+      task: >-
+        On your own copy, make the Docker workflow publish an SBOM with the
+        image and fail the build on a critical vulnerability. Then decide, and
+        write down, what you will do the first time it fails on a
+        vulnerability that has no fix yet.
+      hint: >-
+        `docker/build-push-action` accepts `sbom: true` and
+        `provenance: mode=max`. Any image scanner (Trivy and Grype are common)
+        can run against `verify:local` before the push step.
+      answer: >-
+        The first two are a few lines each. The third is the real work: a gate
+        that fails on findings nobody can fix gets switched off. It needs an
+        allowlist where every entry has an owner and an expiry date, so each
+        exception has to be renewed rather than quietly forgotten.
+    read:
+      - docker.md
+      - cicd.md
+      - so101.md
+
+  - id: audit-the-gate
+    title: Audit the gate before someone else does
+    tags: [security, devops, robops]
+    builds_on: [gate-the-motors]
+    minutes: 30
+    objective: >-
+      Read a deploy workflow the way an auditor would, and separate what it
+      guarantees from what it only appears to.
+    body: |
+      The previous lesson designed a gate. This one attacks it. The skill is
+      the one an auditor or a red team brings to any pipeline: read every
+      line that runs near a credential, and for each one ask **who can make
+      this line do something else?**
+
+      Start with what holds, because it is a good deal. The workflow asks for
+      a read-only token, and the repository's default token is read-only
+      too. The tag becomes a digest before anyone approves, so what was
+      approved is what lands. A typed `DEPLOY` stops a misclick. With no
+      robot to reach, it fails honestly at the SSH step.
+
+      Now five things that do not hold, each with the line or setting that
+      shows it.
+
+      **1. Whoever starts a deploy can approve it.** As configured in
+      November 2026, the `robot` environment has one required reviewer, the
+      repository's owner, and GitHub's "Prevent self-review" is off. So the
+      gate is a deliberate pause, not separation of duties: one person can
+      dispatch and approve. With a single maintainer it cannot be otherwise,
+      and saying so is better than letting "required reviewer" suggest a
+      second pair of eyes.
+
+      **2. The audit line names the wrong person.** The summary writes
+      `approved by @${{ github.actor }}`, but `github.actor` is whoever
+      started the run, not whoever approved it. GitHub records the real
+      reviewer on the run itself. Here they are the same person, so the line
+      is right by accident, which is the worst way for an audit record to be
+      right.
+
+      **3. Inputs become code.** `${{ inputs.image_tag }}` and
+      `${{ inputs.robot_id }}` are pasted into the scripts by GitHub
+      *before* the shell reads them. A robot id containing a quote and a
+      command closes the quoting and runs the command. It happens in the
+      preflight job, which runs **before** anyone approves, and again in the
+      script sent over SSH, where it would run on the robot. Only someone who
+      can start the workflow can do this, which limits it to people with
+      write access. The fix is mechanical: pass inputs through `env:` and use
+      them as shell variables, so they arrive as data.
+
+      **4. The key would sit outside the gate.** When an arm exists, the
+      workflow says to store `ROBOT_HOST`, `ROBOT_USER` and `ROBOT_SSH_KEY`
+      as *repository* secrets. Every workflow in the repository, on every
+      branch, can read a repository secret, so a branch carrying a new
+      workflow file could use the robot's key without ever meeting the
+      approval. As **environment secrets** on `robot`, the key is released
+      only to a job that has passed the gate, and a deployment-branch rule
+      (there is none today) would limit that job to `main`.
+
+      **5. The robot is never authenticated.**
+      `StrictHostKeyChecking=accept-new` trusts the first host key it sees
+      and remembers it. A fresh CI runner remembers nothing, so every run
+      trusts whatever answers at `ROBOT_HOST`, and anything that can sit
+      between the runner and the robot receives the deploy. The fix is to
+      store the robot's host key as a secret beside the others and check
+      against it.
+
+      **None of these is exploitable today**, because no robot exists and
+      none of the `ROBOT_*` secrets has been set. That is exactly why now is
+      the time: before the first key exists, each fix costs a few lines.
+      Afterwards, each one comes with a key rotation.
+    steps:
+      - do: Find every place the workflow uses an input, and note which lines sit inside a script.
+        run: grep -n 'inputs\.' .github/workflows/hardware-deploy.yml
+        expect: >-
+          `inputs.confirm` once, in an `if:` that GitHub evaluates, which is
+          safe. `inputs.image_tag` and `inputs.robot_id` several times inside
+          scripts: in the preflight, which runs before approval, and in the
+          `docker run` sent to the robot.
+      - do: Find the token's permissions, the gate, the secrets, the host-key setting and the audit line.
+        run: grep -n -E 'permissions|environment:|secrets\.|StrictHostKeyChecking|approved by' .github/workflows/hardware-deploy.yml
+      - do: >-
+          On your own copy, open Settings → Environments → robot (create it if
+          it does not exist yet) and read three things: the required
+          reviewers, whether "Prevent self-review" is ticked, and the
+          deployment-branch rule.
+      - do: >-
+          On your copy, run the workflow with `DEPLOY` and an image tag that
+          exists in your registry, and approve it yourself. When it fails at
+          the SSH step, compare the summary's "approved by" with the reviewer
+          the run page shows.
+        expect: >-
+          Your name in both, because you did both. That is why the line has
+          never been caught out.
+    checkpoint: >-
+      You can name the five gaps, point at the line or setting behind each,
+      give its fix, and say which one a project with a single maintainer
+      cannot close.
+    pitfalls:
+      - symptom: Secrets were "behind the approval", and a new workflow on a branch read them anyway.
+        cause: >-
+          They were repository secrets. An environment's rules guard its own
+          secrets and the jobs that use it, nothing else.
+        fix: Move them to environment secrets on `robot`, and add a deployment-branch rule for `main`.
+      - symptom: Quoting the input as `'${{ inputs.robot_id }}'` did not stop the injection.
+        cause: >-
+          GitHub substitutes the expression into the script text before the
+          shell parses anything, so a quote inside the input closes yours.
+        fix: >-
+          Put the input in `env:` and use `"$ROBOT_ID"` in the script. The
+          shell then receives it as a value, never as code.
+    concepts:
+      - term: Separation of duties
+        meaning: >-
+          No single person can both request and approve a sensitive change. A
+          required reviewer provides it only when the reviewer cannot be the
+          requester.
+      - term: Expression injection
+        meaning: >-
+          Untrusted text substituted into a script before the script is
+          parsed, so the text can become commands. In GitHub Actions, any
+          `${{ }}` inside a `run:` block.
+      - term: Environment secret
+        meaning: >-
+          A secret released only to jobs that use a given environment, and
+          therefore only after that environment's reviewers and branch rules
+          are satisfied.
+      - term: Trust on first use (TOFU)
+        meaning: >-
+          Accepting a server's identity the first time you see it and
+          checking it from then on. On a machine that starts fresh every
+          run, every use is the first.
+    quiz:
+      - q: The preflight job has only a read token and runs before approval. Why does an injection there still matter?
+        a: >-
+          It runs before anyone has looked at anything, so the approval
+          cannot prevent it, and a read token can still pull private images
+          or leak whatever the job can see. The gate protects the deploy job,
+          not the steps before it.
+      - q: Why does moving the SSH key to an environment secret change who can use it, with the workflow file unchanged?
+        a: >-
+          A repository secret is available to every workflow on every branch.
+          An environment secret is released only to a job that names the
+          environment and has passed its rules, so the key exists only after
+          approval.
+      - q: Which of the five gaps can a one-person project not close, and what is the honest response?
+        a: >-
+          Separation of duties: with one maintainer, the requester and the
+          approver are the same person. The honest response is to say so,
+          that the gate is a deliberate pause and not a second opinion,
+          rather than let "required reviewer" suggest otherwise.
+    exercise:
+      task: On your own copy, close gaps 2 to 5 in one pull request.
+      answer: >-
+        Inputs move into `env:` (`ROBOT_ID: ${{ inputs.robot_id }}`) and the
+        scripts use `"$ROBOT_ID"`. On the robot side, a quoted heredoc
+        (`<<'SSH'`) stops the local shell splicing anything into the remote
+        script, and the values cross as arguments quoted with `printf %q`.
+        The three `ROBOT_*` secrets, plus a new `ROBOT_HOST_KEY`, become
+        environment secrets on `robot`, with a deployment-branch rule for
+        `main`. The deploy writes `ROBOT_HOST_KEY` to a `known_hosts` file
+        and uses `StrictHostKeyChecking=yes`. The summary either drops
+        "approved by" or fetches the reviewer from
+        `gh api repos/{owner}/{repo}/actions/runs/{run_id}/approvals`.
     read:
       - cicd.md
       - deployment.md
