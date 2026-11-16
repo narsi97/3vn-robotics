@@ -47,6 +47,15 @@ std::string param(
   const auto it = info.hardware_parameters.find(key);
   return it == info.hardware_parameters.end() ? fallback : it->second;
 }
+
+/// True when the description declares this state interface for the joint.
+bool hasStateInterface(
+  const hardware_interface::ComponentInfo & joint, const std::string & name)
+{
+  return std::any_of(
+    joint.state_interfaces.begin(), joint.state_interfaces.end(),
+    [&name](const hardware_interface::InterfaceInfo & iface) {return iface.name == name;});
+}
 }  // namespace
 
 void Esp32SystemInterface::setTransport(std::unique_ptr<Transport> transport)
@@ -100,13 +109,27 @@ hardware_interface::CallbackReturn Esp32SystemInterface::on_init(
         joint.name.c_str());
       return hardware_interface::CallbackReturn::ERROR;
     }
+
+    // read() publishes both of these for every joint, every cycle. A
+    // description that leaves one out has no handle to publish into, and
+    // the first control cycle is too late to find that out.
+    if (!hasStateInterface(joint, hardware_interface::HW_IF_POSITION) ||
+      !hasStateInterface(joint, hardware_interface::HW_IF_VELOCITY))
+    {
+      RCLCPP_ERROR(
+        logger(), "joint '%s' must have position and velocity state interfaces",
+        joint.name.c_str());
+      return hardware_interface::CallbackReturn::ERROR;
+    }
+
+    position_names_.push_back(joint.name + "/" + hardware_interface::HW_IF_POSITION);
+    velocity_names_.push_back(joint.name + "/" + hardware_interface::HW_IF_VELOCITY);
   }
 
   const auto n = info_.joints.size();
   const double nan = std::numeric_limits<double>::quiet_NaN();
   // NaN until the device reports. Zero would be a lie that reads as a
   // robot sitting at its home pose, and a controller would act on it.
-  commands_.assign(n, nan);
   positions_.assign(n, nan);
   velocities_.assign(n, 0.0);
   previous_positions_.assign(n, nan);
@@ -138,6 +161,16 @@ hardware_interface::CallbackReturn Esp32SystemInterface::on_activate(
   status_ = 0;
   activated_ = true;
 
+  // Forget whatever the command handles hold. After a deactivation that
+  // is the last pose a controller asked for, and the arm has been limp
+  // since: sent with torque back on, it would throw the arm there. NaN
+  // reads as "no command", so write() holds the measured position until
+  // read() has a fresh state frame to seed the handles from.
+  for (const auto & name : position_names_) {
+    set_command(name, std::numeric_limits<double>::quiet_NaN());
+  }
+  seed_commands_ = true;
+
   // Ask the device to identify itself. Purely informational: the answer
   // arrives on a later read cycle, and activation does not wait for it.
   uint8_t frame[protocol::kMaxFrameSize];
@@ -153,6 +186,7 @@ hardware_interface::CallbackReturn Esp32SystemInterface::on_deactivate(
   const rclcpp_lifecycle::State & /*previous_state*/)
 {
   activated_ = false;
+  seed_commands_ = false;
 
   // Release torque on the way out. Leaving servos energised after
   // deactivation means an arm that holds a pose nothing is controlling.
@@ -275,6 +309,29 @@ hardware_interface::return_type Esp32SystemInterface::read(
     }
   }
 
+  // Hand the measurement to ros2_control. The handles are the only thing
+  // a controller or /joint_states ever reads; until this runs, a frame
+  // decoded into positions_ has been reported to nobody. Published even
+  // while it is still NaN, so that a description's initial_value cannot
+  // stand in for a pose the device never reported.
+  for (size_t i = 0; i < positions_.size(); ++i) {
+    set_state(position_names_[i], positions_[i]);
+    set_state(velocity_names_[i], velocities_[i]);
+  }
+
+  // Once per activation, on the first state frame after it: start the
+  // command where the arm is. A trajectory controller that finds finite
+  // commands when it activates begins its first trajectory from them. A
+  // joint something has already commanded is left alone.
+  if (seed_commands_ && frames_received_ > 0) {
+    for (size_t i = 0; i < positions_.size(); ++i) {
+      if (!std::isfinite(get_command<double>(position_names_[i]))) {
+        set_command(position_names_[i], positions_[i]);
+      }
+    }
+    seed_commands_ = false;
+  }
+
   // A lost link is reported as an error so controller_manager can act on
   // it, rather than being logged while the controllers carry on against
   // stale state.
@@ -290,25 +347,24 @@ hardware_interface::return_type Esp32SystemInterface::write(
   }
 
   protocol::CommandPayload command;
-  bool any_valid = false;
-  for (size_t i = 0; i < commands_.size() && i < protocol::kJointCount; ++i) {
-    if (std::isnan(commands_[i])) {
-      // Before the first command arrives, hold the measured position.
-      // Sending zero would drive every joint to its reference pose the
-      // instant the hardware activated.
+  for (size_t i = 0; i < position_names_.size() && i < protocol::kJointCount; ++i) {
+    // What a controller wrote into the command handle, if anything has.
+    const double target = get_command<double>(position_names_[i]);
+    if (std::isfinite(target)) {
+      command.position_micro[i] = protocol::toMicro(target);
+    } else {
+      // NaN is "no command yet"; infinity is not a position either, and
+      // toMicro() would saturate it to the end of an int32. Hold the
+      // measured position. Sending zero would drive every joint to its
+      // reference pose the instant the hardware activated.
       command.position_micro[i] =
         std::isnan(positions_[i]) ? 0 : protocol::toMicro(positions_[i]);
-    } else {
-      command.position_micro[i] = protocol::toMicro(commands_[i]);
-      any_valid = true;
     }
   }
   command.flags = protocol::kFlagEnable;
 
   // Sent every cycle even when nothing changed: the frame doubles as the
   // heartbeat, and the device holds position if it stops arriving.
-  (void)any_valid;
-
   uint8_t frame[protocol::kMaxFrameSize];
   const size_t n = protocol::encodeCommand(command, frame, sizeof(frame));
   if (n == 0) {return hardware_interface::return_type::ERROR;}
