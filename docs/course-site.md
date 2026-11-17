@@ -147,6 +147,13 @@ It sits behind the shared 3VNSYSTEMS Caddy, at a public path,
   `script-src 'self'` with no `'unsafe-inline'`, so an inline `<script>`
   would be blocked. Styles are inline because `style-src` does permit
   `'unsafe-inline'`. A reading site needs no script anyway.
+- **Two themes, no switch.** Paper by day and blueprint by night,
+  following the reader's system setting through `prefers-color-scheme`;
+  a switch would need a script. The accents are the three strokes of the
+  3VN mark. Headings use the system's serif and code its monospace, so
+  no font is downloaded. Each robot's drawing (`ROBOT_ART`) is inline SVG
+  coloured by the stylesheet, so it follows the theme; a robot without
+  one gets no picture.
 - **noindex everywhere**, plus `robots.txt` with `Disallow: /`, plus an
   `X-Robots-Tag` header from nginx. One of the three may be ignored by a
   given crawler; all three being ignored is unlikely.
