@@ -292,8 +292,6 @@ translate:
   - term: pinch point
   - term: print clearance
   - term: support-free printing
-  - term: derivative work
-    because: A legal idea. Explain it plainly and give the English term.
   - term: architecture decision record (ADR)
     because: Keep "ADR" as the name; explain what it records.
   - term: bill of materials (BOM)
