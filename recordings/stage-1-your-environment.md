@@ -5,8 +5,8 @@ whole session is one terminal, and the subject is the toolchain.
 
 | | |
 |---|---|
-| Length | About 21 minutes finished, or six clips of 2½ to 4½ minutes |
-| Covers | Stage 1, "Your environment": all six lessons |
+| Length | About 19 minutes finished, or five clips of 3 to 5 minutes |
+| Covers | Stage 1, "Your environment": all five lessons |
 | Robot | None runs. The 3VN arm's description is read and checked |
 | Needs | Docker, an internet connection, a fresh clone of `main` |
 | Recorded in | English. Dubbed and subtitled afterwards; see [terms.yaml](terms.yaml) |
@@ -22,7 +22,7 @@ are trusted because we watched one of them fail.**
 
 ## One segment, one lesson
 
-Segments 1 to 6 are the six lessons of the stage, in order. Each one
+Segments 1 to 5 are the five lessons of the stage, in order. Each one
 shows that lesson's own steps and stops, so each can be published alone
 on its lesson page. The two `[face]` segments belong to the full-length
 version only.
@@ -31,10 +31,8 @@ The written lesson still carries what a video cannot: the pitfalls, the
 quiz and the exercise. Do not add them to the narration.
 
 Each segment types its lesson's commands exactly as the lesson writes
-them, with one exception: segment 5 lists the headings of the licence
-file where the lesson pages through it. Steps that only read a file
-(`less …`) are left to the written lesson, and segment 6 does not run
-`make doctor` a second time.
+them. Steps that only read a file (`less …`) are left to the written
+lesson, and segment 5 does not run `make doctor` a second time.
 
 Writing this script found six steps where a lesson and `main`
 disagreed. They have since been corrected in the lessons;
@@ -62,9 +60,9 @@ Every checkout of this repository on one machine shares a single dev
 container and a single set of build volumes. So `make setup` in the new
 clone points that container at the new clone. Nothing else on the
 machine should be using the container while you record. Afterwards,
-`make up` from your usual checkout points it back. (This was not run
-here, because other work was using the container. It is how the
-container came to follow each checkout so far.)
+`make up` from your usual checkout points it back. (Checked on
+2026-11-16: `make setup` in a new clone moved the container to that
+clone.)
 
 **The picture**
 
@@ -154,17 +152,15 @@ reads `port 8106 free`. Both are a pass.
 make setup
 ```
 
-**Cut the wait.** With the image already built this is a re-run: Docker
-finds every layer cached, and the workspace build ends
+**Cut the wait.** With the image already built, Docker finds every
+layer cached and only the workspace is built. In a new clone that takes
+about two minutes, and ends
 
 ```
-Summary: 11 packages finished [6.23s]
+Summary: 11 packages finished [2min 7s]
 
   Ready. Try:  make test   then   make view   then open http://localhost:8106/vnc.html
 ```
-
-This is the one step that did not finish when the script was checked;
-[the last section](#what-was-checked) says what was run instead.
 
 > This is the long step, and only the first time. It builds one image
 > from one file: ROS 2, Gazebo, and every tool the course uses. The
@@ -246,7 +242,7 @@ Shows three volumes: `docker_build`, `docker_install`, `docker_log`.
 > manages. A build writes tens of thousands of small files, and on a Mac
 > that is much faster inside Docker's own storage.
 
-### 3. A test suite people actually run `[screen]` 4:30
+### 3. A test suite people actually run `[screen]` 5:00
 
 Lesson: *A test suite people actually run*.
 
@@ -325,6 +321,23 @@ of tests it runs in. Do not explain that on camera.
 > evidence. Now there is evidence.
 
 ```bash
+grep -n -E "model:|display_name:" src/threevn_robot_description/config/threevn_arm_v1.yaml
+```
+
+Shows, with the fault still in place:
+
+```
+27:  model: 3vn_arm_v1
+33:  display_name: "3VN Arm v1"
+```
+
+> A name in ROS must start with a letter. ROS turns this name into
+> other names in code, and those must start with a letter.
+>
+> That is why every package in this project starts with "threevn". The
+> arm has a second name, for people. That one can start with a digit.
+
+```bash
 git checkout src/threevn_robot_description/config/threevn_arm_v1.yaml
 make test
 ```
@@ -388,65 +401,7 @@ Shows exactly three lines:
 > Everything later in this course plugs in at this one place: the
 > simulator, the real motors, and a robot that somebody else designed.
 
-### 5. Before the first line, a licence and a name `[screen]` 2:30
-
-Lesson: *Before the first line, a licence and a name*.
-
-```bash
-grep "^## " THIRD_PARTY.md
-```
-
-Shows, first:
-
-```
-## Rejected: EEZYbotARM (and EEZYbotARM MK2)
-## Rejected: Annin Robotics AR4 (MK2 / MK3 / MK5)
-## Considered: SO-ARM100 / SO-101
-```
-
-> The first decision in this project was not about code. It was about
-> a licence.
->
-> Three arms were checked. Two were rejected. The first one was the arm
-> this project was planned around, and its licence does not allow
-> commercial use. Checking took minutes, on the first day. That is much
-> cheaper than finding out after the work is done.
->
-> The third arm, the SO-101, has a licence that allows it. You will
-> meet that arm later.
-
-```bash
-grep -n -E "model:|display_name:" src/threevn_robot_description/config/threevn_arm_v1.yaml
-```
-
-Shows:
-
-```
-27:  model: threevn_arm_v1
-33:  display_name: "3VN Arm v1"
-```
-
-> The second decision was a name. A name in ROS must start with a
-> letter. Our name starts with a digit.
->
-> So there are two lines. One name is for the machine. One name is for
-> people.
-
-```bash
-grep -n -A10 "def test_model_name_is_ros_legal" src/threevn_robot_description/test/test_config_schema.py
-```
-
-Shows the test, from line 117. Its comment states the rule; the
-assertion is one line below where the listing stops.
-
-> And this is the check that failed a few minutes ago. A rule that
-> matters gets a test.
->
-> Both decisions are written down, with the options that lost and the
-> reason each one lost. That part stops the same argument from
-> happening twice.
-
-### 6. Symptoms that lie `[screen]` 3:00
+### 5. Symptoms that lie `[screen]` 3:00
 
 Lesson: *Symptoms that lie*.
 
@@ -509,7 +464,7 @@ Docker Desktop then offers to help debug it.
 >
 > That is a symptom that lies, in the lesson about them.
 
-### 7. What this did not prove `[face]` 0:45
+### 6. What this did not prove `[face]` 0:45
 
 > Nothing moved today. No simulator ran, and no motor. Every check so
 > far reads files. That is why nine hundred of them fit in under a
@@ -527,16 +482,19 @@ The same four steps as the pilot, with this file's name:
 `stage-1-your-environment.en.srt` first, then one reviewed translation
 per language, then the dub.
 
-If the segments are also published as six clips, cut the transcript at
+If the segments are also published as five clips, cut the transcript at
 the same points and name the parts `stage-1-your-environment.1.en.srt`
-to `….6.en.srt`.
+to `….5.en.srt`.
 
 ## What running the lessons found
 
-Every step of the six lessons was run on `main` while this script was
-written. Six did not print what the lesson said. All six were then
+Every step of the stage's lessons was run on `main` while this script
+was written. Six did not print what the lesson said. All six were then
 corrected in the lessons, so the lessons and this script now type the
 same commands.
+
+Lessons are numbered as they are now. The stage had six when this was
+run; the licence lesson was removed afterwards.
 
 | Lesson | The lesson said | What `main` printed |
 |---|---|---|
@@ -545,7 +503,7 @@ same commands.
 | 3 | "Several hundred" assertions, "well under a minute" | 938 tests, about 900 of them run in a new clone, in 49 to 59 seconds against a limit of 60 |
 | 4 | `make urdf TARGET=gz \| grep -c …` prints `1` | It did, after about 290 lines of build output |
 | 4 | `grep -n "xacro:if" …`: "three branches and no others" | Fourteen lines: the three targets, four joint-type conditions, and every closing tag |
-| 6 | `make shell`, then the `grep -c`, expecting `0` | `0`, and then `make: *** [shell] Error 1` when the shell is left |
+| 5 | `make shell`, then the `grep -c`, expecting `0` | `0`, and then `make: *** [shell] Error 1` when the shell is left |
 
 `make nuke` was corrected in the same change. It named three volumes
 that never existed, so it left the build volumes behind, and lesson 1
@@ -559,9 +517,10 @@ On 2026-11-16. The test runs and the four counts in segment 4 are from
 earlier, and none of the files those commands read changed in between.
 
 The lessons were corrected after those runs, on `main` at `48f83af`.
-Nothing was run again for that: of the 31 command lines in this script,
-30 are in the corrected lessons character for character, and the other
-is the heading list in segment 5.
+Nothing was run again for that. The licence lesson was then removed
+and its naming step moved into lesson 3, at `main` `c9cdf36` plus that
+change. All 29 command lines in this script are in the lessons
+character for character.
 
 - `git clone`, `make` and `make doctor` were run in a new, empty
   folder.
@@ -569,6 +528,15 @@ is the heading list in segment 5.
   a checkout whose `src/` is `main`'s plus one RViz file from the pilot
   branch. The outputs and timings quoted are from those runs. The
   commands inside `make shell` went to a real interactive shell.
+- `make setup` was run to the end at `c9cdf36`, twice, each time in a
+  new clone. The first run took 14 minutes, because the
+  `ros:jazzy-ros-base` image had changed upstream and almost every
+  layer was rebuilt. The second took 2 minutes 21 seconds: every image
+  layer cached, and the workspace built from nothing
+  (`11 packages finished [2min 7s]`). Each run moved the shared
+  container to its new clone. Docker Hub answered both times.
+- The `model:` and `display_name:` grep in segment 3 was run at
+  `c9cdf36` with the fault planted, then the file was put back.
 - The fault in segment 3 was planted and reverted for real. With the
   SO-101 description absent, as in a new clone: 0 failures in 53
   seconds, 2 failures naming the rule in 50, and 0 again in 49. With it
@@ -577,17 +545,7 @@ is the heading list in segment 5.
 
 Not checked:
 
-- **`make setup` did not finish.** It was run twice. Both times Docker
-  waited two minutes, twice, for Docker Hub to answer about the build
-  front end, then gave up on the base image:
-  `DeadlineExceeded` after five minutes. The Mac itself reached Docker
-  Hub in 0.2 seconds, and so did a container. The cause was not found.
-  What was run instead: `make doctor`, which is setup's first step, and
-  `make build`, which is its last (7 seconds). The `Ready.` line is
-  quoted from the Makefile.
 - A first build, on a machine that has never built the image. No time
   for it is given anywhere in this script.
-- `make setup` in a second clone, and what it does to the shared
-  container.
 - The session has not been run end to end in one sitting, and nothing
   has been recorded, transcribed or dubbed.

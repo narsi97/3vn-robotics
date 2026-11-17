@@ -136,7 +136,7 @@ Not done, and not claimed:
   Seen on the jaw's upper limit. The likely fix is to put the
   simulator's stops a little outside the command limits.
 
-## 2. The 48 lessons on a virtual SO-101
+## 2. The 47 lessons on a virtual SO-101
 
 **Runs** means the lesson's commands work today with
 `PROFILE=so101_follower` added to the launch command, and its text does
@@ -156,73 +156,72 @@ is expected to work.
 | 2 | Living inside the container | Runs | robot-agnostic |
 | 3 | A test suite people actually run | Runs | `make test` |
 | 4 | The decision everything else rests on | Version: `TARGET=feetech` and `FeetechSystemInterface` in place of `esp32`. The plugin now exists. | the four `make urdf` greps |
-| 5 | Before the first line, a licence and a name | Runs. It is the SO-101's licence story. | text only |
-| 6 | Symptoms that lie | Runs | robot-agnostic |
+| 5 | Symptoms that lie | Runs | robot-agnostic |
 
 ### Stage 2: Describing a robot
 
 | # | Lesson | On the SO-101 | Checked |
 |---|---|---|---|
-| 7 | A robot is a tree | Version: five revolute joints and one jaw, no mimic, root is `world` | `make urdf`; the `make view` launch, in RViz |
-| 8 | One source of physical truth | Version: the profile is an overlay; upstream's URDF is the kinematic truth | profile tests |
-| 9 | Never type a number you can derive | Version: the inertias are upstream's, exported from CAD. The lesson becomes "check a number you did not derive". | no |
-| 10 | Three frames that save you a day each | Version: `gripper_frame_link`; there is no camera frame until a camera is added | TF in `test-ros` |
-| 11 | One file, three targets, two traps | Not on this path: xacro detail of the 3VN arm | |
-| 12 | Test it with two parsers, not one | Version: `check_description.sh` globs `threevn_*.yaml` and skips the SO-101 | `check_urdf` by hand, all three targets |
-| 13 | Limits come from the datasheet | Version, and a better one: upstream ships placeholders and the overlay replaces them | profile tests |
+| 6 | A robot is a tree | Version: five revolute joints and one jaw, no mimic, root is `world` | `make urdf`; the `make view` launch, in RViz |
+| 7 | One source of physical truth | Version: the profile is an overlay; upstream's URDF is the kinematic truth | profile tests |
+| 8 | Never type a number you can derive | Version: the inertias are upstream's, exported from CAD. The lesson becomes "check a number you did not derive". | no |
+| 9 | Three frames that save you a day each | Version: `gripper_frame_link`; there is no camera frame until a camera is added | TF in `test-ros` |
+| 10 | One file, three targets, two traps | Not on this path: xacro detail of the 3VN arm | |
+| 11 | Test it with two parsers, not one | Version: `check_description.sh` globs `threevn_*.yaml` and skips the SO-101 | `check_urdf` by hand, all three targets |
+| 12 | Limits come from the datasheet | Version, and a better one: upstream ships placeholders and the overlay replaces them | profile tests |
 
 ### Stage 3: Making it move
 
 | # | Lesson | On the SO-101 | Checked |
 |---|---|---|---|
-| 14 | A simulator that runs in CI | Version: `make play` is wired to the mobile manipulator. `make sim` then `make watch` is the SO-101's equivalent. | `make sim`, `make watch` |
-| 15 | Three ways to watch | Version: written around `make play`; `make watch` is a fourth way and is not in the lesson | `make watch` only |
-| 16 | Drive it yourself | Version: the teleop reads its joints from the controller, so it should work against `make sim`. Needs a terminal; not run. | no |
-| 17 | Topics, services and actions | Runs, except the `/base_controller` step | graph checks in `test-ros` |
-| 18 | Two clocks, and the bug they cause | Runs | `/clock` in `test-sim` |
-| 19 | One command, two backends | Version: the goal in the lesson names the 3VN arm's joints | the same goal with SO-101 names, in `test-ros` |
-| 20 | Scenarios are tests you can watch | Runs | 6 of 6 on mock, 6 of 6 in Gazebo |
+| 13 | A simulator that runs in CI | Version: `make play` is wired to the mobile manipulator. `make sim` then `make watch` is the SO-101's equivalent. | `make sim`, `make watch` |
+| 14 | Three ways to watch | Version: written around `make play`; `make watch` is a fourth way and is not in the lesson | `make watch` only |
+| 15 | Drive it yourself | Version: the teleop reads its joints from the controller, so it should work against `make sim`. Needs a terminal; not run. | no |
+| 16 | Topics, services and actions | Runs, except the `/base_controller` step | graph checks in `test-ros` |
+| 17 | Two clocks, and the bug they cause | Runs | `/clock` in `test-sim` |
+| 18 | One command, two backends | Version: the goal in the lesson names the 3VN arm's joints | the same goal with SO-101 names, in `test-ros` |
+| 19 | Scenarios are tests you can watch | Runs | 6 of 6 on mock, 6 of 6 in Gazebo |
 
 ### Stage 4: Make it trustworthy
 
 | # | Lesson | On the SO-101 | Checked |
 |---|---|---|---|
-| 21 | Four layers of test | Runs | all four: the acceptance run passed 6 of 6 in Gazebo |
-| 22 | Tests that cannot pass by accident | Runs | robot-agnostic |
-| 23 | Keeping the suite fast | Runs | robot-agnostic |
-| 24 | Integration tests without physics | Runs | `make test-ros PROFILE=so101_follower` |
-| 25 | An image that carries no simulator | Version: the runtime image has no `vendor/`. It needs the pinned fetch as a build step. | no |
-| 26 | CI that runs what you run | Runs. The SO-101 is not in the pipeline yet. | no |
-| 27 | A release is a tag plus evidence | Runs | robot-agnostic |
-| 28 | A pipeline for a machine with motors | Runs as a concept; its firmware half is the 3VN arm's | |
+| 20 | Four layers of test | Runs | all four: the acceptance run passed 6 of 6 in Gazebo |
+| 21 | Tests that cannot pass by accident | Runs | robot-agnostic |
+| 22 | Keeping the suite fast | Runs | robot-agnostic |
+| 23 | Integration tests without physics | Runs | `make test-ros PROFILE=so101_follower` |
+| 24 | An image that carries no simulator | Version: the runtime image has no `vendor/`. It needs the pinned fetch as a build step. | no |
+| 25 | CI that runs what you run | Runs. The SO-101 is not in the pipeline yet. | no |
+| 26 | A release is a tag plus evidence | Runs | robot-agnostic |
+| 27 | A pipeline for a machine with motors | Runs as a concept; its firmware half is the 3VN arm's | |
 
 ### Stage 5: Make it real
 
 | # | Lesson | On the SO-101 | Checked |
 |---|---|---|---|
-| 29 | The microcontroller is a dumb driver | New lesson; the code exists. The servo is the driver, and the interface is a third the size of the ESP32's. | the interface's 23 unit tests |
-| 30 | A wire protocol you can test on your laptop | New lesson; the code exists. Somebody else's protocol, checked against packets worked out by hand, then against a simulated bus. | 24 protocol tests, 16 on the simulated bus |
-| 31 | Decide how it fails before it fails | New lesson; half the code exists: a missing servo, a quiet servo, a corrupt reply and torque-on are decided and tested. What a servo does when the HOST goes quiet is not. | the Link and Activate tests |
-| 32 | Where safety actually lives | Version: joint names in the hand-sent goal | `safety_limit`, and the clamp test in `test-ros` |
-| 33 | Parts generated from the same numbers | Not on this path: the SO-101's parts are upstream's STLs | |
-| 34 | A decision with a number attached | Not on this path | |
-| 35 | Deploy, and roll back with a pull | Version: needs lesson 25's image | no |
-| 36 | Alive is not the same as ready | Version, and a better one: the servo reports load and temperature. See R5. | the dashboard against the SO-101 in Gazebo: `/readyz` ready, six joints in `/api/state` |
-| 37 | Metrics from a robot behind a home router | Runs | robot-agnostic |
+| 28 | The microcontroller is a dumb driver | New lesson; the code exists. The servo is the driver, and the interface is a third the size of the ESP32's. | the interface's 23 unit tests |
+| 29 | A wire protocol you can test on your laptop | New lesson; the code exists. Somebody else's protocol, checked against packets worked out by hand, then against a simulated bus. | 24 protocol tests, 16 on the simulated bus |
+| 30 | Decide how it fails before it fails | New lesson; half the code exists: a missing servo, a quiet servo, a corrupt reply and torque-on are decided and tested. What a servo does when the HOST goes quiet is not. | the Link and Activate tests |
+| 31 | Where safety actually lives | Version: joint names in the hand-sent goal | `safety_limit`, and the clamp test in `test-ros` |
+| 32 | Parts generated from the same numbers | Not on this path: the SO-101's parts are upstream's STLs | |
+| 33 | A decision with a number attached | Not on this path | |
+| 34 | Deploy, and roll back with a pull | Version: needs lesson 24's image | no |
+| 35 | Alive is not the same as ready | Version, and a better one: the servo reports load and temperature. See R5. | the dashboard against the SO-101 in Gazebo: `/readyz` ready, six joints in `/api/state` |
+| 36 | Metrics from a robot behind a home router | Runs | robot-agnostic |
 
 ### Stage 6: Make it capable
 
 | # | Lesson | On the SO-101 | Checked |
 |---|---|---|---|
-| 38–40 | Mobile base, gyro, composition | Not on this path: parked with the mobility work | |
-| 41 | Solve the kinematics | New: numerical IK. The closed form refuses five joints, correctly. | the refusal, in the spike |
-| 42 | Prove the grasp | New: needs lesson 41 and mesh collisions on the jaws | no |
-| 43 | A camera, and the geometry behind it | New: no camera in this description. Upstream added a wrist-camera URDF variant in September 2026. | no |
-| 44–47 | Datasets, model, registry, serving | Version: the registry is robot-agnostic; collection is wired to the mobile manipulator's camera | no |
-| 48 | Somebody else's robot | Runs, updated in this change: the last step now passes | all of it |
+| 37–39 | Mobile base, gyro, composition | Not on this path: parked with the mobility work | |
+| 40 | Solve the kinematics | New: numerical IK. The closed form refuses five joints, correctly. | the refusal, in the spike |
+| 41 | Prove the grasp | New: needs lesson 40 and mesh collisions on the jaws | no |
+| 42 | A camera, and the geometry behind it | New: no camera in this description. Upstream added a wrist-camera URDF variant in September 2026. | no |
+| 43–46 | Datasets, model, registry, serving | Version: the registry is robot-agnostic; collection is wired to the mobile manipulator's camera | no |
+| 47 | Somebody else's robot | Runs, updated in this change: the last step now passes | all of it |
 
-**Count:** 17 run, 19 need a version, 6 need a new lesson, 6 are not on
-this path. The free stages (1 to 3) are 8 runs and 11 versions with no
+**Count:** 16 run, 19 need a version, 6 need a new lesson, 6 are not on
+this path. The free stages (1 to 3) are 7 runs and 11 versions with no
 new lessons, so a free SO-101 track is a writing job, not a building
 one.
 
@@ -251,7 +250,7 @@ In the order that unblocks the most lessons:
    `test-ros` and `test-sim` for both profiles. `make test-ros` is not
    in CI for either robot today.
 5. **Numerical IK**, against the existing IK test cases. Unblocks
-   lessons 41 and 42.
+   lessons 40 and 41.
 6. **The runtime image with the pinned description baked in.**
 
 ## 4. Sessions to record on the physical arm

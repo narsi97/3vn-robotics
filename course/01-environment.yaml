@@ -13,7 +13,6 @@ outcomes:
   - Say, for any file in the project, whether changing it needs a rebuild — and why.
   - Run about nine hundred checks against a robot that does not exist yet, in under a minute.
   - Explain the hardware seam, and prove it with two commands rather than a diagram.
-  - Check a licence and a naming rule before they become expensive, and record the decision as an ADR.
   - Recognise the environment failures that disguise themselves as robotics bugs.
 
 prerequisites:
@@ -109,6 +108,11 @@ lessons:
           A script that verifies the environment before any real work
           starts, so a resource problem fails clearly instead of
           masquerading as a bug later. Here, `make doctor`.
+      - term: Architecture decision record (ADR)
+        meaning: >-
+          A short document recording one decision: its context, the choice,
+          the alternatives rejected and why, and the consequences. This
+          project's are in `docs/decisions/`.
     quiz:
       - q: Why does `make doctor` check Docker's memory before anything else?
         a: >-
@@ -325,9 +329,22 @@ lessons:
         run: make test
         expect: >-
           A failure in `test_model_name_is_ros_legal`, with a message saying
-          why. You will see why that rule exists two lessons from now. The
-          summary counts the one fault as `2 failures`: the test itself,
-          and the CTest entry that ran it.
+          why. The summary counts the one fault as `2 failures`: the test
+          itself, and the CTest entry that ran it.
+      - do: >-
+          Read why the rule exists. A ROS name must start with a letter,
+          because names become C++ namespaces, Python modules and CMake
+          targets. YAML accepts `3vn_arm_v1` without complaint. The failure
+          would come later, deep in the middleware, in an error that does
+          not mention the name. The test moves that failure here, to the
+          line that caused it. It is also why every package in this
+          project is called `threevn_…` and never `3vn_…`. The arm keeps a
+          separate `display_name` for people.
+        run: grep -n -E "model:|display_name:" src/threevn_robot_description/config/threevn_arm_v1.yaml
+        expect: >-
+          `model: 3vn_arm_v1`, your planted fault, and `display_name: "3VN
+          Arm v1"`. The display name may start with a digit and contain
+          spaces, because nothing derives a ROS name from it.
       - do: Put it back, and confirm green.
         run: |
           git checkout src/threevn_robot_description/config/threevn_arm_v1.yaml
@@ -352,7 +369,18 @@ lessons:
         fix: >-
           `make test` clears old results first. If you run colcon by hand,
           delete `build/*/test_results` before testing.
+      - symptom: A name works in YAML and fails later inside the middleware, with an error that does not mention the name.
+        cause: >-
+          A ROS identifier starting with a digit. YAML does not care; DDS
+          entity names do.
+        fix: >-
+          Keep a ROS-legal identifier and a separate display name, and
+          assert the identifier matches `[a-z][a-z0-9_]*` in a test.
     concepts:
+      - term: REP-144
+        meaning: >-
+          The ROS convention for package names: lowercase letters, digits
+          and underscores, starting with a letter.
       - term: Test budget
         meaning: >-
           A hard limit on how long the fast suite may take — here 60
@@ -388,6 +416,7 @@ lessons:
         simulator.
     read:
       - testing.md
+      - decisions/0001-package-naming.md
 
   - id: the-seam
     title: The decision everything else rests on
@@ -504,104 +533,6 @@ lessons:
     read:
       - architecture.md
       - decisions/0003-hardware-seam.md
-
-  - id: names-and-licences
-    title: Before the first line, a licence and a name
-    tags: [security, hardware]
-    minutes: 25
-    objective: Check a licence and a naming rule before either becomes expensive, and record the decision.
-    body: |
-      The first decision this project made was not about code.
-
-      The original specification named a well-known open-source arm as the
-      reference design. Checking its licence first showed **CC BY-NC 4.0** —
-      NonCommercial — on both the original and its successor. This is a paid
-      course. And the problem is wider than not shipping the files: a mesh
-      re-modelled from their CAD is still a derivative work, and a robot
-      description that reproduces their measurements is *arguably* one too.
-      "Arguably" is the wrong amount of certainty to build a product on. So
-      this arm is built from its own primitive geometry, with every number
-      in a file this project owns.
-
-      Two more arms were checked later, with three different outcomes. One
-      highly recommended six-axis arm carries a licence that forbids
-      redistribution outright — and costs about $2,000 against this whole
-      robot's $45–55. Another, the SO-101, is Apache-2.0 and was tried for
-      real; Tier 6 covers what happened.
-
-      The naming rule was the second early decision. `3vn_robot_description`
-      is an **illegal** ROS package name: names must start with a letter,
-      because they become C++ namespaces, Python modules and CMake targets.
-      The same rule binds node, topic and namespace names. So
-      `model: 3vn_arm_v1` in a config file is a latent failure: it is a
-      perfectly good YAML string right up until something derives a
-      namespace or a frame prefix from it, and then it fails deep in the
-      middleware, far from its cause.
-
-      Hence `threevn_` for every package, a separate `display_name: "3VN
-      Arm v1"` for humans, and a test pinning the rule.
-
-      Both decisions are written up as **architecture decision records**.
-      The section that earns its keep is *alternatives considered*: it is
-      what stops the same argument being had again in six months by
-      someone who was not there.
-    steps:
-      - do: Read how three candidate arms were assessed, and what became of each.
-        run: less THIRD_PARTY.md
-      - do: Read the naming decision.
-        run: less docs/decisions/0001-package-naming.md
-      - do: See the identifier and the display name side by side in the profile.
-        run: grep -n -E "model:|display_name:" src/threevn_robot_description/config/threevn_arm_v1.yaml
-        expect: '`model: threevn_arm_v1` and `display_name: "3VN Arm v1"`.'
-      - do: Find the test that keeps it that way.
-        run: grep -n -A10 "def test_model_name_is_ros_legal" src/threevn_robot_description/test/test_config_schema.py
-    checkpoint: >-
-      You can say, for each arm in `THIRD_PARTY.md`, why it was rejected or
-      tried, and which rule the `threevn_` prefix exists to obey.
-    pitfalls:
-      - symptom: A name works in YAML and fails later inside the middleware, with an error that does not mention the name.
-        cause: >-
-          A ROS identifier starting with a digit. YAML does not care; DDS
-          entity names do.
-        fix: >-
-          Keep a ROS-legal identifier and a separate display name, and
-          assert the identifier matches `[a-z][a-z0-9_]*` in a test.
-    concepts:
-      - term: Architecture decision record (ADR)
-        meaning: >-
-          A short document recording one decision: its context, the choice,
-          the alternatives rejected and why, and the consequences.
-      - term: REP-144
-        meaning: >-
-          The ROS convention for package names: lowercase letters, digits
-          and underscores, starting with a letter.
-      - term: Derivative work
-        meaning: >-
-          Something based on a copyrighted work closely enough that the
-          original's licence governs it — a re-modelled mesh, arguably a
-          set of measurements. Not legal advice.
-    quiz:
-      - q: You re-model a NonCommercial-licensed arm from scratch in your own CAD, using its published dimensions. Is that clean for a paid course?
-        a: >-
-          Not obviously. A re-modelled mesh is a derivative work, and a
-          design reproducing its measurements is arguably one. When the
-          answer is "arguably", a commercial product should not depend on
-          it. (Not legal advice.)
-      - q: Why is "alternatives considered" the most valuable section of an ADR?
-        a: >-
-          The decision itself is visible in the code. What is not visible is
-          what was tried and why it lost — and without that, someone
-          proposes the rejected option again and the argument is had twice.
-    exercise:
-      task: >-
-        Write a one-page ADR, in the format of
-        `docs/decisions/0001-package-naming.md`, for a decision you have
-        already made in your own work. Include at least two rejected
-        alternatives, each with the reason it lost.
-    read:
-      - decisions/0001-package-naming.md
-      - decisions/0004-own-geometry.md
-      - so101-spike.md
 
   - id: symptoms-that-lie
     title: Symptoms that lie

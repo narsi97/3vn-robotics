@@ -792,17 +792,17 @@ lessons:
   - id: every-input-is-a-dependency
     title: Every input is a dependency
     tags: [security, devops]
-    builds_on: [names-and-licences, images-that-ship, releases-are-evidence]
+    builds_on: [images-that-ship, releases-are-evidence]
     minutes: 40
     objective: >-
       List everything the robot image is built from, and say for each input
       whether it is verified, only pinned, or open.
     body: |
-      Earlier lessons each secured one link: a licence checked before the
-      first line, an image that provably carries no simulator, a release
-      whose tag and digest agree. This one walks the whole chain from a
-      commit to a robot and asks one question of every link: **who, or
-      what, can change this without anyone here deciding to?**
+      Earlier lessons each secured one link: an image that provably
+      carries no simulator, a release whose tag and digest agree. This one
+      walks the whole chain from a commit to a robot and asks one question
+      of every link: **who, or what, can change this without anyone here
+      deciding to?**
 
       There are three possible answers, and only the first is comforting:
 
