@@ -1,0 +1,30 @@
+# The robot the course was written on. Every lesson's default text is
+# this robot's version; the others replace only what has to change.
+id: 3vn-arm1
+name: 3VN Arm 1
+order: 1
+reference: true
+price: "about US$55–75"
+price_note: >-
+  At the unit prices in the [bill of materials](bom-hardware.md), the arm
+  with its ESP32 controller, power supply and e-stop comes to about
+  **US$55–75**. Bought one at a time in Canada, in the pack sizes shops
+  sell, the same list was about **C$167 before tax** in November 2026.
+  The mobile base and camera used in stage 6 cost extra; the bill of
+  materials itemises both.
+kind: Four-joint arm, with an optional mobile base
+has: [arm, gripper, wheels, camera]
+summary: >-
+  Our own arm: hobby servos, printed parts generated from the same YAML as
+  the simulation, and an ESP32 as a deliberately dumb driver. The cheapest
+  way through the whole stack, and the only robot here whose every part you
+  can regenerate and change.
+status: >-
+  The whole course runs on it **in simulation**. Its parts have been
+  printed; nothing has been bought, assembled or powered yet. The masses
+  are computed rather than weighed, and it has never picked anything up:
+  the grasp lesson ends on that open problem.
+teaches:
+  - Designing the robot itself, because every part is CAD generated from one profile
+  - Living without feedback, because hobby servos report nothing back
+  - Composing an arm with a mobile base into one robot

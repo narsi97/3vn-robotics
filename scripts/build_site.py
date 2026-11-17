@@ -41,6 +41,29 @@ one passage that touches it. The topic page links straight to that
 passage with a URL text fragment, and validation fails if the quote is
 no longer in the lesson.
 
+ONE COURSE, SEVERAL ROBOTS. A student picks the machine they will learn
+on (course/robots/*.yaml), and every robot gets its own copy of the
+course under site/<robot>/. A lesson's objective, reasoning and terms
+are the course and are shared; a robot's version replaces only what has
+to change -- the steps, the checkpoint, what goes wrong. A lesson is one
+of three kinds:
+
+  * `scope: any`  -- robot-agnostic (Docker, CI, releases); the same page
+                     on every robot.
+  * `needs: [..]` -- only on robots that have those capabilities; a
+                     robot without wheels gets no driving lesson.
+  * otherwise     -- written for the reference robot, and for each other
+                     robot either given its own version under
+                     `flavors: {robot: {steps: ...}}`, or shown as
+                     PLANNED: the shared idea, and a link to the same
+                     lesson on the reference robot in simulation.
+
+So a robot's coverage is counted, never claimed, the same way stage
+durations are summed rather than typed.
+
+Each robot's copy carries its own topic pages, so a topic lists the
+lessons that robot's student will actually meet.
+
 Three constraints come from where this is served -- behind the shared
 3VNSYSTEMS Caddy, on an unlisted path:
 
@@ -132,6 +155,22 @@ TAGS_FILE = 'tags.yaml'
 #: after every lesson its own lessons build on.
 RELATED_PICKS = 4
 
+#: What a robot -- one flavour of the course -- must carry.
+ROBOT_FIELDS = ('id', 'name', 'order', 'price', 'price_note', 'kind', 'has',
+                'summary', 'status', 'teaches')
+#: What a robot can have, and so what a lesson can need -- with how a
+#: page says it. `wheels`, not "mobile": a walking duck is mobile, and
+#: the lessons that need wheels are about wheel odometry.
+CAPABILITIES = {'arm': 'an arm', 'gripper': 'a gripper', 'wheels': 'wheels',
+                'legs': 'legs', 'camera': 'a camera', 'lidar': 'a lidar'}
+#: What a robot's version may replace. The objective, the reasoning and
+#: the terms ARE the course; the steps are the robot. Concepts given in
+#: a robot's version are added to the shared ones, not swapped for them.
+LESSON_OVERRIDES = ('steps', 'checkpoint', 'pitfalls', 'quiz', 'exercise',
+                    'read', 'note', 'minutes', 'concepts')
+PROJECT_OVERRIDES = ('brief', 'tasks', 'done_when', 'hints', 'read', 'note',
+                     'minutes')
+
 STYLE = """
 :root {
   --bg: #11131a; --panel: #181b24; --line: #272b36;
@@ -216,8 +255,9 @@ footer.site {
 .stage h2 { margin: 0; font-size: 18px; }
 .stage h2 a { color: var(--ink); text-decoration: none; }
 .stage h2 a:hover { color: var(--accent); }
-.price { margin-left: auto; font-size: 12.5px; padding: 2px 10px;
+.price { margin-left: auto; font-size: 12.5px; padding: 2px 10px; white-space: nowrap;
          border-radius: 999px; border: 1px solid var(--line); color: var(--dim); }
+h1 .price { display: inline-block; vertical-align: middle; font-weight: 500; }
 .price.free { color: var(--good); border-color: #2c5a3c; }
 .price.paid { color: var(--warn); border-color: #5a4a22; }
 .stage .blurb { padding: 12px 16px 0; color: var(--dim); font-size: 14.5px; margin: 0; }
@@ -303,6 +343,20 @@ h2.stage-head a { color: var(--ink); text-decoration: none; }
 h2.stage-head a:hover { color: var(--accent); }
 h2.stage-head .n { color: var(--dim); font-size: 12px; letter-spacing: .1em;
                    text-transform: uppercase; margin-right: 8px; }
+/* --- one course, several robots --- */
+details.picker { display: inline-block; margin: 14px 0 0; padding: 0 12px;
+                 max-width: 100%; }
+details.picker > summary { padding: 6px 0; font-weight: 500; font-size: 14px; }
+details.picker > summary span { color: var(--dim); margin-left: 6px; }
+details.picker[open] > summary { margin-bottom: 0; }
+details.picker ul { list-style: none; margin: 0; padding: 4px 0 8px; }
+details.picker li a { display: block; padding: 7px 0; text-decoration: none; }
+details.picker li span { display: block; color: var(--dim); font-size: 12.5px; }
+.soon { font-size: 11.5px; color: var(--warn); border: 1px solid #5a4a22;
+        border-radius: 999px; padding: 0 7px; margin-left: 6px; white-space: nowrap; }
+.stage .go { padding: 10px 16px 14px; margin: 0; font-size: 14.5px; }
+.stage ul.teach { margin: 8px 0 4px; padding: 0 16px 0 34px; color: var(--dim);
+                  font-size: 14px; }
 """
 
 PAGE = """<!DOCTYPE html>
@@ -318,6 +372,7 @@ PAGE = """<!DOCTYPE html>
 <header class="site"><div class="wrap">
   <div class="brand"><a href="{home}">3VN Robotics</a><span class="badge">preview</span></div>
   <div class="meta">{meta}</div>
+  {picker}
 </div></header>
 <div class="wrap">
 {body}
@@ -479,6 +534,89 @@ def load_tags(root):
     return data.get('tags') or []
 
 
+def load_robots(root):
+    """
+    Load the robots the course can be taken on, from course/robots/*.yaml,
+    in their declared order.
+
+    A subdirectory rather than course/*.yaml, because every top-level YAML
+    file there is a stage.
+    """
+    folder = root / 'course' / 'robots'
+    if not folder.is_dir():
+        return []
+    robots = [yaml.safe_load(f.read_text()) for f in sorted(folder.glob('*.yaml'))]
+    return sorted(robots, key=lambda r: (r.get('order', 99), str(r.get('id'))))
+
+
+def reference_of(robots):
+    """The robot the default lesson text is written for."""
+    return next(r for r in robots if r.get('reference'))
+
+
+def resolve(base, robot, ref_id, overrides):
+    """
+    One lesson or project as THIS robot's student sees it.
+
+    Ready when it is robot-agnostic, written for this robot alone, the
+    reference robot's own, or given a version for this robot. Planned
+    otherwise: the shared idea is real, the steps do not exist yet.
+    """
+    item = dict(base)
+    rid = robot['id']
+    variant = (base.get('flavors') or {}).get(rid)
+    if rid == ref_id or base.get('scope') == 'any' or base.get('only'):
+        item['status'] = 'ready'
+    elif variant:
+        for key in overrides:
+            if key not in variant:
+                continue
+            if key == 'concepts':
+                item[key] = list(base.get('concepts') or []) + list(variant[key])
+            else:
+                item[key] = variant[key]
+        item['status'] = 'ready'
+    else:
+        item['status'] = 'planned'
+    return item
+
+
+def flavor_view(stages, robot, ref):
+    """
+    The whole course for one robot: lessons it cannot do are set aside
+    with the reason, the rest are resolved and renumbered.
+    """
+    has = set(robot.get('has') or [])
+    view, number = [], 0
+    for stage in stages:
+        st = dict(stage, robot=robot, ref=ref)
+        lessons, skipped = [], []
+        for base in stage.get('lessons') or []:
+            if base.get('only') and robot['id'] not in base['only']:
+                continue
+            missing = set(base.get('needs') or []) - has
+            if missing:
+                skipped.append((base, sorted(missing)))
+                continue
+            lessons.append(resolve(base, robot, ref['id'], LESSON_OVERRIDES))
+        for position, lesson in enumerate(lessons, 1):
+            number += 1
+            lesson.update(index=number, position=position, stage=st)
+        project = resolve(stage['project'], robot, ref['id'], PROJECT_OVERRIDES)
+        project['stage'] = st
+        st.update(lessons=lessons, skipped=skipped, project=project)
+        st['minutes'] = (sum(int(le.get('minutes') or 0) for le in lessons)
+                         + int(project.get('minutes') or 0))
+        view.append(st)
+    return view
+
+
+def coverage(view):
+    """(ready, total) lessons on one robot. Counted, never claimed."""
+    lessons = [le for st in view for le in st['lessons']]
+    return sum(le['status'] == 'ready' for le in lessons), len(lessons)
+
+
 def make_targets(root):
     """Every target the Makefile declares."""
     makefile = root / 'Makefile'
@@ -548,14 +686,15 @@ def lesson_text(lesson):
 
 # ------------------------------------------------------------- validation
 
-def validate(stages, root, tags=None):
+def validate(stages, root, tags=None, robots=None):
     """
     Return every problem with the curriculum, as a list of strings.
 
     Empty means valid. Checks the shape of each stage, lesson and project,
     and -- more usefully -- that what a lesson points at exists: Make
     targets, docs, topic tags, the lessons it builds on, and the
-    uniqueness of ids and glossary terms.
+    uniqueness of ids and glossary terms. A robot's version of a lesson
+    is held to exactly the same checks as the lesson.
     """
     errors = []
     docs = root / 'docs'
@@ -563,6 +702,12 @@ def validate(stages, root, tags=None):
     seen_ids, seen_terms = {}, {}
     order = {le.get('id'): le.get('index')
              for st in stages for le in (st.get('lessons') or [])}
+    robots = robots or []
+    robot_ids = {r.get('id') for r in robots}
+    refs = [r for r in robots if r.get('reference')]
+    ref_id = refs[0].get('id') if len(refs) == 1 else None
+    variant_terms = []      # (where, robot, term), checked once every base term is known
+    needed = set()          # capabilities some lesson for everyone needs
 
     def need(where, data, fields):
         for name in fields:
@@ -589,6 +734,99 @@ def validate(stages, root, tags=None):
                 name = name[5:]
             check_doc(where, name)
 
+    def check_lesson_content(lwhere, lesson):
+        """Everything a lesson points at -- for a lesson or a robot's version of one."""
+        for i, step in enumerate(lesson.get('steps') or [], 1):
+            if not isinstance(step, dict) or not step.get('do'):
+                errors.append(f'{lwhere}: step {i} has no `do`')
+                continue
+            check_shell(f'{lwhere} step {i}', step.get('run', ''))
+            check_shell(f'{lwhere} step {i}', code_in(step.get('do', '')))
+            check_markdown(f'{lwhere} step {i}', step.get('do', ''))
+
+        for field in ('body', 'checkpoint', 'note'):
+            check_markdown(lwhere, lesson.get(field, ''))
+            check_shell(lwhere, code_in(lesson.get(field, '')))
+
+        for name in lesson.get('read') or []:
+            check_doc(lwhere, name)
+
+        for i, pit in enumerate(lesson.get('pitfalls') or [], 1):
+            for part in ('symptom', 'cause', 'fix'):
+                if not pit.get(part):
+                    errors.append(f'{lwhere}: pitfall {i} has no `{part}`')
+            check_shell(f'{lwhere} pitfall {i}', code_in(pit.get('fix', '')))
+
+        for i, item in enumerate(lesson.get('quiz') or [], 1):
+            if not item.get('q') or not item.get('a'):
+                errors.append(f'{lwhere}: quiz {i} needs both `q` and `a`')
+
+        exercise = lesson.get('exercise')
+        if exercise is not None and not (isinstance(exercise, dict)
+                                         and exercise.get('task')):
+            errors.append(f'{lwhere}: `exercise` needs a `task`')
+
+        if 'minutes' in lesson and (not isinstance(lesson['minutes'], int)
+                                    or lesson['minutes'] <= 0):
+            errors.append(f'{lwhere}: `minutes` must be a positive integer')
+
+    def check_project_content(pwhere, project):
+        for i, task in enumerate(project.get('tasks') or [], 1):
+            text = task.get('do') if isinstance(task, dict) else task
+            if not text:
+                errors.append(f'{pwhere}: task {i} is empty')
+            if isinstance(task, dict):
+                check_shell(f'{pwhere} task {i}', task.get('run', ''))
+            check_shell(f'{pwhere} task {i}', code_in(text or ''))
+        for field in ('brief', 'note'):
+            check_markdown(pwhere, project.get(field, ''))
+        for name in project.get('read') or []:
+            check_doc(pwhere, name)
+
+    def check_flavors(where, item, required, overrides, content):
+        """The robot-specific parts of a lesson or project."""
+        scope = item.get('scope')
+        if scope not in (None, 'any'):
+            errors.append(f'{where}: scope {scope!r} is not "any"')
+        if scope == 'any' and (item.get('flavors') or item.get('needs')
+                               or item.get('only')):
+            errors.append(f'{where}: `scope: any` means the same on every robot, '
+                          f'so it cannot also have `flavors`, `needs` or `only`')
+        for cap in item.get('needs') or []:
+            if cap not in CAPABILITIES:
+                errors.append(f'{where}: needs {cap!r}, which is not one of '
+                              f'{", ".join(CAPABILITIES)}')
+        for rid in item.get('only') or []:
+            if rid not in robot_ids:
+                errors.append(f'{where}: `only` names robot {rid!r}, '
+                              f'which course/robots/ does not define')
+        if not item.get('only'):
+            needed.update(item.get('needs') or [])
+        for rid, variant in (item.get('flavors') or {}).items():
+            vwhere = f'{where} on {rid}'
+            if rid not in robot_ids:
+                errors.append(f'{vwhere}: no such robot in course/robots/')
+                continue
+            if rid == ref_id:
+                errors.append(f'{vwhere}: the reference robot\'s version is the '
+                              f'lesson itself; edit that instead')
+                continue
+            if not isinstance(variant, dict) or not variant.get(required):
+                errors.append(f'{vwhere}: a robot\'s version must give its own '
+                              f'`{required}`; leave it out to show it as planned')
+                continue
+            for key in variant:
+                if key not in overrides:
+                    errors.append(f'{vwhere}: `{key}` cannot differ by robot '
+                                  f'(only {", ".join(overrides)} can)')
+            content(vwhere, variant)
+            for concept in variant.get('concepts') or []:
+                term = str(concept.get('term', '')).strip()
+                if not term or not concept.get('meaning'):
+                    errors.append(f'{vwhere}: a concept needs `term` and `meaning`')
+                    continue
+                variant_terms.append((vwhere, rid, term))
+
     if not stages:
         return ['course/: no stages found']
 
@@ -609,6 +847,33 @@ def validate(stages, root, tags=None):
             errors.append(f'{twhere}: listed twice in course/{TAGS_FILE}')
         known[name] = tag
 
+    # ---- the robots
+    if not robots:
+        errors.append('course/robots/: no robots found')
+    elif len(refs) != 1:
+        errors.append(f'course/robots/: exactly one robot must be '
+                      f'`reference: true`, found {len(refs)}')
+    seen_robots = set()
+    for robot in robots:
+        rwhere = f'robot {robot.get("id", "?")}'
+        need(rwhere, robot, ROBOT_FIELDS)
+        rid = str(robot.get('id', ''))
+        if rid in seen_robots:
+            errors.append(f'{rwhere}: id used by another robot')
+        seen_robots.add(rid)
+        if rid and not re.fullmatch(r'[a-z0-9][a-z0-9-]*', rid):
+            errors.append(f'{rwhere}: id must be lowercase letters, digits and '
+                          f'dashes -- it becomes a directory and a URL')
+        for cap in robot.get('has') or []:
+            if cap not in CAPABILITIES:
+                errors.append(f'{rwhere}: has {cap!r}, which is not one of '
+                              f'{", ".join(CAPABILITIES)}')
+        for field in ('summary', 'status', 'price_note'):
+            check_markdown(rwhere, robot.get(field, ''))
+        for name in robot.get('read') or []:
+            check_doc(rwhere, name)
+
+    # ---- the course
     for expected, stage in enumerate(stages, 1):
         where = f'stage {stage.get("id", expected)}'
         need(where, stage, STAGE_FIELDS)
@@ -677,35 +942,9 @@ def validate(stages, root, tags=None):
                 elif quote not in text:
                     errors.append(f'{mwhere}: quote {quote!r} is not in the lesson')
 
-            for i, step in enumerate(lesson.get('steps') or [], 1):
-                if not isinstance(step, dict) or not step.get('do'):
-                    errors.append(f'{lwhere}: step {i} has no `do`')
-                    continue
-                check_shell(f'{lwhere} step {i}', step.get('run', ''))
-                check_shell(f'{lwhere} step {i}', code_in(step.get('do', '')))
-                check_markdown(f'{lwhere} step {i}', step.get('do', ''))
-
-            for field in ('body', 'checkpoint'):
-                check_markdown(lwhere, lesson.get(field, ''))
-                check_shell(lwhere, code_in(lesson.get(field, '')))
-
-            for name in lesson.get('read') or []:
-                check_doc(lwhere, name)
-
-            for i, pit in enumerate(lesson.get('pitfalls') or [], 1):
-                for part in ('symptom', 'cause', 'fix'):
-                    if not pit.get(part):
-                        errors.append(f'{lwhere}: pitfall {i} has no `{part}`')
-                check_shell(f'{lwhere} pitfall {i}', code_in(pit.get('fix', '')))
-
-            for i, item in enumerate(lesson.get('quiz') or [], 1):
-                if not item.get('q') or not item.get('a'):
-                    errors.append(f'{lwhere}: quiz {i} needs both `q` and `a`')
-
-            exercise = lesson.get('exercise')
-            if exercise is not None and not (isinstance(exercise, dict)
-                                             and exercise.get('task')):
-                errors.append(f'{lwhere}: `exercise` needs a `task`')
+            check_lesson_content(lwhere, lesson)
+            check_flavors(lwhere, lesson, 'steps', LESSON_OVERRIDES,
+                          check_lesson_content)
 
             for concept in lesson.get('concepts') or []:
                 term = str(concept.get('term', '')).strip()
@@ -722,19 +961,34 @@ def validate(stages, root, tags=None):
         if isinstance(project, dict):
             pwhere = f'{where} project'
             need(pwhere, project, PROJECT_FIELDS)
-            for i, task in enumerate(project.get('tasks') or [], 1):
-                text = task.get('do') if isinstance(task, dict) else task
-                if not text:
-                    errors.append(f'{pwhere}: task {i} is empty')
-                if isinstance(task, dict):
-                    check_shell(f'{pwhere} task {i}', task.get('run', ''))
-                check_shell(f'{pwhere} task {i}', code_in(text or ''))
-            for name in project.get('read') or []:
-                check_doc(pwhere, name)
+            check_project_content(pwhere, project)
+            if project.get('needs') or project.get('only'):
+                errors.append(f'{pwhere}: every robot gets every project, so a '
+                              f'project cannot have `needs` or `only`')
+            check_flavors(pwhere, project, 'tasks', PROJECT_OVERRIDES,
+                          check_project_content)
 
     for name in known:
         if name not in used:
             errors.append(f'tag {name}: in course/{TAGS_FILE}, but no lesson carries it')
+
+    # ---- across both
+    per_robot = {}
+    for vwhere, rid, term in variant_terms:
+        key = term.lower()
+        mine = per_robot.setdefault(rid, {})
+        if key in seen_terms:
+            errors.append(f'{vwhere}: glossary term {term!r} is already defined '
+                          f'by lesson {seen_terms[key]}')
+        elif key in mine:
+            errors.append(f'{vwhere}: glossary term {term!r} is already defined '
+                          f'for this robot in {mine[key]}')
+        mine[key] = vwhere
+    if ref_id:
+        missing = needed - set(refs[0].get('has') or [])
+        if missing:
+            errors.append(f'robot {ref_id}: the reference robot must be able to '
+                          f'take every lesson, but lacks {", ".join(sorted(missing))}')
     return errors
 
 
@@ -908,6 +1162,57 @@ def pager(sequence, position):
     return f'<div class="pager">{prev}{nxt}</div>'
 
 
+def soon(item):
+    """The pill on a lesson or project not yet written for this robot."""
+    return '<span class="soon">planned</span>' if item.get('status') == 'planned' else ''
+
+
+def robot_notes(item, page):
+    """
+    What a lesson or project says about THIS robot: its own note, or --
+    when its version does not exist yet -- that, and where to take the
+    lesson meanwhile.
+    """
+    stage = item['stage']
+    robot, ref = stage.get('robot'), stage.get('ref')
+    out = []
+    if robot and item.get('note'):
+        out.append(f'<div class="note"><strong>On the {esc(robot["name"])}:</strong> '
+                   f'{inline(item["note"])}</div>')
+    if robot and item.get('status') == 'planned':
+        out.append(
+            f'<div class="note"><strong>Not written for the {esc(robot["name"])} '
+            f'yet.</strong> The idea above is the same on every robot, though '
+            f'it is told through the {esc(ref["name"])}; the steps are not. '
+            f'Until they exist, take it on the '
+            f'<a href="../{ref["id"]}/{page}">{esc(ref["name"])}</a> in '
+            f'simulation, which needs no hardware.</div>')
+    return out
+
+
+def picker_html(robot, robots, pages, counts, name):
+    """
+    The robot chooser at the top of every course page.
+
+    No JavaScript, per the CSP: a <details> that opens into links, each to
+    THIS page on the other robot where it exists there, and to that
+    robot's front page where it does not (a vacuum has no grasp lesson).
+    """
+    items = []
+    for other in robots:
+        if other['id'] == robot['id']:
+            continue
+        target = name if name in pages[other['id']] else 'index.html'
+        ready, total = counts[other['id']]
+        items.append(f'<li><a href="../{other["id"]}/{target}">{esc(other["name"])}'
+                     f'<span>{esc(other["price"])} &middot; {ready} of {total} '
+                     f'lessons ready</span></a></li>')
+    items.append('<li><a href="../index.html">Compare the robots</a></li>')
+    return (f'<details class="picker"><summary>Robot: <b>{esc(robot["name"])}</b>'
+            f'<span>{esc(robot["price"])}</span></summary>'
+            f'<ul>{"".join(items)}</ul></details>')
+
+
 def crumbs(stage):
     """Breadcrumb back to the course and the stage."""
     return (f'<div class="crumbs"><a href="index.html">The course</a> / '
@@ -936,10 +1241,11 @@ def lesson_page(lesson, sequence, position, vocab, by_id):
         f'<p class="objective"><b>You will:</b> {inline(lesson["objective"])}</p>',
         tag_chips(lesson['tags'], vocab),
     ]
-    if lesson.get('builds_on'):
+    # A lesson built on may not exist on this robot (it needs wheels).
+    deps = [by_id[dep] for dep in lesson.get('builds_on') or [] if dep in by_id]
+    if deps:
         parts.append('<p class="builds">Builds on '
-                     + said(lesson_link(by_id[dep]) for dep in lesson['builds_on'])
-                     + '.</p>')
+                     + said(lesson_link(dep) for dep in deps) + '.</p>')
     touched = []
     for mention in lesson.get('mentions') or []:
         if mention['tag'] not in touched:
@@ -949,6 +1255,18 @@ def lesson_page(lesson, sequence, position, vocab, by_id):
                      + said(f'<a href="{tag_href(t)}">{esc(vocab[t]["label"])}</a>'
                             for t in touched) + '.</p>')
     parts.append(rewrite_links(render(lesson.get('body', ''))))
+    parts.extend(robot_notes(lesson, f'lesson-{lesson["id"]}.html'))
+
+    if lesson.get('status') == 'planned':
+        # The idea is shared and real; the steps, checks and pitfalls
+        # are the reference robot's, and would mislead on this one.
+        if lesson.get('concepts'):
+            parts.append('<h2>Terms</h2><dl class="terms">')
+            parts.extend(f'<dt id="{slug(c["term"])}">{esc(c["term"])}</dt>'
+                         f'<dd>{inline(c["meaning"])}</dd>' for c in lesson['concepts'])
+            parts.append('</dl>')
+        parts.append(pager(sequence, position))
+        return '\n'.join(parts)
 
     parts.append('<h2>Do it</h2><ol class="steps">')
     for step in lesson['steps']:
@@ -1015,8 +1333,12 @@ def project_page(stage, sequence, position):
         f'&middot; project &middot; {hours(project["minutes"])}</div>',
         f'<h1>Project: {esc(project["title"])}</h1>',
         rewrite_links(render(project['brief'])),
-        '<h2>Tasks</h2><ol class="steps">',
     ]
+    parts.extend(robot_notes(project, f'project-{stage["id"]}.html'))
+    if project.get('status') == 'planned':
+        parts.append(pager(sequence, position))
+        return '\n'.join(parts)
+    parts.append('<h2>Tasks</h2><ol class="steps">')
     for task in project['tasks']:
         if isinstance(task, dict):
             piece = f'<li>{rewrite_links(render(task["do"]))}'
@@ -1066,16 +1388,30 @@ def stage_page(stage, sequence, vocab):
     for lesson in lessons:
         parts.append(
             f'<tr><td>{lesson["position"]}</td><td><a href="lesson-{lesson["id"]}.html">'
-            f'{esc(lesson["title"])}</a><span class="obj">{inline(lesson["objective"])}'
-            f'</span>{tag_chips(lesson["tags"], vocab)}</td>'
+            f'{esc(lesson["title"])}</a>{soon(lesson)}<span class="obj">'
+            f'{inline(lesson["objective"])}</span>{tag_chips(lesson["tags"], vocab)}</td>'
             f'<td class="m">{lesson["minutes"]} min</td></tr>')
     project = stage['project']
     parts.append(
         f'<tr><td>&#9670;</td><td><a href="project-{stage["id"]}.html">Project: '
-        f'{esc(project["title"])}</a></td><td class="m">{project["minutes"]} min</td></tr>')
+        f'{esc(project["title"])}</a>{soon(project)}</td>'
+        f'<td class="m">{project["minutes"]} min</td></tr>')
     parts.append('</table>')
 
-    first = f'lesson-{lessons[0]["id"]}.html'
+    robot, ref = stage.get('robot'), stage.get('ref')
+    if robot and stage.get('skipped'):
+        parts.append(f'<h2>Not on the {esc(robot["name"])}</h2><ul>')
+        for lesson, missing in stage['skipped']:
+            parts.append(
+                f'<li>{esc(lesson["title"])}<span class="obj">needs '
+                f'{" and ".join(CAPABILITIES[c] for c in missing)}, which this '
+                f'robot does not have. '
+                f'<a href="../{ref["id"]}/lesson-{lesson["id"]}.html">Read it on the '
+                f'{esc(ref["name"])}</a></span></li>')
+        parts.append('</ul>')
+
+    first = (f'lesson-{lessons[0]["id"]}.html' if lessons
+             else f'project-{stage["id"]}.html')
     parts.append(f'<p><a href="{first}">Start with lesson 1 &rarr;</a></p>')
     return '\n'.join(parts)
 
@@ -1204,12 +1540,14 @@ def ladder_html(stages):
     out = []
     for stage in stages:
         items = ''.join(
-            f'<li><a href="lesson-{le["id"]}.html">{esc(le["title"])}</a>'
+            f'<li><a href="lesson-{le["id"]}.html">{esc(le["title"])}</a>{soon(le)}'
             f'<span class="mins">{le["minutes"]} min</span></li>'
             for le in stage['lessons'])
         project = stage['project']
         items += (f'<li class="proj"><a href="project-{stage["id"]}.html">Project: '
-                  f'{esc(project["title"])}</a></li>')
+                  f'{esc(project["title"])}</a>{soon(project)}</li>')
+        skipped = (f' &middot; {len(stage["skipped"])} not on this robot'
+                   if stage.get('skipped') else '')
         out.append(
             f'<section class="stage"><header>'
             f'<span class="n">{stage_word(stage)} {stage["number"]}</span>'
@@ -1217,92 +1555,137 @@ def ladder_html(stages):
             f'{price_badge(stage)}</header>'
             f'<p class="blurb">{inline(stage["summary"])}</p>'
             f'<div class="facts">{len(stage["lessons"])} lessons &middot; '
-            f'project &middot; {hours(stage["minutes"])}</div>'
+            f'project &middot; {hours(stage["minutes"])}{skipped}</div>'
             f'<ol>{items}</ol></section>')
     return '\n'.join(out)
 
 
-def index_html(docs, written, stages, vocab):
-    """Render the front page: the course first, the manual second."""
+HOW_IT_WORKS = (
+    'Each lesson has the same shape, so you always know where to look. '
+    '**Why** the thing is built this way, usually through something '
+    'that went wrong here first. **Do it** — numbered steps with the '
+    'exact command and what you should see. **A checkpoint** that tells '
+    'you it worked. **When it goes wrong** — the symptoms that mislead, '
+    'and what they really mean. **Check yourself** — questions with the '
+    'answers folded away. **Stretch** — an exercise that goes past the '
+    'steps. Every stage ends in a **project** with a definition of done.\n\n'
+    'You need Docker and a machine with 6 GB of memory to give it. You '
+    'do not need a robot to start: hardware is one of three interchangeable '
+    'targets, and the course is built so the other two teach '
+    'everything except the screwdriver.')
+
+
+def index_html(stages, robot, ref, counts, vocab):
+    """Render one robot's front page: its course, and how far it has got."""
     lessons = [le for st in stages for le in st['lessons']]
     total_minutes = sum(st['minutes'] for st in stages)
-    listed = {name for _, items in CURRICULUM for name, _ in items}
     free = [st for st in stages if st.get('price') == 'free']
     paid = [st for st in stages if st.get('price') != 'free']
     cost = (f"${sum(int(st['price'].strip('$')) for st in paid)}" if paid else '$0')
+    ready, total = counts[robot['id']]
+    is_ref = robot['id'] == ref['id']
 
-    parts = ['<h1>Build a robot the way you build software</h1>', render(
-        'One system that grows, from a simulated arm to a mobile '
-        'manipulator that sees and learns. You already know Git, Docker, '
-        'testing, CI and observability. This is those skills, pointed at '
-        'a machine that moves.')]
+    parts = [f'<h1>Build a robot the way you build software, on the '
+             f'{esc(robot["name"])}</h1>',
+             render('One system that grows, from a simulated robot to one that '
+                    'sees and learns. You already know Git, Docker, testing, CI '
+                    'and observability. This is those skills, pointed at a '
+                    'machine that moves.'),
+             f'<p>{inline(robot["summary"])} <a href="robot.html">About the '
+             f'{esc(robot["name"])} &rarr;</a></p>']
 
-    if paid:
-        price_stat = (f'<div class="stat"><b>{len(free)} free</b><span>then '
-                      f'{paid[0]["price"]} per tier, {cost} for all</span></div>')
+    stats = [
+        f'<div class="stat"><b>{len(lessons)}</b><span>lessons on this robot</span></div>',
+        f'<div class="stat"><b>{len(stages)}</b><span>stages, each ending in a project</span></div>',
+        f'<div class="stat"><b>~{round(total_minutes / 60)} h</b><span>of hands-on work</span></div>',
+        (f'<div class="stat"><b>{len(free)} free</b><span>then '
+         f'{paid[0]["price"]} per tier, {cost} for all</span></div>' if paid else
+         f'<div class="stat"><b>Free</b><span>all {len(stages)} stages, '
+         f'for now</span></div>'),
+    ]
+    if not is_ref:
+        stats.insert(1, f'<div class="stat"><b>{ready} of {total}</b>'
+                        f'<span>written for this robot</span></div>')
+    parts.append('<div class="stats">' + ''.join(stats) + '</div>')
+
+    if is_ref:
+        parts.append(
+            '<div class="note"><strong>This is a live preview of an '
+            'unfinished course.</strong> It is generated from the project as '
+            'it actually stands, including what does not work yet. Where '
+            'something is unproven or failing, the lesson says so.</div>')
     else:
-        price_stat = (f'<div class="stat"><b>Free</b><span>all {len(stages)} '
-                      'stages, for now</span></div>')
-
-    parts.append(
-        '<div class="stats">'
-        f'<div class="stat"><b>{len(lessons)}</b><span>lessons</span></div>'
-        f'<div class="stat"><b>{len(stages)}</b>'
-        '<span>stages, each ending in a project</span></div>'
-        f'<div class="stat"><b>~{round(total_minutes / 60)} h</b>'
-        '<span>of hands-on work</span></div>'
-        f'{price_stat}'
-        '</div>')
-
-    parts.append(
-        '<div class="note"><strong>This is a live preview of an '
-        'unfinished course.</strong> It is generated from the project as '
-        'it actually stands, including what does not work yet. Where '
-        'something is unproven or failing, the lesson says so.</div>')
+        parts.append(
+            f'<div class="note"><strong>The {esc(robot["name"])} version is being '
+            f'written: {ready} of {total} lessons are ready.</strong> The rest '
+            f'show what they will teach, marked planned, and link to the same '
+            f'lesson on the {esc(ref["name"])} in simulation, which needs no '
+            f'hardware.</div>')
 
     parts.append('<h2>How every lesson works</h2>')
-    parts.append(render(
-        'Each lesson has the same shape, so you always know where to look. '
-        '**Why** the thing is built this way, usually through something '
-        'that went wrong here first. **Do it** — numbered steps with the '
-        'exact command and what you should see. **A checkpoint** that tells '
-        'you it worked. **When it goes wrong** — the symptoms that mislead, '
-        'and what they really mean. **Check yourself** — questions with the '
-        'answers folded away. **Stretch** — an exercise that goes past the '
-        'steps. Every stage ends in a **project** with a definition of done.\n\n'
-        'You need Docker and a machine with 6 GB of memory to give it. You '
-        'do not need a robot: hardware is one of three interchangeable '
-        'targets, and the course is built so the other two teach '
-        'everything except the screwdriver.'))
-
+    parts.append(render(HOW_IT_WORKS))
     parts.append('<h2>The course</h2>')
     parts.append(ladder_html(stages))
-    parts.append('<p><a href="glossary.html">Glossary of every term the course '
-                 'introduces &rarr;</a></p>')
 
-    counts = {name: 0 for name in vocab}
+    tag_counts = {name: 0 for name in vocab}
     for le in lessons:
         for tag in le['tags']:
-            counts[tag] += 1
+            tag_counts[tag] += 1
+    shown = [name for name in vocab if tag_counts[name]]
     parts.append('<h2>Topics</h2>')
     parts.append(render(
         'Every lesson is tagged. Pick a topic to see each lesson that covers '
         'it, wherever it sits in the course, and what to read alongside.'))
-    parts.append(tag_chips(list(vocab), vocab, counts=counts))
+    parts.append(tag_chips(shown, vocab, counts=tag_counts))
     parts.append('<p><a href="tags/index.html">Every topic, described &rarr;</a></p>')
+    parts.append('<p><a href="glossary.html">Glossary of every term the course '
+                 'introduces &rarr;</a></p>')
+    parts.append('<p><a href="../index.html#reference">The project\'s reference '
+                 'documentation &rarr;</a></p>')
+    return '\n'.join(parts)
 
-    table = phase_table(docs)
-    if table:
-        parts.append('<h2>The real project, honestly</h2>')
-        parts.append(render(
-            'The course is written against a project that is genuinely '
-            'being built, not a finished example. This is where it is:'))
-        parts.append(render(table))
 
-    parts.append('<h2>Reference</h2>')
-    parts.append(render(
+def robot_page(robot, stages, ref, counts):
+    """One robot: what it costs, what only it teaches, and how far its course is."""
+    ready, total = counts[robot['id']]
+    parts = ['<div class="crumbs"><a href="index.html">The course</a></div>',
+             f'<div class="lesson-head">{esc(robot["kind"])}</div>',
+             f'<h1>{esc(robot["name"])} <span class="price">{esc(robot["price"])}</span></h1>',
+             rewrite_links(render(robot['summary'])),
+             '<h2>What it costs</h2>', rewrite_links(render(robot['price_note'])),
+             '<h2>What it teaches that the others do not</h2><ul>']
+    parts.extend(f'<li>{inline(t)}</li>' for t in robot['teaches'])
+    parts.append('</ul>')
+    if robot.get('exclusive'):
+        parts.append('<h2>Lessons only this robot gets</h2>'
+                     '<p class="expect">Planned, not written yet.</p><ul>')
+        parts.extend(f'<li>{inline(t)}</li>' for t in robot['exclusive'])
+        parts.append('</ul>')
+    parts.append('<h2>Where it stands</h2>' + rewrite_links(render(robot['status'])))
+
+    parts.append('<h2>The course on this robot</h2><table class="syllabus"><tr>'
+                 '<th>Stage</th><th>Ready</th><th>Planned</th><th>Not on this robot</th></tr>')
+    for st in stages:
+        done = sum(le['status'] == 'ready' for le in st['lessons'])
+        parts.append(
+            f'<tr><td><a href="stage-{st["id"]}.html">{stage_word(st)} '
+            f'{st["number"]}: {esc(st["title"])}</a></td><td class="m">{done}</td>'
+            f'<td class="m">{len(st["lessons"]) - done}</td>'
+            f'<td class="m">{len(st.get("skipped") or [])}</td></tr>')
+    parts.append(f'<tr><th>All</th><th>{ready}</th><th>{total - ready}</th>'
+                 f'<th>{sum(len(st.get("skipped") or []) for st in stages)}</th></tr>')
+    parts.append('</table>')
+    if robot.get('read'):
+        parts.append('<h2>Going deeper</h2>' + read_list(robot['read']))
+    return '\n'.join(parts)
+
+
+def reference_html(docs, written):
+    """The project's own documentation, grouped in reading order."""
+    listed = {name for _, items in CURRICULUM for name, _ in items}
+    parts = ['<h2 id="reference">Reference</h2>', render(
         'The project\'s own documentation, linked from the lessons that '
-        'need it. You do not have to read it in order.'))
+        'need it. You do not have to read it in order.')]
     for heading, items in CURRICULUM:
         rows = [f'<li><a href="{doc_page(n)}">{esc(label)}</a></li>'
                 for n, label in items if n in written]
@@ -1327,9 +1710,76 @@ def index_html(docs, written, stages, vocab):
     return '\n'.join(parts)
 
 
+def chooser_html(robots, counts, docs, written):
+    """
+    The front page: one course, and the robots it can be taken on.
+
+    Each card says what the robot costs, what only it teaches, and how
+    much of the course is actually written for it -- counted, not claimed.
+    """
+    parts = ['<h1>One course. Pick your robot.</h1>', render(
+        'The same engineering — tests, CI, deployment, safety, perception — '
+        'taught on two inexpensive arms: the 3VN Arm 1, which you print and '
+        'wire yourself, and the SO-101, an open arm whose servos report back. '
+        'Every lesson\'s idea is shared; its steps are written for your '
+        'robot. Start free on either: simulation needs no hardware.')]
+
+    for robot in robots:
+        ready, total = counts[robot['id']]
+        teach = ''.join(f'<li>{inline(t)}</li>' for t in robot['teaches'])
+        parts.append(
+            f'<section class="stage"><header>'
+            f'<span class="n">{esc(robot["kind"])}</span>'
+            f'<h2><a href="{robot["id"]}/index.html">{esc(robot["name"])}</a></h2>'
+            f'<span class="price">{esc(robot["price"])}</span></header>'
+            f'<p class="blurb">{inline(robot["summary"])}</p>'
+            f'<div class="facts">{ready} of {total} lessons written for it</div>'
+            f'<ul class="teach">{teach}</ul>'
+            f'<p class="go"><a href="{robot["id"]}/index.html">Take the course on the '
+            f'{esc(robot["name"])} &rarr;</a> &nbsp;&middot;&nbsp; '
+            f'<a href="{robot["id"]}/robot.html">about it</a></p></section>')
+
+    parts.append('<h2>How every lesson works</h2>')
+    parts.append(render(HOW_IT_WORKS))
+
+    table = phase_table(docs)
+    if table:
+        parts.append('<h2>The real project, honestly</h2>')
+        parts.append(render(
+            'The course is written against a project that is genuinely '
+            'being built, not a finished example. This is where it is:'))
+        parts.append(render(table))
+
+    parts.append(reference_html(docs, written))
+    return '\n'.join(parts)
+
+
 # ------------------------------------------------------------------ build
 
-def build(root, out, stages, tags):
+REDIRECT = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="robots" content="noindex, nofollow">
+<meta http-equiv="refresh" content="0; url={target}">
+<title>Moved — 3VN Robotics</title></head>
+<body><p><a href="{target}">This page has moved.</a></p></body></html>
+"""
+
+
+def relink_docs(html, doc_pages):
+    """
+    Point a robot's pages at the shared docs one directory up.
+
+    Lessons live in site/<robot>/ and link docs as `viewing.html`, which
+    is right at the top level and wrong one level down. Only names that
+    ARE doc pages move, so lesson-to-lesson links stay where they are.
+    """
+    def fix(match):
+        name, anchor = match.group(1), match.group(2) or ''
+        return f'href="../{name}{anchor}"' if name in doc_pages else match.group(0)
+    return re.sub(r'href="([^"/:#]+\.html)(#[^"]*)?"', fix, html)
+
+
+def build(root, out, stages, robots, tags):
     """Render the whole site into `out`. Returns the page count."""
     docs = root / 'docs'
     out.mkdir(parents=True, exist_ok=True)
@@ -1341,17 +1791,12 @@ def build(root, out, stages, tags):
     stamp = f'v{version} · {commit}'
     meta = f'v{version} · {commit or "no commit"} · built {datetime.date.today().isoformat()}'
 
-    def write(name, title, body):
-        # `name` may be a path: the topic pages sit in tags/<slug>/.
-        prefix = '../' * name.count('/')
-        path = out / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(PAGE.format(
-            title=esc(title), style=STYLE, meta=meta, stamp=stamp,
-            home=prefix + 'index.html', body=rebase(body, prefix)))
+    def page(title, body, home='index.html', picker=''):
+        return PAGE.format(title=esc(title), style=STYLE, meta=meta, body=body,
+                           stamp=stamp, home=home, picker=picker)
 
-    vocab = {tag['slug']: tag for tag in tags}
-    by_id = {le['id']: le for st in stages for le in st['lessons']}
+    def write(name, title, body):
+        (out / name).write_text(page(title, body))
 
     written = []
     for source in sorted(docs.glob('*.md')):
@@ -1364,30 +1809,79 @@ def build(root, out, stages, tags):
         html = rewrite_links(render(source.read_text()))
         write(f'decisions-{source.stem}.html', doc_label('decisions/' + source.name),
               f'<a class="back" href="index.html">&larr; the course</a>\n{html}')
+    doc_pages = {p.name for p in out.glob('*.html')}
 
-    sequence = []
-    for stage in stages:
-        sequence.extend(('lesson', le) for le in stage['lessons'])
-        sequence.append(('project', stage['project']))
+    ref = reference_of(robots)
+    views = {r['id']: flavor_view(stages, r, ref) for r in robots}
+    counts = {rid: coverage(view) for rid, view in views.items()}
+    vocab = {tag['slug']: tag for tag in tags}
 
-    for position, (kind, obj) in enumerate(sequence):
-        if kind == 'lesson':
-            write(f'lesson-{obj["id"]}.html', obj['title'],
-                  lesson_page(obj, sequence, position, vocab, by_id))
-        else:
-            write(f'project-{obj["stage"]["id"]}.html', f'Project: {obj["title"]}',
-                  project_page(obj['stage'], sequence, position))
+    def sequence_of(view):
+        sequence = []
+        for stage in view:
+            sequence.extend(('lesson', le) for le in stage['lessons'])
+            sequence.append(('project', stage['project']))
+        return sequence
 
-    for stage in stages:
-        write(f'stage-{stage["id"]}.html', stage['title'],
-              stage_page(stage, sequence, vocab))
+    pages = {}
+    for rid, view in views.items():
+        names = {'index.html', 'robot.html', 'glossary.html', 'tags/index.html'}
+        for stage in view:
+            names.add(f'stage-{stage["id"]}.html')
+            names.add(f'project-{stage["id"]}.html')
+            names.update(f'lesson-{le["id"]}.html' for le in stage['lessons'])
+        names.update(tag_href(tag['slug']) for tag in tags)
+        pages[rid] = names
 
-    for tag in tags:
-        write(tag_href(tag['slug']), f'Topic: {tag["label"]}', tag_page(tag, stages, vocab))
-    write('tags/index.html', 'Topics', tags_index(stages, vocab))
+    for robot in robots:
+        view = views[robot['id']]
+        folder = out / robot['id']
+        folder.mkdir(exist_ok=True)
+        by_id = {le['id']: le for st in view for le in st['lessons']}
 
-    write('glossary.html', 'Glossary', glossary_page(stages))
-    write('index.html', 'The course', index_html(docs, written, stages, vocab))
+        def fwrite(name, title, body, robot=robot, folder=folder):
+            # Topic pages sit in tags/<slug>/ inside the robot's folder. Doc
+            # links are pointed up at the shared docs first, then the whole
+            # page is re-rooted for its depth.
+            prefix = '../' * name.count('/')
+            html = page(f'{title} · {robot["name"]}',
+                        rebase(relink_docs(body, doc_pages), prefix),
+                        home=prefix + '../index.html',
+                        picker=rebase(picker_html(robot, robots, pages, counts, name),
+                                      prefix))
+            path = folder / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(html)
+
+        sequence = sequence_of(view)
+        for position, (kind, obj) in enumerate(sequence):
+            if kind == 'lesson':
+                fwrite(f'lesson-{obj["id"]}.html', obj['title'],
+                       lesson_page(obj, sequence, position, vocab, by_id))
+            else:
+                fwrite(f'project-{obj["stage"]["id"]}.html', f'Project: {obj["title"]}',
+                       project_page(obj['stage'], sequence, position))
+        for stage in view:
+            fwrite(f'stage-{stage["id"]}.html', stage['title'],
+                   stage_page(stage, sequence, vocab))
+        for tag in tags:
+            fwrite(tag_href(tag['slug']), f'Topic: {tag["label"]}',
+                   tag_page(tag, view, vocab))
+        fwrite('tags/index.html', 'Topics', tags_index(view, vocab))
+        fwrite('glossary.html', 'Glossary', glossary_page(view))
+        fwrite('robot.html', robot['name'], robot_page(robot, view, ref, counts))
+        fwrite('index.html', 'The course', index_html(view, robot, ref, counts, vocab))
+
+    # The course used to live at the top level, its topic pages under
+    # tags/. Keep those addresses working: a refresh needs no script, so
+    # the CSP allows it.
+    for name in sorted(pages[ref['id']] - {'index.html', 'robot.html'} - doc_pages):
+        path = out / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        up = '../' * name.count('/')
+        path.write_text(REDIRECT.format(target=f'{up}{ref["id"]}/{name}'))
+
+    write('index.html', 'Pick your robot', chooser_html(robots, counts, docs, written))
     (out / 'robots.txt').write_text('User-agent: *\nDisallow: /\n')
     return len(list(out.rglob('*.html')))
 
@@ -1406,7 +1900,8 @@ def main(argv=None):
     root = pathlib.Path(args.root).resolve()
     stages = load_course(root)
     tags = load_tags(root)
-    errors = validate(stages, root, tags)
+    robots = load_robots(root)
+    errors = validate(stages, root, tags, robots)
     if errors:
         print(f'  course/ has {len(errors)} problem(s):', file=sys.stderr)
         for error in errors:
@@ -1417,13 +1912,17 @@ def main(argv=None):
     minutes = sum(st['minutes'] for st in stages)
     print(f'  course ok: {len(stages)} stages, {lessons} lessons, '
           f'{len(stages)} projects, {len(tags)} topics, {hours(minutes)}')
+    ref = reference_of(robots)
+    for robot in robots:
+        ready, total = coverage(flavor_view(stages, robot, ref))
+        print(f'    {robot["id"]:<10} {ready:>2} of {total} lessons written for it')
     if args.check:
         return 0
 
     out = pathlib.Path(args.out).resolve()
     if args.clean and out.exists():
         shutil.rmtree(out)
-    count = build(root, out, stages, tags)
+    count = build(root, out, stages, robots, tags)
     print(f'  {count} pages -> {out}')
     return 0
 

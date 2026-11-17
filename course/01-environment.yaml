@@ -21,6 +21,7 @@ prerequisites:
 
 lessons:
   - id: docker-and-nothing-else
+    scope: any
     title: Docker, and nothing else
     tags: [devops, security]
     minutes: 40
@@ -139,6 +140,7 @@ lessons:
       - docker.md
 
   - id: inside-the-container
+    scope: any
     title: Living inside the container
     tags: [devops, ros2]
     builds_on: [docker-and-nothing-else]
@@ -535,6 +537,7 @@ lessons:
       - decisions/0003-hardware-seam.md
 
   - id: symptoms-that-lie
+    scope: any
     title: Symptoms that lie
     tags: [devops, simulation]
     builds_on: [docker-and-nothing-else]
@@ -630,6 +633,7 @@ lessons:
       - troubleshooting.md
 
 project:
+  scope: any
   title: Prove your environment, then break it on purpose
   minutes: 60
   brief: |

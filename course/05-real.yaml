@@ -617,6 +617,7 @@ lessons:
       - so101-spike.md
 
   - id: roll-back-with-a-pull
+    scope: any
     title: Deploy, and roll back with a pull
     tags: [robops, devops, security]
     builds_on: [releases-are-evidence, gate-the-motors]
@@ -710,6 +711,7 @@ lessons:
       - architecture.md
 
   - id: alive-is-not-ready
+    scope: any
     title: Alive is not the same as ready
     tags: [robops]
     minutes: 35
@@ -821,6 +823,7 @@ lessons:
       - architecture.md
 
   - id: what-happened-when-you-were-away
+    scope: any
     title: Metrics from a robot behind a home router
     tags: [robops, security]
     builds_on: [alive-is-not-ready]

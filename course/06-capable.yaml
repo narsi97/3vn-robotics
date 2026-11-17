@@ -27,6 +27,7 @@ prerequisites:
 
 lessons:
   - id: it-drives
+    needs: [wheels]
     title: Odometry lies, and by how much
     tags: [motion, simulation]
     builds_on: [drive-it]
@@ -129,6 +130,7 @@ lessons:
       - mobile-base.md
 
   - id: two-wrong-answers
+    needs: [wheels]
     title: Two wrong answers, one better one
     tags: [motion]
     builds_on: [it-drives]
@@ -232,6 +234,7 @@ lessons:
       - navigation.md
 
   - id: composing-robots
+    needs: [arm, wheels]
     title: Composing two robots into one
     tags: [ros2, architecture, safety]
     builds_on: [links-and-joints, one-source-of-truth, inertia-is-computed]
@@ -325,6 +328,7 @@ lessons:
       - mobile-manipulator.md
 
   - id: solve-the-arm
+    needs: [arm]
     title: Solve the kinematics, and find out what the arm cannot do
     tags: [motion]
     builds_on: [links-and-joints]
@@ -427,6 +431,7 @@ lessons:
       - manipulation.md
 
   - id: prove-the-grasp
+    needs: [arm, gripper]
     title: Prove the grasp — and what is still open
     tags: [motion, testing, simulation]
     builds_on: [solve-the-arm, scenarios-are-tests]
@@ -548,6 +553,7 @@ lessons:
       - gazebo.md
 
   - id: it-sees
+    needs: [camera]
     title: A camera, and the geometry behind it
     tags: [motion]
     builds_on: [frames-that-pay-later]
@@ -648,6 +654,7 @@ lessons:
       - perception.md
 
   - id: datasets
+    needs: [camera]
     title: Datasets, splits, and the leak you did not look for
     tags: [ai]
     builds_on: [it-sees]
@@ -748,6 +755,7 @@ lessons:
       - data-pipeline.md
 
   - id: beats-geometry
+    needs: [camera]
     title: When a model beats geometry, and why
     tags: [ai, motion]
     builds_on: [datasets, it-sees]
@@ -842,6 +850,7 @@ lessons:
       - machine-learning.md
 
   - id: mlops
+    scope: any
     title: Shipping a model like software
     tags: [ai, devops]
     builds_on: [beats-geometry]
@@ -962,6 +971,7 @@ lessons:
       - mlops.md
 
   - id: serve-and-watch
+    needs: [camera]
     title: Serving, and noticing the question changed
     tags: [ai, robops]
     builds_on: [mlops]
