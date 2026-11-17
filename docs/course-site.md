@@ -58,6 +58,69 @@ curriculum never replaces the one already being served. The checker was
 mutation-tested when it was written: four planted faults, four named
 errors.
 
+## One course, two robots
+
+The course is taken on one of two arms: the 3VN Arm 1 and the SO-101.
+Other robots wait until there is a clear plan for them, and recordings
+for each. A student picks the robot they learn on, and the site is
+built once per robot, under `site/<robot>/`, topic pages included. The front page compares them; a
+dropdown at the top of every course page switches robot and lands on
+the same lesson where that robot has it. It is a `<details>`, so it
+needs no JavaScript.
+
+The robots are data too, one file each in `course/robots/`: name,
+price, what it `has` (`arm`, `gripper`, `wheels`, `legs`, `camera`,
+`lidar`), what only it teaches, and where it stands. Exactly one is
+`reference: true`, the 3VN Arm 1, and every lesson's default text is
+that robot's version. The Arm 1 has the optional mobile base, so the
+lessons that need `wheels` are not on the SO-101.
+
+The idea is shared and the steps are not. A lesson is one of three
+kinds:
+
+| in the lesson's YAML | means | on another robot |
+|---|---|---|
+| `scope: any` | robot-agnostic: Docker, CI, releases | the same page |
+| `needs: [arm]` | only robots that have it | left out, and listed as "not on this robot" with the reason |
+| neither | written for the reference robot | its own version if it has one, otherwise **planned** |
+
+A robot's own version goes under the lesson:
+
+```yaml
+  - id: links-and-joints
+    ...
+    flavors:
+      so101:
+        steps: [...]      # required: without steps it stays planned
+        checkpoint: ...
+        pitfalls: [...]
+        note: ...         # shown as "On the SO-101: ..."
+        concepts: [...]   # added to the lesson's terms, not swapped
+```
+
+Only steps, checkpoint, pitfalls, quiz, exercise, read, note, minutes
+and concepts can differ by robot. Projects work the same way, with
+`tasks` required. A lesson only one robot gets uses
+`only: [so101]`.
+
+A planned page shows the shared objective, reasoning and terms, says
+plainly that its steps are not written, and links to the same lesson
+on the reference robot in simulation. Its steps, checks and pitfalls
+are not shown: they are the reference robot's, and would mislead on
+another one.
+
+**Coverage is counted, never claimed.** `make course-check` prints
+how many lessons are ready on each robot, and each robot's page has the
+same count per stage. A robot's version is held to exactly the checks a
+lesson is, so an SO-101 step that runs a Make target that does not exist
+fails the build like any other. The checker was mutation-tested when it
+was first written, for five robots: nine planted faults, nine named
+errors.
+
+The course used to live at the top level, and its topic pages under
+`tags/`. Those addresses now redirect to the reference robot's copy
+with a meta refresh, which the CSP allows.
+
 The project's documentation is still rendered, underneath, as reference
 that lessons link into. The course is the front page and the docs are
 the appendix, rather than the other way round.
@@ -84,6 +147,13 @@ It sits behind the shared 3VNSYSTEMS Caddy, at a public path,
   `script-src 'self'` with no `'unsafe-inline'`, so an inline `<script>`
   would be blocked. Styles are inline because `style-src` does permit
   `'unsafe-inline'`. A reading site needs no script anyway.
+- **Two themes, no switch.** Paper by day and blueprint by night,
+  following the reader's system setting through `prefers-color-scheme`;
+  a switch would need a script. The accents are the three strokes of the
+  3VN mark. Headings use the system's serif and code its monospace, so
+  no font is downloaded. Each robot's drawing (`ROBOT_ART`) is inline SVG
+  coloured by the stylesheet, so it follows the theme; a robot without
+  one gets no picture.
 - **noindex everywhere**, plus `robots.txt` with `Disallow: /`, plus an
   `X-Robots-Tag` header from nginx. One of the three may be ignored by a
   given crawler; all three being ignored is unlikely.

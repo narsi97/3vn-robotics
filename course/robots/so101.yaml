@@ -1,0 +1,30 @@
+id: so101
+name: SO-101
+order: 2
+price: "about US$130–140"
+price_note: >-
+  One follower arm: six Feetech STS3215 bus servos, a servo driver board
+  and printed parts, plus a USB webcam for the camera lessons. The
+  designers' own bill of materials is US$121.94 for the follower; with
+  screws and filament it comes to about **US$130–140**, or about
+  **C$185–200** at Canadian prices before shipping. The SO-101 is the
+  successor to the SO-100, from the same designers.
+kind: Five-joint arm with a jaw
+has: [arm, gripper, camera]
+summary: >-
+  TheRobotStudio's open arm, the one the LeRobot community learns
+  imitation on. Bus servos that report their position, load and
+  temperature, which is exactly the feedback the 3VN arm does not have.
+status: >-
+  It runs in our simulation as a robot profile, under our own
+  controllers (`make so101`). Its Feetech servo interface has been
+  rehearsed against a simulated servo bus (`make fake-bus`), but no real
+  servo has answered it yet. Lessons are being given SO-101 versions
+  stage by stage; the rest are marked planned.
+teaches:
+  - Servos that talk back, so a stalled joint stops looking healthy
+  - A symmetric gripper that can grasp where the 3VN arm cannot
+  - The arm most learning-from-demonstration work is published on
+read:
+  - so101.md
+  - so101-spike.md

@@ -41,6 +41,29 @@ one passage that touches it. The topic page links straight to that
 passage with a URL text fragment, and validation fails if the quote is
 no longer in the lesson.
 
+ONE COURSE, SEVERAL ROBOTS. A student picks the machine they will learn
+on (course/robots/*.yaml), and every robot gets its own copy of the
+course under site/<robot>/. A lesson's objective, reasoning and terms
+are the course and are shared; a robot's version replaces only what has
+to change -- the steps, the checkpoint, what goes wrong. A lesson is one
+of three kinds:
+
+  * `scope: any`  -- robot-agnostic (Docker, CI, releases); the same page
+                     on every robot.
+  * `needs: [..]` -- only on robots that have those capabilities; a
+                     robot without wheels gets no driving lesson.
+  * otherwise     -- written for the reference robot, and for each other
+                     robot either given its own version under
+                     `flavors: {robot: {steps: ...}}`, or shown as
+                     PLANNED: the shared idea, and a link to the same
+                     lesson on the reference robot in simulation.
+
+So a robot's coverage is counted, never claimed, the same way stage
+durations are summed rather than typed.
+
+Each robot's copy carries its own topic pages, so a topic lists the
+lessons that robot's student will actually meet.
+
 Three constraints come from where this is served -- behind the shared
 3VNSYSTEMS Caddy, on an unlisted path:
 
@@ -132,151 +155,334 @@ TAGS_FILE = 'tags.yaml'
 #: after every lesson its own lessons build on.
 RELATED_PICKS = 4
 
+#: What a robot -- one flavour of the course -- must carry.
+ROBOT_FIELDS = ('id', 'name', 'order', 'price', 'price_note', 'kind', 'has',
+                'summary', 'status', 'teaches')
+#: What a robot can have, and so what a lesson can need -- with how a
+#: page says it. `wheels`, not "mobile": a walking duck is mobile, and
+#: the lessons that need wheels are about wheel odometry.
+CAPABILITIES = {'arm': 'an arm', 'gripper': 'a gripper', 'wheels': 'wheels',
+                'legs': 'legs', 'camera': 'a camera', 'lidar': 'a lidar'}
+#: What a robot's version may replace. The objective, the reasoning and
+#: the terms ARE the course; the steps are the robot. Concepts given in
+#: a robot's version are added to the shared ones, not swapped for them.
+LESSON_OVERRIDES = ('steps', 'checkpoint', 'pitfalls', 'quiz', 'exercise',
+                    'read', 'note', 'minutes', 'concepts')
+PROJECT_OVERRIDES = ('brief', 'tasks', 'done_when', 'hints', 'read', 'note',
+                     'minutes')
+
 STYLE = """
+/* Two themes, chosen by the reader's system setting (no script, per the
+   CSP): paper by day, blueprint by night. The three accents are the
+   strokes of the 3VN mark -- blue, violet, teal. */
 :root {
-  --bg: #11131a; --panel: #181b24; --line: #272b36;
-  --ink: #e6e8ef; --dim: #9aa0b0; --accent: #7fb7ff; --warn: #ffcc66;
-  --good: #7ddc9a; --bad: #ff8a80;
+  --bg: #f6f2e8; --panel: #fffcf5; --sunken: #eee8da; --line: #dcd4c1;
+  --ink: #1c2230; --dim: #5b6271; --accent: #1d4ed8; --violet: #6d28d9;
+  --teal: #0f766e; --warn: #9a4a0b; --good: #0f766e; --bad: #b42318;
+  --grid: rgba(29, 78, 216, .08); --term: #141a28; --term-ink: #e4e8f1;
+  --serif: "Iowan Old Style", Charter, "Bitstream Charter", "Sitka Text",
+           Cambria, Georgia, serif;
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --thread: linear-gradient(90deg, #2563eb, #7c3aed 50%, #14b8a6);
+  --gutter: 20px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0d1322; --panel: #131b2d; --sunken: #0a101c; --line: #26324b;
+    --ink: #e8ecf4; --dim: #9ba6bc; --accent: #8ab4ff; --violet: #b9a2ff;
+    --teal: #4fd1c1; --warn: #f2b84b; --good: #6fdcae; --bad: #ff8f85;
+    --grid: rgba(138, 180, 255, .075); --term: #080d18; --term-ink: #e4e8f1;
+    color-scheme: dark;
+  }
 }
 * { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
 body {
   margin: 0; background: var(--bg); color: var(--ink);
-  font: 16px/1.65 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: 16.5px/1.7 var(--sans);
 }
-.wrap { max-width: 860px; margin: 0 auto; padding: 0 20px 72px; }
-header.site { border-bottom: 1px solid var(--line); margin-bottom: 36px; }
-header.site .wrap { padding-top: 26px; padding-bottom: 22px; }
-.brand { font-weight: 650; letter-spacing: .02em; }
-.brand a { color: var(--ink); text-decoration: none; }
-.meta { color: var(--dim); font-size: 13px; margin-top: 6px; }
-.badge {
-  display: inline-block; padding: 2px 9px; border: 1px solid var(--line);
-  border-radius: 999px; font-size: 12px; color: var(--dim); margin-left: 6px;
-}
-a { color: var(--accent); }
-h1 { font-size: 28px; line-height: 1.25; margin: 0 0 14px; }
-h2 { font-size: 20px; margin: 38px 0 12px; }
-h3 { font-size: 16px; margin: 24px 0 8px; color: var(--dim);
-     text-transform: uppercase; letter-spacing: .06em; }
+::selection { background: color-mix(in srgb, var(--accent) 24%, transparent); }
+.wrap { max-width: 880px; margin: 0 auto; padding: 0 var(--gutter) 72px; }
+a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 3px; }
+a:hover { text-decoration-thickness: 2px; }
+h1, h2 { font-family: var(--serif); font-weight: 600; letter-spacing: -.005em;
+         text-wrap: balance; }
+h1 { font-size: 38px; line-height: 1.15; margin: 0 0 16px; }
+h2 { font-size: 25px; line-height: 1.25; margin: 48px 0 14px; }
+h3 { font: 600 12px/1.4 var(--mono); margin: 28px 0 10px; color: var(--dim);
+     text-transform: uppercase; letter-spacing: .12em; }
+h4 { font-size: 16px; margin: 22px 0 6px; }
+p { text-wrap: pretty; }
 p, li { color: var(--ink); }
+hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
 code {
-  background: var(--panel); border: 1px solid var(--line); border-radius: 4px;
-  padding: 1px 5px; font-size: 13.5px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--sunken); border: 1px solid var(--line); border-radius: 5px;
+  padding: .08em .38em; font-size: .84em; font-family: var(--mono);
 }
 pre {
-  background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
-  padding: 14px 16px; overflow-x: auto;
+  background: var(--term); color: var(--term-ink); border-radius: 10px;
+  border-left: 3px solid var(--teal); padding: 15px 18px; overflow-x: auto;
 }
-pre code { background: none; border: 0; padding: 0; font-size: 13px; }
-table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14.5px;
+pre code { background: none; border: 0; padding: 0; font-size: 13.5px;
+           line-height: 1.6; color: inherit; }
+table { border-collapse: collapse; width: 100%; margin: 18px 0; font-size: 14.5px;
         display: block; overflow-x: auto; }
-th, td { border: 1px solid var(--line); padding: 7px 10px; text-align: left;
+th, td { border-bottom: 1px solid var(--line); padding: 9px 12px; text-align: left;
          vertical-align: top; }
-th { background: var(--panel); }
+th { font: 600 11.5px/1.5 var(--mono); text-transform: uppercase; letter-spacing: .08em;
+     color: var(--dim); border-bottom: 2px solid var(--line); }
 blockquote {
-  margin: 16px 0; padding: 10px 16px; border-left: 3px solid var(--line);
-  color: var(--dim);
+  margin: 18px 0; padding: 2px 18px; border-left: 3px solid var(--violet);
+  color: var(--dim); font-family: var(--serif); font-size: 17.5px;
 }
+
+/* --- frame --- */
+header.site { border-bottom: 1px solid var(--line); margin-bottom: 40px;
+              background: var(--panel); }
+header.site::before { content: ""; display: block; height: 3px; background: var(--thread); }
+header.site .wrap { padding-top: 16px; padding-bottom: 14px; display: flex;
+                    flex-wrap: wrap; align-items: center; gap: 10px 18px; }
+.brand { display: flex; align-items: center; gap: 8px; }
+.brand a { display: flex; align-items: center; gap: 10px; color: var(--ink);
+           text-decoration: none; font: 600 19px/1.2 var(--serif); }
+.brand svg { width: 21px; height: 24px; flex: none; }
+.mark-dot { fill: var(--ink); }
+.badge {
+  display: inline-block; padding: 1px 9px; border: 1px solid var(--line);
+  border-radius: 999px; font: 500 11px/1.6 var(--mono); color: var(--dim);
+  text-transform: uppercase; letter-spacing: .08em;
+}
+footer.site {
+  border-top: 1px solid var(--line); margin-top: 64px; padding-top: 22px;
+  color: var(--dim); font-size: 13.5px; display: flex; gap: 12px;
+}
+footer.site svg { width: 16px; height: 18px; flex: none; margin-top: 3px; }
+footer.site p { margin: 0; color: var(--dim); }
+footer.site .meta { font: 12px/1.6 var(--mono); margin-top: 4px; }
+.back { display: inline-block; margin-bottom: 20px; font-size: 14px; }
+.crumbs { font-size: 14px; margin-bottom: 22px; color: var(--dim); }
+.crumbs a { color: var(--dim); text-decoration: none; }
+.crumbs a:hover { color: var(--accent); text-decoration: underline; }
+.eyebrow, .lesson-head {
+  font: 600 12px/1.5 var(--mono); letter-spacing: .12em; text-transform: uppercase;
+  color: var(--violet); margin-bottom: 10px;
+}
+.lede { font-size: 18.5px; line-height: 1.6; }
+
+/* folded things: a plus that turns into a cross */
+details { border: 1px solid var(--line); border-radius: 10px; margin: 10px 0;
+          padding: 0 16px; background: var(--panel); }
+details > summary { cursor: pointer; padding: 12px 0 12px 26px; font-weight: 550;
+                    list-style: none; position: relative; }
+details > summary::-webkit-details-marker { display: none; }
+details > summary::before {
+  content: "+"; position: absolute; left: 0; top: 11px; width: 18px; height: 18px;
+  border-radius: 50%; border: 1px solid var(--line); color: var(--accent);
+  font: 600 14px/16px var(--mono); text-align: center; transition: transform .15s;
+}
+details[open] > summary::before { transform: rotate(45deg); }
+details[open] > summary { border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+details > div { padding-bottom: 10px; }
+
 .note {
-  background: var(--panel); border: 1px solid var(--line);
-  border-left: 3px solid var(--warn); border-radius: 6px;
-  padding: 14px 16px; margin: 22px 0; font-size: 15px;
+  background: color-mix(in srgb, var(--warn) 8%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--warn) 30%, var(--line));
+  border-radius: 10px; padding: 14px 18px; margin: 24px 0; font-size: 15.5px;
 }
 .note strong { color: var(--warn); }
-.group { margin: 28px 0; }
-.group ul { list-style: none; padding: 0; margin: 0; }
+.group { margin: 26px 0; }
+.group ul { list-style: none; padding: 0; margin: 0; border-top: 1px solid var(--line); }
 .group li { border-bottom: 1px solid var(--line); }
-.group li:last-child { border-bottom: 0; }
-.group a { display: block; padding: 9px 2px; text-decoration: none; }
-.group a:hover { background: var(--panel); }
-footer.site {
-  border-top: 1px solid var(--line); margin-top: 48px; padding-top: 18px;
-  color: var(--dim); font-size: 13px;
+.group a { display: flex; justify-content: space-between; gap: 12px; padding: 10px 4px;
+           color: var(--ink); text-decoration: none; }
+.group a::after { content: "\\2192"; color: var(--dim); }
+.group a:hover { color: var(--accent); }
+.group a:hover::after { color: var(--accent); }
+
+/* --- heroes and drawings --- */
+.hero { position: relative; padding: 4px 0 8px; }
+.hero::before {
+  content: ""; position: absolute; z-index: -1; pointer-events: none;
+  top: -40px; bottom: -8px; left: calc(-1 * var(--gutter)); right: calc(-1 * var(--gutter));
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px),
+                    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 24px 24px;
+  -webkit-mask-image: radial-gradient(ellipse at 70% 35%, #000 25%, transparent 72%);
+  mask-image: radial-gradient(ellipse at 70% 35%, #000 25%, transparent 72%);
 }
-.back { display: inline-block; margin-bottom: 20px; font-size: 14px; }
-.crumbs { font-size: 14px; margin-bottom: 20px; color: var(--dim); }
-.crumbs a { text-decoration: none; }
-@media (max-width: 620px) { .wrap { padding: 0 16px 56px; } h1 { font-size: 23px; } }
+.hero h1 { font-size: 46px; line-height: 1.08; }
+.hero.split { display: grid; grid-template-columns: minmax(0, 1fr) 230px; gap: 8px 28px;
+              align-items: center; }
+.hero.split .art { grid-row: 1 / span 3; grid-column: 2; }
+.art svg { display: block; width: 100%; height: auto; }
+.art .gd { stroke: var(--dim); stroke-width: 1.2; stroke-dasharray: 3 5; fill: none; }
+.art .hatch { stroke: var(--dim); stroke-width: 1.2; fill: none; }
+.art .ln { stroke: var(--ink); stroke-width: 2.4; fill: var(--panel);
+           stroke-linejoin: round; stroke-linecap: round; }
+.art .lk { stroke: var(--accent); stroke-width: 9; stroke-linecap: round; fill: none; }
+.art .jt { stroke: var(--ink); stroke-width: 2.4; fill: var(--panel); }
+.art .hub { fill: var(--ink); }
+.art .jaw { stroke: var(--violet); stroke-width: 4; fill: none;
+            stroke-linecap: round; stroke-linejoin: round; }
+.art .lb { font: 600 9px var(--mono); fill: var(--dim); letter-spacing: .1em; }
+
+.robots { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+          gap: 18px; margin: 30px 0 8px; }
+.robot { border: 1px solid var(--line); border-radius: 14px; background: var(--panel);
+         overflow: hidden; display: flex; flex-direction: column; }
+.robot .art { display: block; padding: 18px 26px 4px; border-bottom: 1px solid var(--line);
+              background-color: var(--bg);
+              background-image: linear-gradient(var(--grid) 1px, transparent 1px),
+                                linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+              background-size: 16px 16px; }
+.robot .body { padding: 16px 20px 18px; display: flex; flex-direction: column; flex: 1; }
+.robot .eyebrow { margin-bottom: 4px; }
+.robot h2 { margin: 0 0 6px; font-size: 26px; }
+.robot h2 a { color: var(--ink); text-decoration: none; }
+.robot h2 a:hover { color: var(--accent); }
+.robot .price { margin: 0 0 10px; align-self: flex-start; }
+.robot p { font-size: 15px; margin: 0 0 12px; }
+.robot .go { margin: auto 0 0; padding-top: 14px; font-size: 14.5px; }
+ul.teach { margin: 4px 0 4px; padding: 0 0 0 18px; color: var(--dim); font-size: 14px; }
+ul.teach li { color: var(--dim); margin: 3px 0; }
+ul.teach li::marker { color: var(--teal); }
+.meter { height: 6px; border-radius: 999px; background: var(--sunken);
+         overflow: hidden; margin: 2px 0 6px; }
+.meter span { display: block; height: 100%; border-radius: 999px;
+              background: linear-gradient(90deg, var(--accent), var(--teal)); }
+.button { display: inline-block; padding: 8px 15px; border-radius: 999px;
+          background: var(--accent); color: var(--bg); font-weight: 600;
+          text-decoration: none; margin-right: 10px; }
+.button:hover { filter: brightness(1.08); text-decoration: none; }
+
+/* --- anatomy of a lesson --- */
+ol.anatomy { list-style: none; padding: 0; margin: 18px 0;
+             display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+             gap: 10px; counter-reset: part; }
+ol.anatomy li { counter-increment: part; border: 1px solid var(--line); border-radius: 10px;
+                background: var(--panel); padding: 12px 14px 12px 48px; position: relative;
+                font-size: 14.5px; color: var(--dim); }
+ol.anatomy li::before {
+  content: counter(part, decimal-leading-zero); position: absolute; left: 14px; top: 12px;
+  font: 600 13px/1.7 var(--mono); color: var(--violet);
+}
+ol.anatomy b { display: block; color: var(--ink); font: 600 16px/1.4 var(--serif); }
 
 /* --- the ladder --- */
-.stats { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0 8px; }
-.stat { background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
-        padding: 10px 14px; min-width: 120px; }
-.stat b { display: block; font-size: 20px; }
-.stat span { color: var(--dim); font-size: 12.5px; }
-.stage { border: 1px solid var(--line); border-radius: 10px; margin: 18px 0;
-         overflow: hidden; }
-.stage > header {
-  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
-  padding: 14px 16px; background: var(--panel); border-bottom: 1px solid var(--line);
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+         gap: 10px; margin: 22px 0 8px; }
+.stat { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+        padding: 12px 15px; }
+.stat b { display: block; font: 600 27px/1.15 var(--serif); }
+.stat span { color: var(--dim); font-size: 13px; }
+.ladder { position: relative; margin: 24px 0 8px; }
+.ladder::before {
+  content: ""; position: absolute; left: 23px; top: 24px; bottom: 40px; width: 2px;
+  background: linear-gradient(var(--accent), var(--violet) 55%, var(--teal)); opacity: .4;
 }
-.stage .n { color: var(--dim); font-size: 12px; letter-spacing: .1em;
-            text-transform: uppercase; }
-.stage h2 { margin: 0; font-size: 18px; }
+.stage { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 0 16px;
+         margin: 0 0 20px; position: relative; }
+.stage .num {
+  width: 48px; height: 48px; border-radius: 50%; display: flex; align-items: center;
+  justify-content: center; background: var(--bg); border: 2px solid currentColor;
+  font: 600 19px/1 var(--serif); color: var(--accent); position: relative;
+}
+.stage:nth-child(3n+2) .num { color: var(--violet); }
+.stage:nth-child(3n) .num { color: var(--teal); }
+.stage .card { border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+               overflow: hidden; }
+.stage header { display: flex; align-items: baseline; gap: 2px 12px; flex-wrap: wrap;
+                padding: 14px 18px 0; }
+.stage .n { color: var(--dim); font: 600 11.5px/1.5 var(--mono); letter-spacing: .12em;
+            text-transform: uppercase; width: 100%; }
+.stage h2 { margin: 0; font-size: 22px; }
 .stage h2 a { color: var(--ink); text-decoration: none; }
 .stage h2 a:hover { color: var(--accent); }
-.price { margin-left: auto; font-size: 12.5px; padding: 2px 10px;
-         border-radius: 999px; border: 1px solid var(--line); color: var(--dim); }
-.price.free { color: var(--good); border-color: #2c5a3c; }
-.price.paid { color: var(--warn); border-color: #5a4a22; }
-.stage .blurb { padding: 12px 16px 0; color: var(--dim); font-size: 14.5px; margin: 0; }
-.stage .facts { padding: 4px 16px 0; color: var(--dim); font-size: 12.5px;
-                letter-spacing: .03em; }
-.stage ol { margin: 8px 0 14px; padding: 0 16px 0 40px; }
+.price { margin-left: auto; font: 500 12px/1.6 var(--mono); padding: 1px 10px;
+         white-space: nowrap; border-radius: 999px; border: 1px solid var(--line);
+         color: var(--dim); }
+h1 .price { display: inline-block; vertical-align: middle; font-weight: 500;
+            margin-left: 6px; }
+.price.free { color: var(--good); border-color: color-mix(in srgb, var(--good) 45%, var(--line)); }
+.price.paid { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+.stage .blurb { padding: 8px 18px 0; color: var(--dim); font-size: 15px; margin: 0; }
+.stage .facts { padding: 6px 18px 0; color: var(--dim); font: 12px/1.6 var(--mono); }
+.stage ol { margin: 10px 0 0; padding: 10px 18px 14px 44px; border-top: 1px dashed var(--line); }
 .stage li { margin: 5px 0; }
-.mins { color: var(--dim); font-size: 12.5px; margin-left: 6px; white-space: nowrap; }
+.stage ol a { color: var(--ink);
+              text-decoration-color: color-mix(in srgb, var(--ink) 25%, transparent); }
+.stage ol a:hover { color: var(--accent); text-decoration-color: currentColor; }
+.stage ol li::marker { color: var(--dim); font: 12px var(--mono); }
+.mins { color: var(--dim); font: 12px var(--mono); margin-left: 8px; white-space: nowrap; }
 .stage li.proj { list-style: none; margin-left: -22px; margin-top: 10px; }
 .stage li.proj::before { content: "\\25C6  "; color: var(--warn); }
-.obj { color: var(--dim); font-size: 13px; display: block; }
+.obj { color: var(--dim); font-size: 13.5px; display: block; }
 
 /* --- a lesson --- */
-.lesson-head { color: var(--dim); font-size: 13px; letter-spacing: .04em;
-               text-transform: uppercase; margin-bottom: 6px; }
-.objective { font-size: 17px; color: var(--ink); margin: 0 0 18px; }
-.objective b { color: var(--dim); font-weight: 500; }
+.dots { display: inline-flex; gap: 4px; margin-left: 10px; vertical-align: 1px; }
+.dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--line); }
+.dots i.past { background: color-mix(in srgb, var(--violet) 55%, var(--line)); }
+.dots i.here { background: var(--violet); box-shadow: 0 0 0 3px color-mix(in srgb, var(--violet) 25%, transparent); }
+.objective { font: 20px/1.45 var(--serif); color: var(--ink); margin: 0 0 18px; }
+.objective b { display: block; font: 600 11.5px/1.6 var(--mono); color: var(--dim);
+               text-transform: uppercase; letter-spacing: .12em; margin-bottom: 2px; }
 .check {
-  background: var(--panel); border: 1px solid var(--line);
-  border-left: 3px solid #3c7a52; border-radius: 6px; padding: 12px 15px;
-  margin: 22px 0; font-size: 15px;
+  background: color-mix(in srgb, var(--good) 8%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--good) 35%, var(--line));
+  border-radius: 10px; padding: 14px 18px 14px 52px; margin: 26px 0;
+  font-size: 15.5px; position: relative;
+}
+.check::before {
+  content: "\\2713"; position: absolute; left: 17px; top: 15px; width: 22px; height: 22px;
+  border-radius: 50%; background: var(--good); color: var(--bg); text-align: center;
+  font: 700 13px/22px var(--sans);
 }
 .check strong { color: var(--good); }
 ol.steps { counter-reset: step; list-style: none; padding: 0; margin: 0; }
-ol.steps > li { counter-increment: step; position: relative; padding-left: 40px;
-                margin: 0 0 18px; }
+ol.steps > li { counter-increment: step; position: relative; padding-left: 46px;
+                margin: 0 0 22px; }
 ol.steps > li::before {
-  content: counter(step); position: absolute; left: 0; top: 0;
-  width: 26px; height: 26px; border-radius: 50%; text-align: center;
-  font-size: 13px; line-height: 26px; background: var(--panel);
-  border: 1px solid var(--line); color: var(--accent);
+  content: counter(step); position: absolute; left: 0; top: 0; z-index: 1;
+  width: 28px; height: 28px; border-radius: 50%; text-align: center;
+  font: 600 13px/28px var(--mono); background: var(--accent); color: var(--bg);
+}
+ol.steps > li:not(:last-child)::after {
+  content: ""; position: absolute; left: 13px; top: 32px; bottom: -18px; width: 2px;
+  background: var(--line);
 }
 ol.steps p { margin: 0 0 8px; }
 ol.steps pre { margin: 6px 0 8px; }
 .expect { color: var(--dim); font-size: 14.5px; }
 .expect b { color: var(--good); font-weight: 600; }
-.pitfall { border: 1px solid var(--line); border-radius: 8px; margin: 12px 0;
-           padding: 12px 15px; }
+.pitfall { border: 1px solid var(--line); border-left: 3px solid var(--bad);
+           border-radius: 10px; margin: 12px 0; padding: 12px 16px; background: var(--panel); }
 .pitfall p { margin: 4px 0; font-size: 15px; }
 .pitfall .sym { color: var(--bad); font-weight: 600; }
-.pitfall b { color: var(--dim); font-weight: 600; }
+.pitfall b { color: var(--dim); font: 600 11.5px/1.6 var(--mono); text-transform: uppercase;
+             letter-spacing: .1em; margin-right: 4px; }
 dl.terms { margin: 10px 0; }
-dl.terms dt { font-weight: 650; margin-top: 10px; }
+dl.terms dt { font: 600 17px/1.4 var(--serif); margin-top: 14px; }
 dl.terms dd { margin: 2px 0 0 0; color: var(--dim); font-size: 15px; }
-details { border: 1px solid var(--line); border-radius: 8px; margin: 10px 0;
-          padding: 0 14px; background: var(--panel); }
-details > summary { cursor: pointer; padding: 11px 0; font-weight: 550; }
-details[open] > summary { border-bottom: 1px solid var(--line); margin-bottom: 8px; }
-details > div { padding-bottom: 10px; }
-.stretch { border: 1px dashed var(--line); border-radius: 8px; padding: 12px 16px; }
-.pager { display: flex; justify-content: space-between; gap: 12px;
-         margin-top: 38px; font-size: 14px; border-top: 1px solid var(--line);
-         padding-top: 16px; }
-.pager span { color: var(--dim); }
+.stretch { border: 1px dashed color-mix(in srgb, var(--violet) 50%, var(--line));
+           border-radius: 10px; padding: 12px 18px; }
+.pager { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 44px; }
+.pager a, .pager span { display: block; border: 1px solid var(--line); border-radius: 10px;
+                        padding: 12px 16px; text-decoration: none; background: var(--panel);
+                        font-weight: 550; }
+.pager a:hover { border-color: var(--accent); }
+.pager small { display: block; font: 600 11px/1.6 var(--mono); color: var(--dim);
+               text-transform: uppercase; letter-spacing: .12em; }
+.pager .next { text-align: right; grid-column: 2; }
+.pager span { color: var(--dim); background: none; border-style: dashed; }
+.pager span:empty { visibility: hidden; }
 ul.checklist { list-style: none; padding-left: 0; }
-ul.checklist li { padding-left: 28px; position: relative; margin: 8px 0; }
-ul.checklist li::before { content: "\\2610"; position: absolute; left: 2px;
-                          color: var(--good); }
-table.syllabus td.m { white-space: nowrap; color: var(--dim); }
+ul.checklist li { padding-left: 30px; position: relative; margin: 9px 0; }
+ul.checklist li::before { content: ""; position: absolute; left: 2px; top: 5px;
+                          width: 15px; height: 15px; border-radius: 4px;
+                          border: 2px solid var(--good); }
+table.syllabus td.m { white-space: nowrap; color: var(--dim); font: 12.5px/1.9 var(--mono); }
 
 /* --- topics --- */
 ul.tags { list-style: none; display: flex; flex-wrap: wrap; gap: 6px;
@@ -287,8 +493,8 @@ ul.tags li, .stage ul.tags li { margin: 0; }
        background: var(--panel); color: var(--accent); text-decoration: none; }
 .tag:hover { border-color: var(--accent); }
 .tag.on { background: var(--accent); border-color: var(--accent); color: var(--bg); }
-.tag .count { color: var(--dim); background: var(--line); border-radius: 999px;
-              font-size: 11px; padding: 0 6px; margin-left: 6px; }
+.tag .count { color: var(--dim); background: var(--sunken); border-radius: 999px;
+              font: 10.5px/1.6 var(--mono); padding: 0 6px; margin-left: 6px; }
 .objective + ul.tags { margin: -8px 0 18px; }
 .builds { color: var(--dim); font-size: 14.5px; margin: 0 0 18px; }
 ul.picks { list-style: none; padding: 0; margin: 0; }
@@ -296,14 +502,128 @@ ul.picks > li { border-bottom: 1px solid var(--line); padding: 12px 2px; }
 ul.picks > li:last-child { border-bottom: 0; }
 ul.picks .title { font-weight: 600; }
 .why { color: var(--dim); font-size: 13.5px; display: block; margin-top: 2px; }
-.quote { display: block; margin-top: 6px; padding-left: 12px; font-size: 14.5px;
-         border-left: 3px solid var(--line); color: var(--ink); }
-h2.stage-head { font-size: 17px; }
+.quote { display: block; margin-top: 6px; padding-left: 12px; font: 15.5px/1.5 var(--serif);
+         border-left: 3px solid var(--violet); color: var(--ink); }
+h2.stage-head { font-size: 20px; }
 h2.stage-head a { color: var(--ink); text-decoration: none; }
 h2.stage-head a:hover { color: var(--accent); }
-h2.stage-head .n { color: var(--dim); font-size: 12px; letter-spacing: .1em;
+h2.stage-head .n { color: var(--dim); font: 600 11.5px var(--mono); letter-spacing: .12em;
                    text-transform: uppercase; margin-right: 8px; }
+
+/* --- the robot picker --- */
+details.picker { margin: 0 0 0 auto; padding: 0 14px; border-radius: 999px;
+                 position: relative; max-width: 100%; }
+details.picker > summary { padding: 6px 18px 6px 0; font-weight: 500; font-size: 14px; }
+details.picker > summary::before { display: none; }
+details.picker > summary::after {
+  content: ""; position: absolute; right: 0; top: 50%; width: 6px; height: 6px;
+  border-right: 2px solid var(--dim); border-bottom: 2px solid var(--dim);
+  transform: translateY(-70%) rotate(45deg); transition: transform .15s;
+}
+details.picker[open] > summary::after { transform: translateY(-30%) rotate(225deg); }
+details.picker > summary span { color: var(--dim); margin-left: 6px; font: 12px var(--mono); }
+details.picker[open] > summary { border-bottom: 0; margin-bottom: 0; }
+details.picker ul {
+  list-style: none; margin: 0; padding: 6px 14px; position: absolute; right: 0;
+  top: calc(100% + 8px); z-index: 10; min-width: 270px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .18);
+}
+details.picker li + li { border-top: 1px solid var(--line); }
+details.picker li a { display: block; padding: 9px 0; text-decoration: none; font-weight: 550; }
+details.picker li span { display: block; color: var(--dim); font: 400 12px/1.5 var(--mono); }
+.soon { font: 500 10.5px/1.6 var(--mono); color: var(--warn); text-transform: uppercase;
+        letter-spacing: .06em; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line));
+        border-radius: 999px; padding: 0 7px; margin-left: 8px; white-space: nowrap; }
+
+@media (max-width: 640px) {
+  :root { --gutter: 16px; }
+  body { font-size: 16px; }
+  h1 { font-size: 30px; }
+  .hero h1 { font-size: 34px; }
+  h2 { font-size: 22px; }
+  .hero.split { grid-template-columns: 1fr; }
+  .hero.split .art { grid-row: auto; grid-column: auto; max-width: 220px; order: -1; }
+  .ladder::before { left: 17px; }
+  .stage { grid-template-columns: 36px minmax(0, 1fr); gap: 0 10px; }
+  .stage .num { width: 36px; height: 36px; font-size: 15px; }
+  .stage ol { padding-left: 36px; }
+  .pager { grid-template-columns: 1fr; }
+  .pager .next { grid-column: 1; }
+  footer.site { flex-direction: column; }
+}
 """
+
+# The 3VN mark: the logo's three strokes and its dot (brand/3vn-mark.svg
+# in the homepage repository), the dot recoloured to follow the theme.
+MARK = (
+    '<svg viewBox="0 0 260 290" aria-hidden="true">'
+    '<g fill="none" stroke-width="23" stroke-linecap="round" stroke-linejoin="round">'
+    '<path stroke="#2563eb" d="M23,25 C23.0,28.3 22.3,38.3 23,45 C23.7,51.7 25.3,58.3 27,65 C28.7,71.7 30.3,78.3 33,85 C35.7,91.7 39.2,98.3 43,105 C46.8,111.7 51.3,118.3 56,125 C60.7,131.7 66.0,138.3 71,145 C76.0,151.7 81.3,158.3 86,165 C90.7,171.7 94.8,178.3 99,185 C103.2,191.7 107.7,198.3 111,205 C114.3,211.7 116.7,218.7 119,225 C121.3,231.3 124.0,240.0 125,243"/>'
+    '<path stroke="#14b8a6" d="M234,25 C233.8,28.3 233.5,38.3 233,45 C232.5,51.7 232.5,58.3 231,65 C229.5,71.7 226.8,78.3 224,85 C221.2,91.7 217.8,98.3 214,105 C210.2,111.7 205.5,118.3 201,125 C196.5,131.7 192.0,138.3 187,145 C182.0,151.7 175.3,158.3 171,165 C166.7,171.7 164.2,178.3 161,185 C157.8,191.7 155.3,198.3 152,205 C148.7,211.7 144.2,218.7 141,225 C137.8,231.3 134.3,240.0 133,243"/>'
+    '<path stroke="#7c3aed" d="M129,15 C128.0,18.3 124.8,28.3 123,35 C121.2,41.7 118.8,48.3 118,55 C117.2,61.7 117.5,68.3 118,75 C118.5,81.7 119.5,88.3 121,95 C122.5,101.7 125.0,108.3 127,115 C129.0,121.7 131.3,128.3 133,135 C134.7,141.7 136.0,148.3 137,155 C138.0,161.7 138.7,168.3 139,175 C139.3,181.7 139.3,188.3 139,195 C138.7,201.7 138.0,208.3 137,215 C136.0,221.7 134.3,229.7 133,235 C131.7,240.3 129.7,245.0 129,247"/>'
+    '</g><circle class="mark-dot" cx="128.5" cy="254" r="18.5"/></svg>')
+
+
+def _hatch(x0, x1, y, step=12, depth=9):
+    """Ground hatching under a line, the way a drawing shows a fixed surface."""
+    return ''.join(f'M{x},{y} l-{depth},{depth} ' for x in range(x0, x1 + 1, step))
+
+
+# A line drawing of each robot, in the style of a figure in a manual. Pure
+# markup coloured by the stylesheet, so it follows the theme. A robot
+# without one simply gets no picture.
+ROBOT_ART = {
+    '3vn-arm1': (
+        '<svg viewBox="0 0 240 170" role="img" aria-label="Line drawing of the '
+        '3VN Arm 1 on its mobile base">'
+        '<text class="lb" x="8" y="16">FIG. 1</text>'
+        '<line class="gd" x1="8" y1="156" x2="232" y2="156"/>'
+        '<path class="gd" d="M81.6,93.8 A25,25 0 0 1 112.5,73.8"/>'
+        '<rect class="ln" x="42" y="116" width="128" height="26" rx="8"/>'
+        '<rect class="ln" x="88" y="102" width="36" height="14" rx="3"/>'
+        '<line class="lk" x1="106" y1="98" x2="130" y2="46"/>'
+        '<line class="lk" x1="130" y1="46" x2="186" y2="64"/>'
+        '<circle class="jt" cx="106" cy="98" r="7.5"/>'
+        '<circle class="jt" cx="130" cy="46" r="6.5"/>'
+        '<circle class="jt" cx="186" cy="64" r="5.5"/>'
+        '<path class="jaw" d="M192,61 L205,56 L215,63"/>'
+        '<path class="jaw" d="M192,68 L203,77 L214,77"/>'
+        '<circle class="jt" cx="68" cy="144" r="11"/><circle class="hub" cx="68" cy="144" r="2.5"/>'
+        '<circle class="jt" cx="144" cy="144" r="11"/><circle class="hub" cx="144" cy="144" r="2.5"/>'
+        '</svg>'),
+    'so101': (
+        '<svg viewBox="0 0 240 170" role="img" aria-label="Line drawing of the '
+        'SO-101 arm clamped to the edge of a desk">'
+        '<text class="lb" x="8" y="16">FIG. 2</text>'
+        f'<path class="hatch" d="{_hatch(20, 128, 146)}"/>'
+        '<path class="ln" d="M8,132 H132 V146 H8"/>'
+        '<path class="ln" style="fill:none" d="M112,126 H142 V154 H122"/>'
+        '<line class="ln" x1="122" y1="154" x2="122" y2="160"/>'
+        '<path class="gd" d="M57.4,89.7 A25,25 0 0 1 90.6,70.5"/>'
+        '<rect class="ln" x="60" y="112" width="58" height="20" rx="4"/>'
+        '<rect class="ln" x="70" y="100" width="26" height="12" rx="3"/>'
+        '<line class="lk" x1="82" y1="94" x2="104" y2="40"/>'
+        '<line class="lk" x1="104" y1="40" x2="160" y2="58"/>'
+        '<line class="lk" x1="160" y1="58" x2="172" y2="62"/>'
+        '<circle class="jt" cx="82" cy="94" r="7.5"/>'
+        '<circle class="jt" cx="104" cy="40" r="6.5"/>'
+        '<circle class="jt" cx="160" cy="58" r="5.5"/>'
+        '<rect class="ln" x="171" y="55" width="12" height="15" rx="2.5"/>'
+        '<path class="jaw" d="M184,58 L207,56 L212,63"/>'
+        '<path class="jaw" d="M184,67 L199,79 L208,79"/>'
+        '</svg>'),
+}
+
+
+def robot_art(robot, href=None):
+    """The robot's drawing, linked to its course when `href` is given."""
+    svg = ROBOT_ART.get(robot['id'])
+    if not svg:
+        return ''
+    if href:
+        return f'<a class="art" href="{href}" tabindex="-1">{svg}</a>'
+    return f'<div class="art">{svg}</div>'
 
 PAGE = """<!DOCTYPE html>
 <html lang="en">
@@ -311,18 +631,22 @@ PAGE = """<!DOCTYPE html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
+<meta name="color-scheme" content="light dark">
 <title>{title} — 3VN Robotics</title>
 <style>{style}</style>
 </head>
 <body>
 <header class="site"><div class="wrap">
-  <div class="brand"><a href="{home}">3VN Robotics</a><span class="badge">preview</span></div>
-  <div class="meta">{meta}</div>
+  <div class="brand"><a href="{home}">{mark}3VN Robotics</a><span class="badge">preview</span></div>
+  {picker}
 </div></header>
 <div class="wrap">
 {body}
 <footer class="site">
-  Generated from the repository's own course and documentation. {stamp}
+  {mark}
+  <div><p>Generated from the repository's own course and documentation, including
+  the parts that do not work yet. A <a href="https://3vnsystems.com/">3VN Systems</a> project.</p>
+  <p class="meta">{meta}</p></div>
 </footer>
 </div>
 </body>
@@ -479,6 +803,89 @@ def load_tags(root):
     return data.get('tags') or []
 
 
+def load_robots(root):
+    """
+    Load the robots the course can be taken on, from course/robots/*.yaml,
+    in their declared order.
+
+    A subdirectory rather than course/*.yaml, because every top-level YAML
+    file there is a stage.
+    """
+    folder = root / 'course' / 'robots'
+    if not folder.is_dir():
+        return []
+    robots = [yaml.safe_load(f.read_text()) for f in sorted(folder.glob('*.yaml'))]
+    return sorted(robots, key=lambda r: (r.get('order', 99), str(r.get('id'))))
+
+
+def reference_of(robots):
+    """The robot the default lesson text is written for."""
+    return next(r for r in robots if r.get('reference'))
+
+
+def resolve(base, robot, ref_id, overrides):
+    """
+    One lesson or project as THIS robot's student sees it.
+
+    Ready when it is robot-agnostic, written for this robot alone, the
+    reference robot's own, or given a version for this robot. Planned
+    otherwise: the shared idea is real, the steps do not exist yet.
+    """
+    item = dict(base)
+    rid = robot['id']
+    variant = (base.get('flavors') or {}).get(rid)
+    if rid == ref_id or base.get('scope') == 'any' or base.get('only'):
+        item['status'] = 'ready'
+    elif variant:
+        for key in overrides:
+            if key not in variant:
+                continue
+            if key == 'concepts':
+                item[key] = list(base.get('concepts') or []) + list(variant[key])
+            else:
+                item[key] = variant[key]
+        item['status'] = 'ready'
+    else:
+        item['status'] = 'planned'
+    return item
+
+
+def flavor_view(stages, robot, ref):
+    """
+    The whole course for one robot: lessons it cannot do are set aside
+    with the reason, the rest are resolved and renumbered.
+    """
+    has = set(robot.get('has') or [])
+    view, number = [], 0
+    for stage in stages:
+        st = dict(stage, robot=robot, ref=ref)
+        lessons, skipped = [], []
+        for base in stage.get('lessons') or []:
+            if base.get('only') and robot['id'] not in base['only']:
+                continue
+            missing = set(base.get('needs') or []) - has
+            if missing:
+                skipped.append((base, sorted(missing)))
+                continue
+            lessons.append(resolve(base, robot, ref['id'], LESSON_OVERRIDES))
+        for position, lesson in enumerate(lessons, 1):
+            number += 1
+            lesson.update(index=number, position=position, stage=st)
+        project = resolve(stage['project'], robot, ref['id'], PROJECT_OVERRIDES)
+        project['stage'] = st
+        st.update(lessons=lessons, skipped=skipped, project=project)
+        st['minutes'] = (sum(int(le.get('minutes') or 0) for le in lessons)
+                         + int(project.get('minutes') or 0))
+        view.append(st)
+    return view
+
+
+def coverage(view):
+    """(ready, total) lessons on one robot. Counted, never claimed."""
+    lessons = [le for st in view for le in st['lessons']]
+    return sum(le['status'] == 'ready' for le in lessons), len(lessons)
+
+
 def make_targets(root):
     """Every target the Makefile declares."""
     makefile = root / 'Makefile'
@@ -548,14 +955,15 @@ def lesson_text(lesson):
 
 # ------------------------------------------------------------- validation
 
-def validate(stages, root, tags=None):
+def validate(stages, root, tags=None, robots=None):
     """
     Return every problem with the curriculum, as a list of strings.
 
     Empty means valid. Checks the shape of each stage, lesson and project,
     and -- more usefully -- that what a lesson points at exists: Make
     targets, docs, topic tags, the lessons it builds on, and the
-    uniqueness of ids and glossary terms.
+    uniqueness of ids and glossary terms. A robot's version of a lesson
+    is held to exactly the same checks as the lesson.
     """
     errors = []
     docs = root / 'docs'
@@ -563,6 +971,12 @@ def validate(stages, root, tags=None):
     seen_ids, seen_terms = {}, {}
     order = {le.get('id'): le.get('index')
              for st in stages for le in (st.get('lessons') or [])}
+    robots = robots or []
+    robot_ids = {r.get('id') for r in robots}
+    refs = [r for r in robots if r.get('reference')]
+    ref_id = refs[0].get('id') if len(refs) == 1 else None
+    variant_terms = []      # (where, robot, term), checked once every base term is known
+    needed = set()          # capabilities some lesson for everyone needs
 
     def need(where, data, fields):
         for name in fields:
@@ -589,6 +1003,99 @@ def validate(stages, root, tags=None):
                 name = name[5:]
             check_doc(where, name)
 
+    def check_lesson_content(lwhere, lesson):
+        """Everything a lesson points at -- for a lesson or a robot's version of one."""
+        for i, step in enumerate(lesson.get('steps') or [], 1):
+            if not isinstance(step, dict) or not step.get('do'):
+                errors.append(f'{lwhere}: step {i} has no `do`')
+                continue
+            check_shell(f'{lwhere} step {i}', step.get('run', ''))
+            check_shell(f'{lwhere} step {i}', code_in(step.get('do', '')))
+            check_markdown(f'{lwhere} step {i}', step.get('do', ''))
+
+        for field in ('body', 'checkpoint', 'note'):
+            check_markdown(lwhere, lesson.get(field, ''))
+            check_shell(lwhere, code_in(lesson.get(field, '')))
+
+        for name in lesson.get('read') or []:
+            check_doc(lwhere, name)
+
+        for i, pit in enumerate(lesson.get('pitfalls') or [], 1):
+            for part in ('symptom', 'cause', 'fix'):
+                if not pit.get(part):
+                    errors.append(f'{lwhere}: pitfall {i} has no `{part}`')
+            check_shell(f'{lwhere} pitfall {i}', code_in(pit.get('fix', '')))
+
+        for i, item in enumerate(lesson.get('quiz') or [], 1):
+            if not item.get('q') or not item.get('a'):
+                errors.append(f'{lwhere}: quiz {i} needs both `q` and `a`')
+
+        exercise = lesson.get('exercise')
+        if exercise is not None and not (isinstance(exercise, dict)
+                                         and exercise.get('task')):
+            errors.append(f'{lwhere}: `exercise` needs a `task`')
+
+        if 'minutes' in lesson and (not isinstance(lesson['minutes'], int)
+                                    or lesson['minutes'] <= 0):
+            errors.append(f'{lwhere}: `minutes` must be a positive integer')
+
+    def check_project_content(pwhere, project):
+        for i, task in enumerate(project.get('tasks') or [], 1):
+            text = task.get('do') if isinstance(task, dict) else task
+            if not text:
+                errors.append(f'{pwhere}: task {i} is empty')
+            if isinstance(task, dict):
+                check_shell(f'{pwhere} task {i}', task.get('run', ''))
+            check_shell(f'{pwhere} task {i}', code_in(text or ''))
+        for field in ('brief', 'note'):
+            check_markdown(pwhere, project.get(field, ''))
+        for name in project.get('read') or []:
+            check_doc(pwhere, name)
+
+    def check_flavors(where, item, required, overrides, content):
+        """The robot-specific parts of a lesson or project."""
+        scope = item.get('scope')
+        if scope not in (None, 'any'):
+            errors.append(f'{where}: scope {scope!r} is not "any"')
+        if scope == 'any' and (item.get('flavors') or item.get('needs')
+                               or item.get('only')):
+            errors.append(f'{where}: `scope: any` means the same on every robot, '
+                          f'so it cannot also have `flavors`, `needs` or `only`')
+        for cap in item.get('needs') or []:
+            if cap not in CAPABILITIES:
+                errors.append(f'{where}: needs {cap!r}, which is not one of '
+                              f'{", ".join(CAPABILITIES)}')
+        for rid in item.get('only') or []:
+            if rid not in robot_ids:
+                errors.append(f'{where}: `only` names robot {rid!r}, '
+                              f'which course/robots/ does not define')
+        if not item.get('only'):
+            needed.update(item.get('needs') or [])
+        for rid, variant in (item.get('flavors') or {}).items():
+            vwhere = f'{where} on {rid}'
+            if rid not in robot_ids:
+                errors.append(f'{vwhere}: no such robot in course/robots/')
+                continue
+            if rid == ref_id:
+                errors.append(f'{vwhere}: the reference robot\'s version is the '
+                              f'lesson itself; edit that instead')
+                continue
+            if not isinstance(variant, dict) or not variant.get(required):
+                errors.append(f'{vwhere}: a robot\'s version must give its own '
+                              f'`{required}`; leave it out to show it as planned')
+                continue
+            for key in variant:
+                if key not in overrides:
+                    errors.append(f'{vwhere}: `{key}` cannot differ by robot '
+                                  f'(only {", ".join(overrides)} can)')
+            content(vwhere, variant)
+            for concept in variant.get('concepts') or []:
+                term = str(concept.get('term', '')).strip()
+                if not term or not concept.get('meaning'):
+                    errors.append(f'{vwhere}: a concept needs `term` and `meaning`')
+                    continue
+                variant_terms.append((vwhere, rid, term))
+
     if not stages:
         return ['course/: no stages found']
 
@@ -609,6 +1116,33 @@ def validate(stages, root, tags=None):
             errors.append(f'{twhere}: listed twice in course/{TAGS_FILE}')
         known[name] = tag
 
+    # ---- the robots
+    if not robots:
+        errors.append('course/robots/: no robots found')
+    elif len(refs) != 1:
+        errors.append(f'course/robots/: exactly one robot must be '
+                      f'`reference: true`, found {len(refs)}')
+    seen_robots = set()
+    for robot in robots:
+        rwhere = f'robot {robot.get("id", "?")}'
+        need(rwhere, robot, ROBOT_FIELDS)
+        rid = str(robot.get('id', ''))
+        if rid in seen_robots:
+            errors.append(f'{rwhere}: id used by another robot')
+        seen_robots.add(rid)
+        if rid and not re.fullmatch(r'[a-z0-9][a-z0-9-]*', rid):
+            errors.append(f'{rwhere}: id must be lowercase letters, digits and '
+                          f'dashes -- it becomes a directory and a URL')
+        for cap in robot.get('has') or []:
+            if cap not in CAPABILITIES:
+                errors.append(f'{rwhere}: has {cap!r}, which is not one of '
+                              f'{", ".join(CAPABILITIES)}')
+        for field in ('summary', 'status', 'price_note'):
+            check_markdown(rwhere, robot.get(field, ''))
+        for name in robot.get('read') or []:
+            check_doc(rwhere, name)
+
+    # ---- the course
     for expected, stage in enumerate(stages, 1):
         where = f'stage {stage.get("id", expected)}'
         need(where, stage, STAGE_FIELDS)
@@ -677,35 +1211,9 @@ def validate(stages, root, tags=None):
                 elif quote not in text:
                     errors.append(f'{mwhere}: quote {quote!r} is not in the lesson')
 
-            for i, step in enumerate(lesson.get('steps') or [], 1):
-                if not isinstance(step, dict) or not step.get('do'):
-                    errors.append(f'{lwhere}: step {i} has no `do`')
-                    continue
-                check_shell(f'{lwhere} step {i}', step.get('run', ''))
-                check_shell(f'{lwhere} step {i}', code_in(step.get('do', '')))
-                check_markdown(f'{lwhere} step {i}', step.get('do', ''))
-
-            for field in ('body', 'checkpoint'):
-                check_markdown(lwhere, lesson.get(field, ''))
-                check_shell(lwhere, code_in(lesson.get(field, '')))
-
-            for name in lesson.get('read') or []:
-                check_doc(lwhere, name)
-
-            for i, pit in enumerate(lesson.get('pitfalls') or [], 1):
-                for part in ('symptom', 'cause', 'fix'):
-                    if not pit.get(part):
-                        errors.append(f'{lwhere}: pitfall {i} has no `{part}`')
-                check_shell(f'{lwhere} pitfall {i}', code_in(pit.get('fix', '')))
-
-            for i, item in enumerate(lesson.get('quiz') or [], 1):
-                if not item.get('q') or not item.get('a'):
-                    errors.append(f'{lwhere}: quiz {i} needs both `q` and `a`')
-
-            exercise = lesson.get('exercise')
-            if exercise is not None and not (isinstance(exercise, dict)
-                                             and exercise.get('task')):
-                errors.append(f'{lwhere}: `exercise` needs a `task`')
+            check_lesson_content(lwhere, lesson)
+            check_flavors(lwhere, lesson, 'steps', LESSON_OVERRIDES,
+                          check_lesson_content)
 
             for concept in lesson.get('concepts') or []:
                 term = str(concept.get('term', '')).strip()
@@ -722,19 +1230,34 @@ def validate(stages, root, tags=None):
         if isinstance(project, dict):
             pwhere = f'{where} project'
             need(pwhere, project, PROJECT_FIELDS)
-            for i, task in enumerate(project.get('tasks') or [], 1):
-                text = task.get('do') if isinstance(task, dict) else task
-                if not text:
-                    errors.append(f'{pwhere}: task {i} is empty')
-                if isinstance(task, dict):
-                    check_shell(f'{pwhere} task {i}', task.get('run', ''))
-                check_shell(f'{pwhere} task {i}', code_in(text or ''))
-            for name in project.get('read') or []:
-                check_doc(pwhere, name)
+            check_project_content(pwhere, project)
+            if project.get('needs') or project.get('only'):
+                errors.append(f'{pwhere}: every robot gets every project, so a '
+                              f'project cannot have `needs` or `only`')
+            check_flavors(pwhere, project, 'tasks', PROJECT_OVERRIDES,
+                          check_project_content)
 
     for name in known:
         if name not in used:
             errors.append(f'tag {name}: in course/{TAGS_FILE}, but no lesson carries it')
+
+    # ---- across both
+    per_robot = {}
+    for vwhere, rid, term in variant_terms:
+        key = term.lower()
+        mine = per_robot.setdefault(rid, {})
+        if key in seen_terms:
+            errors.append(f'{vwhere}: glossary term {term!r} is already defined '
+                          f'by lesson {seen_terms[key]}')
+        elif key in mine:
+            errors.append(f'{vwhere}: glossary term {term!r} is already defined '
+                          f'for this robot in {mine[key]}')
+        mine[key] = vwhere
+    if ref_id:
+        missing = needed - set(refs[0].get('has') or [])
+        if missing:
+            errors.append(f'robot {ref_id}: the reference robot must be able to '
+                          f'take every lesson, but lacks {", ".join(sorted(missing))}')
     return errors
 
 
@@ -900,12 +1423,66 @@ def pager(sequence, position):
         href = (f'lesson-{obj["id"]}.html' if kind == 'lesson'
                 else f'project-{obj["stage"]["id"]}.html')
         title = obj['title'] if kind == 'lesson' else f'Project: {obj["title"]}'
-        return (f'<a href="{href}">&larr; {esc(title)}</a>' if arrow_left
-                else f'<a href="{href}">{esc(title)} &rarr;</a>')
+        return (f'<a class="prev" href="{href}"><small>&larr; Previous</small>'
+                f'{esc(title)}</a>' if arrow_left
+                else f'<a class="next" href="{href}"><small>Next &rarr;</small>'
+                     f'{esc(title)}</a>')
     prev = link(sequence[position - 1], True) if position else '<span></span>'
     nxt = (link(sequence[position + 1], False) if position + 1 < len(sequence)
-           else '<span>end of the course</span>')
+           else '<span class="next"><small>That is all</small>'
+                'The end of the course</span>')
     return f'<div class="pager">{prev}{nxt}</div>'
+
+
+def soon(item):
+    """The pill on a lesson or project not yet written for this robot."""
+    return '<span class="soon">planned</span>' if item.get('status') == 'planned' else ''
+
+
+def robot_notes(item, page):
+    """
+    What a lesson or project says about THIS robot: its own note, or --
+    when its version does not exist yet -- that, and where to take the
+    lesson meanwhile.
+    """
+    stage = item['stage']
+    robot, ref = stage.get('robot'), stage.get('ref')
+    out = []
+    if robot and item.get('note'):
+        out.append(f'<div class="note"><strong>On the {esc(robot["name"])}:</strong> '
+                   f'{inline(item["note"])}</div>')
+    if robot and item.get('status') == 'planned':
+        out.append(
+            f'<div class="note"><strong>Not written for the {esc(robot["name"])} '
+            f'yet.</strong> The idea above is the same on every robot, though '
+            f'it is told through the {esc(ref["name"])}; the steps are not. '
+            f'Until they exist, take it on the '
+            f'<a href="../{ref["id"]}/{page}">{esc(ref["name"])}</a> in '
+            f'simulation, which needs no hardware.</div>')
+    return out
+
+
+def picker_html(robot, robots, pages, counts, name):
+    """
+    The robot chooser at the top of every course page.
+
+    No JavaScript, per the CSP: a <details> that opens into links, each to
+    THIS page on the other robot where it exists there, and to that
+    robot's front page where it does not (a vacuum has no grasp lesson).
+    """
+    items = []
+    for other in robots:
+        if other['id'] == robot['id']:
+            continue
+        target = name if name in pages[other['id']] else 'index.html'
+        ready, total = counts[other['id']]
+        items.append(f'<li><a href="../{other["id"]}/{target}">{esc(other["name"])}'
+                     f'<span>{esc(other["price"])} &middot; {ready} of {total} '
+                     f'lessons ready</span></a></li>')
+    items.append('<li><a href="../index.html">Compare the robots</a></li>')
+    return (f'<details class="picker"><summary>Robot: <b>{esc(robot["name"])}</b>'
+            f'<span>{esc(robot["price"])}</span></summary>'
+            f'<ul>{"".join(items)}</ul></details>')
 
 
 def crumbs(stage):
@@ -927,19 +1504,24 @@ def lesson_page(lesson, sequence, position, vocab, by_id):
     """
     stage = lesson['stage']
     count = len(stage['lessons'])
+    dots = ''.join('<i class="here"></i>' if n == lesson['position'] else
+                   '<i class="past"></i>' if n < lesson['position'] else '<i></i>'
+                   for n in range(1, count + 1))
     parts = [
         crumbs(stage),
         f'<div class="lesson-head">{stage_word(stage)} {stage["number"]} '
         f'&middot; lesson {lesson["position"]} of {count} &middot; '
-        f'{hours(lesson["minutes"])}</div>',
+        f'{hours(lesson["minutes"])}<span class="dots" aria-hidden="true">'
+        f'{dots}</span></div>',
         f'<h1>{esc(lesson["title"])}</h1>',
         f'<p class="objective"><b>You will:</b> {inline(lesson["objective"])}</p>',
         tag_chips(lesson['tags'], vocab),
     ]
-    if lesson.get('builds_on'):
+    # A lesson built on may not exist on this robot (it needs wheels).
+    deps = [by_id[dep] for dep in lesson.get('builds_on') or [] if dep in by_id]
+    if deps:
         parts.append('<p class="builds">Builds on '
-                     + said(lesson_link(by_id[dep]) for dep in lesson['builds_on'])
-                     + '.</p>')
+                     + said(lesson_link(dep) for dep in deps) + '.</p>')
     touched = []
     for mention in lesson.get('mentions') or []:
         if mention['tag'] not in touched:
@@ -949,6 +1531,18 @@ def lesson_page(lesson, sequence, position, vocab, by_id):
                      + said(f'<a href="{tag_href(t)}">{esc(vocab[t]["label"])}</a>'
                             for t in touched) + '.</p>')
     parts.append(rewrite_links(render(lesson.get('body', ''))))
+    parts.extend(robot_notes(lesson, f'lesson-{lesson["id"]}.html'))
+
+    if lesson.get('status') == 'planned':
+        # The idea is shared and real; the steps, checks and pitfalls
+        # are the reference robot's, and would mislead on this one.
+        if lesson.get('concepts'):
+            parts.append('<h2>Terms</h2><dl class="terms">')
+            parts.extend(f'<dt id="{slug(c["term"])}">{esc(c["term"])}</dt>'
+                         f'<dd>{inline(c["meaning"])}</dd>' for c in lesson['concepts'])
+            parts.append('</dl>')
+        parts.append(pager(sequence, position))
+        return '\n'.join(parts)
 
     parts.append('<h2>Do it</h2><ol class="steps">')
     for step in lesson['steps']:
@@ -1015,8 +1609,12 @@ def project_page(stage, sequence, position):
         f'&middot; project &middot; {hours(project["minutes"])}</div>',
         f'<h1>Project: {esc(project["title"])}</h1>',
         rewrite_links(render(project['brief'])),
-        '<h2>Tasks</h2><ol class="steps">',
     ]
+    parts.extend(robot_notes(project, f'project-{stage["id"]}.html'))
+    if project.get('status') == 'planned':
+        parts.append(pager(sequence, position))
+        return '\n'.join(parts)
+    parts.append('<h2>Tasks</h2><ol class="steps">')
     for task in project['tasks']:
         if isinstance(task, dict):
             piece = f'<li>{rewrite_links(render(task["do"]))}'
@@ -1066,16 +1664,30 @@ def stage_page(stage, sequence, vocab):
     for lesson in lessons:
         parts.append(
             f'<tr><td>{lesson["position"]}</td><td><a href="lesson-{lesson["id"]}.html">'
-            f'{esc(lesson["title"])}</a><span class="obj">{inline(lesson["objective"])}'
-            f'</span>{tag_chips(lesson["tags"], vocab)}</td>'
+            f'{esc(lesson["title"])}</a>{soon(lesson)}<span class="obj">'
+            f'{inline(lesson["objective"])}</span>{tag_chips(lesson["tags"], vocab)}</td>'
             f'<td class="m">{lesson["minutes"]} min</td></tr>')
     project = stage['project']
     parts.append(
         f'<tr><td>&#9670;</td><td><a href="project-{stage["id"]}.html">Project: '
-        f'{esc(project["title"])}</a></td><td class="m">{project["minutes"]} min</td></tr>')
+        f'{esc(project["title"])}</a>{soon(project)}</td>'
+        f'<td class="m">{project["minutes"]} min</td></tr>')
     parts.append('</table>')
 
-    first = f'lesson-{lessons[0]["id"]}.html'
+    robot, ref = stage.get('robot'), stage.get('ref')
+    if robot and stage.get('skipped'):
+        parts.append(f'<h2>Not on the {esc(robot["name"])}</h2><ul>')
+        for lesson, missing in stage['skipped']:
+            parts.append(
+                f'<li>{esc(lesson["title"])}<span class="obj">needs '
+                f'{" and ".join(CAPABILITIES[c] for c in missing)}, which this '
+                f'robot does not have. '
+                f'<a href="../{ref["id"]}/lesson-{lesson["id"]}.html">Read it on the '
+                f'{esc(ref["name"])}</a></span></li>')
+        parts.append('</ul>')
+
+    first = (f'lesson-{lessons[0]["id"]}.html' if lessons
+             else f'project-{stage["id"]}.html')
     parts.append(f'<p><a href="{first}">Start with lesson 1 &rarr;</a></p>')
     return '\n'.join(parts)
 
@@ -1204,105 +1816,170 @@ def ladder_html(stages):
     out = []
     for stage in stages:
         items = ''.join(
-            f'<li><a href="lesson-{le["id"]}.html">{esc(le["title"])}</a>'
+            f'<li><a href="lesson-{le["id"]}.html">{esc(le["title"])}</a>{soon(le)}'
             f'<span class="mins">{le["minutes"]} min</span></li>'
             for le in stage['lessons'])
         project = stage['project']
         items += (f'<li class="proj"><a href="project-{stage["id"]}.html">Project: '
-                  f'{esc(project["title"])}</a></li>')
+                  f'{esc(project["title"])}</a>{soon(project)}</li>')
+        skipped = (f' &middot; {len(stage["skipped"])} not on this robot'
+                   if stage.get('skipped') else '')
         out.append(
-            f'<section class="stage"><header>'
+            f'<section class="stage">'
+            f'<div class="num" aria-hidden="true">{stage["number"]:02d}</div>'
+            f'<div class="card"><header>'
             f'<span class="n">{stage_word(stage)} {stage["number"]}</span>'
             f'<h2><a href="stage-{stage["id"]}.html">{esc(stage["title"])}</a></h2>'
             f'{price_badge(stage)}</header>'
             f'<p class="blurb">{inline(stage["summary"])}</p>'
             f'<div class="facts">{len(stage["lessons"])} lessons &middot; '
-            f'project &middot; {hours(stage["minutes"])}</div>'
-            f'<ol>{items}</ol></section>')
-    return '\n'.join(out)
+            f'project &middot; {hours(stage["minutes"])}{skipped}</div>'
+            f'<ol>{items}</ol></div></section>')
+    return '<div class="ladder">' + '\n'.join(out) + '</div>'
 
 
-def index_html(docs, written, stages, vocab):
-    """Render the front page: the course first, the manual second."""
+# Every lesson has the same parts in the same order, so a student always
+# knows where to look. Shown as tiles on the front pages.
+LESSON_PARTS = (
+    ('Why', 'Why the thing is built this way, usually through something '
+            'that went wrong here first.'),
+    ('Do it', 'Numbered steps with the exact command and what you should see.'),
+    ('Checkpoint', 'One sign that tells you it worked.'),
+    ('When it goes wrong', 'The symptoms that mislead, and what they really mean.'),
+    ('Check yourself', 'Questions with the answers folded away.'),
+    ('Stretch', 'An exercise that goes past the steps.'),
+)
+
+HOW_IT_WORKS = (
+    'Every stage ends in a **project** with a definition of done.\n\n'
+    'You need Docker and a machine with 6 GB of memory to give it. You '
+    'do not need a robot to start: hardware is one of three interchangeable '
+    'targets, and the course is built so the other two teach '
+    'everything except the screwdriver.')
+
+
+def how_it_works():
+    """The shape every lesson shares, then what you need to start."""
+    tiles = ''.join(f'<li><b>{esc(name)}</b>{esc(line)}</li>'
+                    for name, line in LESSON_PARTS)
+    return (f'<h2>How every lesson works</h2>'
+            f'<p>Each lesson has the same shape, so you always know where to look.</p>'
+            f'<ol class="anatomy">{tiles}</ol>{render(HOW_IT_WORKS)}')
+
+
+def index_html(stages, robot, ref, counts, vocab):
+    """Render one robot's front page: its course, and how far it has got."""
     lessons = [le for st in stages for le in st['lessons']]
     total_minutes = sum(st['minutes'] for st in stages)
-    listed = {name for _, items in CURRICULUM for name, _ in items}
     free = [st for st in stages if st.get('price') == 'free']
     paid = [st for st in stages if st.get('price') != 'free']
     cost = (f"${sum(int(st['price'].strip('$')) for st in paid)}" if paid else '$0')
+    ready, total = counts[robot['id']]
+    is_ref = robot['id'] == ref['id']
 
-    parts = ['<h1>Build a robot the way you build software</h1>', render(
-        'One system that grows, from a simulated arm to a mobile '
-        'manipulator that sees and learns. You already know Git, Docker, '
-        'testing, CI and observability. This is those skills, pointed at '
-        'a machine that moves.')]
+    parts = [f'<section class="hero split">{robot_art(robot, "robot.html")}'
+             f'<div class="eyebrow">The course on the {esc(robot["name"])}</div>'
+             f'<h1>Build a robot the way you build software</h1>'
+             f'<p class="lede">One system that grows, from a simulated robot to one '
+             f'that sees and learns. You already know Git, Docker, testing, CI and '
+             f'observability. This is those skills, pointed at a machine that '
+             f'moves.</p></section>',
+             f'<p>{inline(robot["summary"])} <a href="robot.html">About the '
+             f'{esc(robot["name"])} &rarr;</a></p>']
 
-    if paid:
-        price_stat = (f'<div class="stat"><b>{len(free)} free</b><span>then '
-                      f'{paid[0]["price"]} per tier, {cost} for all</span></div>')
+    stats = [
+        f'<div class="stat"><b>{len(lessons)}</b><span>lessons on this robot</span></div>',
+        f'<div class="stat"><b>{len(stages)}</b><span>stages, each ending in a project</span></div>',
+        f'<div class="stat"><b>~{round(total_minutes / 60)} h</b><span>of hands-on work</span></div>',
+        (f'<div class="stat"><b>{len(free)} free</b><span>then '
+         f'{paid[0]["price"]} per tier, {cost} for all</span></div>' if paid else
+         f'<div class="stat"><b>Free</b><span>all {len(stages)} stages, '
+         f'for now</span></div>'),
+    ]
+    if not is_ref:
+        stats.insert(1, f'<div class="stat"><b>{ready} of {total}</b>'
+                        f'<span>written for this robot</span></div>')
+    parts.append('<div class="stats">' + ''.join(stats) + '</div>')
+
+    if is_ref:
+        parts.append(
+            '<div class="note"><strong>This is a live preview of an '
+            'unfinished course.</strong> It is generated from the project as '
+            'it actually stands, including what does not work yet. Where '
+            'something is unproven or failing, the lesson says so.</div>')
     else:
-        price_stat = (f'<div class="stat"><b>Free</b><span>all {len(stages)} '
-                      'stages, for now</span></div>')
+        parts.append(
+            f'<div class="note"><strong>The {esc(robot["name"])} version is being '
+            f'written: {ready} of {total} lessons are ready.</strong> The rest '
+            f'show what they will teach, marked planned, and link to the same '
+            f'lesson on the {esc(ref["name"])} in simulation, which needs no '
+            f'hardware.</div>')
 
-    parts.append(
-        '<div class="stats">'
-        f'<div class="stat"><b>{len(lessons)}</b><span>lessons</span></div>'
-        f'<div class="stat"><b>{len(stages)}</b>'
-        '<span>stages, each ending in a project</span></div>'
-        f'<div class="stat"><b>~{round(total_minutes / 60)} h</b>'
-        '<span>of hands-on work</span></div>'
-        f'{price_stat}'
-        '</div>')
-
-    parts.append(
-        '<div class="note"><strong>This is a live preview of an '
-        'unfinished course.</strong> It is generated from the project as '
-        'it actually stands, including what does not work yet. Where '
-        'something is unproven or failing, the lesson says so.</div>')
-
-    parts.append('<h2>How every lesson works</h2>')
-    parts.append(render(
-        'Each lesson has the same shape, so you always know where to look. '
-        '**Why** the thing is built this way, usually through something '
-        'that went wrong here first. **Do it** — numbered steps with the '
-        'exact command and what you should see. **A checkpoint** that tells '
-        'you it worked. **When it goes wrong** — the symptoms that mislead, '
-        'and what they really mean. **Check yourself** — questions with the '
-        'answers folded away. **Stretch** — an exercise that goes past the '
-        'steps. Every stage ends in a **project** with a definition of done.\n\n'
-        'You need Docker and a machine with 6 GB of memory to give it. You '
-        'do not need a robot: hardware is one of three interchangeable '
-        'targets, and the course is built so the other two teach '
-        'everything except the screwdriver.'))
-
+    parts.append(how_it_works())
     parts.append('<h2>The course</h2>')
     parts.append(ladder_html(stages))
-    parts.append('<p><a href="glossary.html">Glossary of every term the course '
-                 'introduces &rarr;</a></p>')
 
-    counts = {name: 0 for name in vocab}
+    tag_counts = {name: 0 for name in vocab}
     for le in lessons:
         for tag in le['tags']:
-            counts[tag] += 1
+            tag_counts[tag] += 1
+    shown = [name for name in vocab if tag_counts[name]]
     parts.append('<h2>Topics</h2>')
     parts.append(render(
         'Every lesson is tagged. Pick a topic to see each lesson that covers '
         'it, wherever it sits in the course, and what to read alongside.'))
-    parts.append(tag_chips(list(vocab), vocab, counts=counts))
+    parts.append(tag_chips(shown, vocab, counts=tag_counts))
     parts.append('<p><a href="tags/index.html">Every topic, described &rarr;</a></p>')
+    parts.append('<p><a href="glossary.html">Glossary of every term the course '
+                 'introduces &rarr;</a></p>')
+    parts.append('<p><a href="../index.html#reference">The project\'s reference '
+                 'documentation &rarr;</a></p>')
+    return '\n'.join(parts)
 
-    table = phase_table(docs)
-    if table:
-        parts.append('<h2>The real project, honestly</h2>')
-        parts.append(render(
-            'The course is written against a project that is genuinely '
-            'being built, not a finished example. This is where it is:'))
-        parts.append(render(table))
 
-    parts.append('<h2>Reference</h2>')
-    parts.append(render(
+def robot_page(robot, stages, ref, counts):
+    """One robot: what it costs, what only it teaches, and how far its course is."""
+    ready, total = counts[robot['id']]
+    parts = ['<div class="crumbs"><a href="index.html">The course</a></div>',
+             f'<section class="hero split">{robot_art(robot)}'
+             f'<div class="eyebrow">{esc(robot["kind"])}</div>',
+             f'<h1>{esc(robot["name"])} <span class="price">{esc(robot["price"])}</span></h1>'
+             f'</section>',
+             rewrite_links(render(robot['summary'])),
+             '<h2>What it costs</h2>', rewrite_links(render(robot['price_note'])),
+             '<h2>What it teaches that the others do not</h2><ul>']
+    parts.extend(f'<li>{inline(t)}</li>' for t in robot['teaches'])
+    parts.append('</ul>')
+    if robot.get('exclusive'):
+        parts.append('<h2>Lessons only this robot gets</h2>'
+                     '<p class="expect">Planned, not written yet.</p><ul>')
+        parts.extend(f'<li>{inline(t)}</li>' for t in robot['exclusive'])
+        parts.append('</ul>')
+    parts.append('<h2>Where it stands</h2>' + rewrite_links(render(robot['status'])))
+
+    parts.append('<h2>The course on this robot</h2><table class="syllabus"><tr>'
+                 '<th>Stage</th><th>Ready</th><th>Planned</th><th>Not on this robot</th></tr>')
+    for st in stages:
+        done = sum(le['status'] == 'ready' for le in st['lessons'])
+        parts.append(
+            f'<tr><td><a href="stage-{st["id"]}.html">{stage_word(st)} '
+            f'{st["number"]}: {esc(st["title"])}</a></td><td class="m">{done}</td>'
+            f'<td class="m">{len(st["lessons"]) - done}</td>'
+            f'<td class="m">{len(st.get("skipped") or [])}</td></tr>')
+    parts.append(f'<tr><th>All</th><th>{ready}</th><th>{total - ready}</th>'
+                 f'<th>{sum(len(st.get("skipped") or []) for st in stages)}</th></tr>')
+    parts.append('</table>')
+    if robot.get('read'):
+        parts.append('<h2>Going deeper</h2>' + read_list(robot['read']))
+    return '\n'.join(parts)
+
+
+def reference_html(docs, written):
+    """The project's own documentation, grouped in reading order."""
+    listed = {name for _, items in CURRICULUM for name, _ in items}
+    parts = ['<h2 id="reference">Reference</h2>', render(
         'The project\'s own documentation, linked from the lessons that '
-        'need it. You do not have to read it in order.'))
+        'need it. You do not have to read it in order.')]
     for heading, items in CURRICULUM:
         rows = [f'<li><a href="{doc_page(n)}">{esc(label)}</a></li>'
                 for n, label in items if n in written]
@@ -1327,9 +2004,82 @@ def index_html(docs, written, stages, vocab):
     return '\n'.join(parts)
 
 
+def chooser_html(robots, counts, docs, written):
+    """
+    The front page: one course, and the robots it can be taken on.
+
+    Each card says what the robot costs, what only it teaches, and how
+    much of the course is actually written for it -- counted, not claimed.
+    """
+    parts = ['<section class="hero">'
+             '<div class="eyebrow">A hands-on course in robot software</div>'
+             '<h1>One course. Pick your robot.</h1>'
+             '<p class="lede">The same engineering — tests, CI, deployment, safety, '
+             'perception — taught on two inexpensive arms: the 3VN Arm 1, which you '
+             'print and wire yourself, and the SO-101, an open arm whose servos '
+             'report back. Every lesson\'s idea is shared; its steps are written for '
+             'your robot. Start free on either: simulation needs no hardware.</p>'
+             '</section>', '<div class="robots">']
+
+    for robot in robots:
+        ready, total = counts[robot['id']]
+        teach = ''.join(f'<li>{inline(t)}</li>' for t in robot['teaches'])
+        course = f'{robot["id"]}/index.html'
+        parts.append(
+            f'<article class="robot">{robot_art(robot, course)}<div class="body">'
+            f'<div class="eyebrow">{esc(robot["kind"])}</div>'
+            f'<h2><a href="{course}">{esc(robot["name"])}</a></h2>'
+            f'<span class="price">{esc(robot["price"])}</span>'
+            f'<p>{inline(robot["summary"])}</p>'
+            f'<div class="meter" title="{ready} of {total} lessons">'
+            f'<span style="width:{round(100 * ready / total) if total else 0}%"></span></div>'
+            f'<div class="stage-facts expect">{ready} of {total} lessons written for it</div>'
+            f'<ul class="teach">{teach}</ul>'
+            f'<p class="go"><a class="button" href="{course}">Start on the '
+            f'{esc(robot["name"])} &rarr;</a>'
+            f'<a href="{robot["id"]}/robot.html">About it</a></p></div></article>')
+    parts.append('</div>')
+
+    parts.append(how_it_works())
+
+    table = phase_table(docs)
+    if table:
+        parts.append('<h2>The real project, honestly</h2>')
+        parts.append(render(
+            'The course is written against a project that is genuinely '
+            'being built, not a finished example. This is where it is:'))
+        parts.append(render(table))
+
+    parts.append(reference_html(docs, written))
+    return '\n'.join(parts)
+
+
 # ------------------------------------------------------------------ build
 
-def build(root, out, stages, tags):
+REDIRECT = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="robots" content="noindex, nofollow">
+<meta http-equiv="refresh" content="0; url={target}">
+<title>Moved — 3VN Robotics</title></head>
+<body><p><a href="{target}">This page has moved.</a></p></body></html>
+"""
+
+
+def relink_docs(html, doc_pages):
+    """
+    Point a robot's pages at the shared docs one directory up.
+
+    Lessons live in site/<robot>/ and link docs as `viewing.html`, which
+    is right at the top level and wrong one level down. Only names that
+    ARE doc pages move, so lesson-to-lesson links stay where they are.
+    """
+    def fix(match):
+        name, anchor = match.group(1), match.group(2) or ''
+        return f'href="../{name}{anchor}"' if name in doc_pages else match.group(0)
+    return re.sub(r'href="([^"/:#]+\.html)(#[^"]*)?"', fix, html)
+
+
+def build(root, out, stages, robots, tags):
     """Render the whole site into `out`. Returns the page count."""
     docs = root / 'docs'
     out.mkdir(parents=True, exist_ok=True)
@@ -1338,20 +2088,14 @@ def build(root, out, stages, tags):
     # git is absent inside the build image, so the commit is passed in.
     commit = (run(['git', 'rev-parse', '--short', 'HEAD'], root)
               or os.environ.get('THREEVN_GIT_COMMIT', '')[:7])
-    stamp = f'v{version} · {commit}'
     meta = f'v{version} · {commit or "no commit"} · built {datetime.date.today().isoformat()}'
 
-    def write(name, title, body):
-        # `name` may be a path: the topic pages sit in tags/<slug>/.
-        prefix = '../' * name.count('/')
-        path = out / name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(PAGE.format(
-            title=esc(title), style=STYLE, meta=meta, stamp=stamp,
-            home=prefix + 'index.html', body=rebase(body, prefix)))
+    def page(title, body, home='index.html', picker=''):
+        return PAGE.format(title=esc(title), style=STYLE, meta=meta, body=body,
+                           home=home, picker=picker, mark=MARK)
 
-    vocab = {tag['slug']: tag for tag in tags}
-    by_id = {le['id']: le for st in stages for le in st['lessons']}
+    def write(name, title, body):
+        (out / name).write_text(page(title, body))
 
     written = []
     for source in sorted(docs.glob('*.md')):
@@ -1364,30 +2108,79 @@ def build(root, out, stages, tags):
         html = rewrite_links(render(source.read_text()))
         write(f'decisions-{source.stem}.html', doc_label('decisions/' + source.name),
               f'<a class="back" href="index.html">&larr; the course</a>\n{html}')
+    doc_pages = {p.name for p in out.glob('*.html')}
 
-    sequence = []
-    for stage in stages:
-        sequence.extend(('lesson', le) for le in stage['lessons'])
-        sequence.append(('project', stage['project']))
+    ref = reference_of(robots)
+    views = {r['id']: flavor_view(stages, r, ref) for r in robots}
+    counts = {rid: coverage(view) for rid, view in views.items()}
+    vocab = {tag['slug']: tag for tag in tags}
 
-    for position, (kind, obj) in enumerate(sequence):
-        if kind == 'lesson':
-            write(f'lesson-{obj["id"]}.html', obj['title'],
-                  lesson_page(obj, sequence, position, vocab, by_id))
-        else:
-            write(f'project-{obj["stage"]["id"]}.html', f'Project: {obj["title"]}',
-                  project_page(obj['stage'], sequence, position))
+    def sequence_of(view):
+        sequence = []
+        for stage in view:
+            sequence.extend(('lesson', le) for le in stage['lessons'])
+            sequence.append(('project', stage['project']))
+        return sequence
 
-    for stage in stages:
-        write(f'stage-{stage["id"]}.html', stage['title'],
-              stage_page(stage, sequence, vocab))
+    pages = {}
+    for rid, view in views.items():
+        names = {'index.html', 'robot.html', 'glossary.html', 'tags/index.html'}
+        for stage in view:
+            names.add(f'stage-{stage["id"]}.html')
+            names.add(f'project-{stage["id"]}.html')
+            names.update(f'lesson-{le["id"]}.html' for le in stage['lessons'])
+        names.update(tag_href(tag['slug']) for tag in tags)
+        pages[rid] = names
 
-    for tag in tags:
-        write(tag_href(tag['slug']), f'Topic: {tag["label"]}', tag_page(tag, stages, vocab))
-    write('tags/index.html', 'Topics', tags_index(stages, vocab))
+    for robot in robots:
+        view = views[robot['id']]
+        folder = out / robot['id']
+        folder.mkdir(exist_ok=True)
+        by_id = {le['id']: le for st in view for le in st['lessons']}
 
-    write('glossary.html', 'Glossary', glossary_page(stages))
-    write('index.html', 'The course', index_html(docs, written, stages, vocab))
+        def fwrite(name, title, body, robot=robot, folder=folder):
+            # Topic pages sit in tags/<slug>/ inside the robot's folder. Doc
+            # links are pointed up at the shared docs first, then the whole
+            # page is re-rooted for its depth.
+            prefix = '../' * name.count('/')
+            html = page(f'{title} · {robot["name"]}',
+                        rebase(relink_docs(body, doc_pages), prefix),
+                        home=prefix + '../index.html',
+                        picker=rebase(picker_html(robot, robots, pages, counts, name),
+                                      prefix))
+            path = folder / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(html)
+
+        sequence = sequence_of(view)
+        for position, (kind, obj) in enumerate(sequence):
+            if kind == 'lesson':
+                fwrite(f'lesson-{obj["id"]}.html', obj['title'],
+                       lesson_page(obj, sequence, position, vocab, by_id))
+            else:
+                fwrite(f'project-{obj["stage"]["id"]}.html', f'Project: {obj["title"]}',
+                       project_page(obj['stage'], sequence, position))
+        for stage in view:
+            fwrite(f'stage-{stage["id"]}.html', stage['title'],
+                   stage_page(stage, sequence, vocab))
+        for tag in tags:
+            fwrite(tag_href(tag['slug']), f'Topic: {tag["label"]}',
+                   tag_page(tag, view, vocab))
+        fwrite('tags/index.html', 'Topics', tags_index(view, vocab))
+        fwrite('glossary.html', 'Glossary', glossary_page(view))
+        fwrite('robot.html', robot['name'], robot_page(robot, view, ref, counts))
+        fwrite('index.html', 'The course', index_html(view, robot, ref, counts, vocab))
+
+    # The course used to live at the top level, its topic pages under
+    # tags/. Keep those addresses working: a refresh needs no script, so
+    # the CSP allows it.
+    for name in sorted(pages[ref['id']] - {'index.html', 'robot.html'} - doc_pages):
+        path = out / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        up = '../' * name.count('/')
+        path.write_text(REDIRECT.format(target=f'{up}{ref["id"]}/{name}'))
+
+    write('index.html', 'Pick your robot', chooser_html(robots, counts, docs, written))
     (out / 'robots.txt').write_text('User-agent: *\nDisallow: /\n')
     return len(list(out.rglob('*.html')))
 
@@ -1406,7 +2199,8 @@ def main(argv=None):
     root = pathlib.Path(args.root).resolve()
     stages = load_course(root)
     tags = load_tags(root)
-    errors = validate(stages, root, tags)
+    robots = load_robots(root)
+    errors = validate(stages, root, tags, robots)
     if errors:
         print(f'  course/ has {len(errors)} problem(s):', file=sys.stderr)
         for error in errors:
@@ -1417,13 +2211,17 @@ def main(argv=None):
     minutes = sum(st['minutes'] for st in stages)
     print(f'  course ok: {len(stages)} stages, {lessons} lessons, '
           f'{len(stages)} projects, {len(tags)} topics, {hours(minutes)}')
+    ref = reference_of(robots)
+    for robot in robots:
+        ready, total = coverage(flavor_view(stages, robot, ref))
+        print(f'    {robot["id"]:<10} {ready:>2} of {total} lessons written for it')
     if args.check:
         return 0
 
     out = pathlib.Path(args.out).resolve()
     if args.clean and out.exists():
         shutil.rmtree(out)
-    count = build(root, out, stages, tags)
+    count = build(root, out, stages, robots, tags)
     print(f'  {count} pages -> {out}')
     return 0
 

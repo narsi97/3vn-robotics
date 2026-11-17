@@ -117,6 +117,7 @@ lessons:
       - testing.md
 
   - id: tests-that-cannot-lie
+    scope: any
     title: Tests that cannot pass by accident
     tags: [testing]
     builds_on: [test-layers]
@@ -218,6 +219,7 @@ lessons:
       - cad.md
 
   - id: the-budget
+    scope: any
     title: Keeping the suite fast is a feature you maintain
     tags: [testing, devops]
     builds_on: [test-layers]
@@ -405,6 +407,7 @@ lessons:
       - architecture.md
 
   - id: images-that-ship
+    scope: any
     title: An image that carries no simulator
     tags: [devops, robops, security]
     builds_on: [docker-and-nothing-else]
@@ -508,6 +511,7 @@ lessons:
       - deployment.md
 
   - id: ci-runs-what-you-run
+    scope: any
     title: CI that runs what you run
     tags: [devops, testing]
     builds_on: [headless-by-default, the-budget]
@@ -610,6 +614,7 @@ lessons:
       - cicd.md
 
   - id: releases-are-evidence
+    scope: any
     title: A release is a tag plus evidence
     tags: [devops, security]
     builds_on: [images-that-ship, ci-runs-what-you-run]
@@ -711,6 +716,7 @@ lessons:
       - cicd.md
 
   - id: gate-the-motors
+    scope: any
     title: A pipeline for a machine with motors
     tags: [robops, devops, safety, security]
     builds_on: [releases-are-evidence]
@@ -1181,6 +1187,7 @@ lessons:
       - deployment.md
 
 project:
+  scope: any
   title: Bug hunt
   minutes: 90
   brief: |
