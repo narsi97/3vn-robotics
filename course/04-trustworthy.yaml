@@ -32,6 +32,23 @@ lessons:
     tags: [testing]
     builds_on: [fast-tests-or-no-tests, scenarios-are-tests]
     minutes: 30
+    flavors:
+      so101:
+        steps:
+          - do: Run the fast layer. It needs no robot, so it is the same command.
+            run: time make test
+          - do: Run the integration layer against the SO-101. It starts a real ROS graph against mock hardware.
+            run: time make test-ros PROFILE=so101_follower
+          - do: Run the simulation layer. Go and make tea.
+            run: time make test-sim PROFILE=so101_follower
+          - do: >-
+              Start the SO-101 in Gazebo, run the acceptance sequence against
+              it, then copy its report out.
+            run: |
+              make so101
+              make acceptance
+              make acceptance-report
+            expect: '`./acceptance.md` in your checkout, naming the commit, the target and every step''s result.'
     objective: Know which layer should catch a given bug, and why that layer and not another.
     body: |
       The test pyramid you already use survives contact with robotics, but
@@ -308,6 +325,26 @@ lessons:
     tags: [testing, safety, ros2]
     builds_on: [the-seam, test-layers, limits-from-the-datasheet]
     minutes: 35
+    flavors:
+      so101:
+        note: >-
+          The layer itself has been run on the SO-101: 14 passed, and one
+          skipped with its reason. The fault the last step plants has been
+          checked on the 3VN arm, not yet on the SO-101.
+        steps:
+          - do: Run the integration layer against the SO-101.
+            run: make test-ros PROFILE=so101_follower
+          - do: List what it checks.
+            run: grep -n "def test_" src/threevn_bringup/test/test_ros_integration.py src/threevn_bringup/test/test_tf_matches_kinematics.py
+          - do: Find the setting the limit tests pin, in the SO-101's controller file.
+            run: grep -n -B3 -A3 "enforce_command_limits" src/threevn_bringup/config/so101_controllers.yaml
+          - do: >-
+              Remove it — set it to `false` — and run the layer again. Then put it
+              back.
+            run: |
+              make test-ros PROFILE=so101_follower
+              git checkout src/threevn_bringup/config/so101_controllers.yaml
+            expect: '`test_out_of_limit_command_is_clamped_below_the_seam` should fail while its partner still passes.'
     objective: Test interface contracts and limit enforcement against a real ROS graph, with mock hardware.
     body: |
       Between the fast suite and the simulator sits a layer that starts a
@@ -796,6 +833,7 @@ lessons:
       - deployment.md
 
   - id: every-input-is-a-dependency
+    scope: any
     title: Every input is a dependency
     tags: [security, devops]
     builds_on: [images-that-ship, releases-are-evidence]
@@ -977,6 +1015,7 @@ lessons:
       - so101.md
 
   - id: audit-the-gate
+    scope: any
     title: Audit the gate before someone else does
     tags: [security, devops, robops]
     builds_on: [gate-the-motors]

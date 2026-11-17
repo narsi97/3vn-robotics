@@ -952,6 +952,7 @@ lessons:
       - dashboard.md
 
   - id: who-can-reach-it
+    scope: any
     title: Who can reach a robot
     tags: [security, robops]
     builds_on: [three-ways-to-watch, what-happened-when-you-were-away]
