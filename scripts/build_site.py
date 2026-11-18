@@ -70,9 +70,12 @@ Three constraints come from where this is served -- behind the shared
   * Every link is RELATIVE. The site lives under /rc-<something>/ today
     and may live at a bare domain tomorrow, and that move is supposed to
     be a config change rather than a rewrite.
-  * No JavaScript at all. The enforced CSP is `script-src 'self'` with
-    no 'unsafe-inline', so an inline <script> is dead on arrival. The
-    answers to self-check questions use <details>, which needs none.
+  * Nothing NEEDS JavaScript. The enforced CSP is `script-src 'self'`
+    with no 'unsafe-inline', so an inline <script> is dead on arrival.
+    Folding (self-check answers, the side map) is <details>; the phone
+    Menu is a checkbox. One same-origin file, nav.js (NAV_JS), makes the
+    Course and Reference tabs remember the page last read in each; with
+    it blocked they are plain links to each half's front page.
     Styles are inline because `style-src` does allow 'unsafe-inline'.
   * Every page carries noindex, and robots.txt disallows everything.
     Unlisted means unlisted; this is obscurity, not security, exactly as
@@ -186,6 +189,7 @@ STYLE = """
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
   --thread: linear-gradient(90deg, #2563eb, #7c3aed 50%, #14b8a6);
   --gutter: 20px;
+  --control: 34px;  /* every control in the header is this tall, so it never moves */
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -198,7 +202,7 @@ STYLE = """
   }
 }
 * { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+html { -webkit-text-size-adjust: 100%; scrollbar-gutter: stable; }
 body {
   margin: 0; background: var(--bg); color: var(--ink);
   font: 16.5px/1.7 var(--sans);
@@ -221,6 +225,8 @@ code {
   background: var(--sunken); border: 1px solid var(--line); border-radius: 5px;
   padding: .08em .38em; font-size: .84em; font-family: var(--mono);
 }
+/* A long identifier in a sentence breaks rather than widen a phone's page. */
+:not(pre) > code { overflow-wrap: anywhere; }
 pre {
   background: var(--term); color: var(--term-ink); border-radius: 10px;
   border-left: 3px solid var(--teal); padding: 15px 18px; overflow-x: auto;
@@ -513,15 +519,17 @@ h2.stage-head .n { color: var(--dim); font: 600 11.5px var(--mono); letter-spaci
 /* --- the robot picker --- */
 details.picker { margin: 0 0 0 auto; padding: 0 14px; border-radius: 999px;
                  position: relative; max-width: 100%; }
-details.picker > summary { padding: 6px 18px 6px 0; font-weight: 500; font-size: 14px; }
+details.picker > summary { padding: 0 18px 0 0; font-weight: 500; font-size: 14px;
+                           line-height: calc(var(--control) - 2px); white-space: nowrap; }
 details.picker > summary::before { display: none; }
 details.picker > summary::after {
-  content: ""; position: absolute; right: 0; top: 50%; width: 6px; height: 6px;
+  content: ""; position: absolute; right: 3px; top: 50%; width: 6px; height: 6px;
   border-right: 2px solid var(--dim); border-bottom: 2px solid var(--dim);
   transform: translateY(-70%) rotate(45deg); transition: transform .15s;
 }
 details.picker[open] > summary::after { transform: translateY(-30%) rotate(225deg); }
 details.picker > summary span { color: var(--dim); margin-left: 6px; font: 12px var(--mono); }
+details.picker > summary i { font-style: normal; }
 details.picker[open] > summary { border-bottom: 0; margin-bottom: 0; }
 details.picker ul {
   list-style: none; margin: 0; padding: 6px 14px; position: absolute; right: 0;
@@ -542,7 +550,8 @@ details.picker li span { display: block; color: var(--dim); font: 400 12px/1.5 v
    because opening a panel without a script takes one. */
 .wrap.wide { max-width: 1380px; }
 nav.tabs { display: flex; gap: 2px; }
-nav.tabs a { padding: 4px 12px; border-radius: 999px; color: var(--dim);
+nav.tabs a { display: block; height: var(--control); line-height: var(--control);
+             padding: 0 12px; border-radius: 999px; color: var(--dim);
              text-decoration: none; font-size: 14.5px; font-weight: 550; }
 nav.tabs a:hover { color: var(--ink); background: var(--sunken); }
 nav.tabs a[aria-current] { color: var(--ink); background: var(--sunken);
@@ -550,7 +559,8 @@ nav.tabs a[aria-current] { color: var(--ink); background: var(--sunken);
 .vh { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
       overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .menu-btn { display: none; align-items: center; gap: 8px; cursor: pointer;
-            border: 1px solid var(--line); border-radius: 999px; padding: 4px 13px;
+            border: 1px solid var(--line); border-radius: 999px; padding: 0 13px;
+            height: var(--control);
             font-size: 14px; font-weight: 550; background: var(--panel); user-select: none; }
 .menu-btn i, .menu-btn i::before, .menu-btn i::after {
   display: block; width: 14px; height: 2px; background: currentColor; border-radius: 2px; }
@@ -602,6 +612,15 @@ nav.tabs a[aria-current] { color: var(--ink); background: var(--sunken);
 .side li.planned a { color: color-mix(in srgb, var(--dim) 75%, var(--bg)); }
 .side li.planned a[aria-current] { color: var(--violet); }
 .side li.proj .n { color: var(--warn); }
+.side ul.pick { border-left: 0; margin: 10px 0 0; display: grid; gap: 6px; }
+.side ul.pick a { display: block; margin: 0; padding: 9px 12px; border: 1px solid var(--line);
+                  border-radius: 10px; background: var(--panel); }
+.side ul.pick a:hover { border-color: var(--accent); }
+.side ul.pick b { display: block; font: 600 15px/1.3 var(--serif); }
+.side ul.pick span { display: block; color: var(--dim); font: 11px/1.5 var(--mono); }
+.side ul.pick .meter { margin: 6px 0 0; height: 4px; }
+.side ul.pick .meter span { height: 100%; }
+.side ul.pick + .sub { margin-top: 10px; }
 .side ul.flat { border-left: 0; margin-left: 0; }
 .side ul.flat a { padding-left: 0; border-left: 0; }
 .side ul.flat a[aria-current] { background: none; }
@@ -620,6 +639,18 @@ h2[id] { scroll-margin-top: 16px; }
   .toc { display: block; }
 }
 @media (max-width: 899px) {
+  /* Two fixed rows on every page, whatever it has: the brand and Menu,
+     then the tabs and the robot. A page without Menu or a robot leaves
+     its cell empty rather than letting the rest move up. */
+  header.site .wrap { display: grid; gap: 10px 12px; align-items: center;
+                      grid-template-columns: auto minmax(0, 1fr) auto;
+                      grid-template-areas: "brand brand menu" "tabs picker picker"; }
+  .brand { grid-area: brand; min-height: var(--control); }
+  nav.tabs { grid-area: tabs; }
+  details.picker { grid-area: picker; justify-self: end; min-width: 0; max-width: 100%;
+                   margin: 0; }
+  details.picker > summary { overflow: hidden; text-overflow: ellipsis; }
+  .menu-btn { grid-area: menu; justify-self: end; }
   .frame { display: block; }
   .menu-btn { display: inline-flex; }
   .side { display: none; position: static; max-height: none; overflow: visible;
@@ -643,11 +674,12 @@ h2[id] { scroll-margin-top: 16px; }
   .pager { grid-template-columns: 1fr; }
   .pager .next { grid-column: 1; }
   footer.site { flex-direction: column; }
-  header.site .wrap { gap: 10px 12px; }
-  .menu-btn { order: 1; margin-left: auto; }
-  nav.tabs { order: 2; }
-  details.picker { order: 3; }
-  details.picker > summary span { display: none; }
+  details.picker > summary span, details.picker > summary i { display: none; }
+}
+@media (max-width: 360px) {
+  .badge { display: none; }
+  nav.tabs a { padding: 0 9px; }
+  details.picker { padding: 0 10px; }
 }
 """
 
@@ -731,9 +763,10 @@ PAGE = """<!DOCTYPE html>
 <meta name="color-scheme" content="light dark">
 <title>{title} — 3VN Robotics</title>
 <style>{style}</style>
+<script src="{script}" defer></script>
 </head>
 <body>
-{toggle}<header class="site"><div class="wrap{wide}">
+{toggle}<header class="site"><div class="wrap wide">
   <div class="brand"><a href="{home}">{mark}3VN Robotics</a><span class="badge">preview</span></div>
   <nav class="tabs" aria-label="Site">{tabs}</nav>
   {picker}{menu}
@@ -1567,7 +1600,7 @@ def picker_html(robot, robots, pages, counts, name):
     """
     The robot chooser at the top of every course page.
 
-    No JavaScript, per the CSP: a <details> that opens into links, each to
+    No script needed: a <details> that opens into links, each to
     THIS page on the other robot where it exists there, and to that
     robot's front page where it does not (a vacuum has no grasp lesson).
     """
@@ -1581,7 +1614,7 @@ def picker_html(robot, robots, pages, counts, name):
                      f'<span>{esc(other["price"])} &middot; {ready} of {total} '
                      f'lessons ready</span></a></li>')
     items.append('<li><a href="../index.html">Compare the robots</a></li>')
-    return (f'<details class="picker"><summary>Robot: <b>{esc(robot["name"])}</b>'
+    return (f'<details class="picker"><summary><i>Robot: </i><b>{esc(robot["name"])}</b>'
             f'<span>{esc(robot["price"])}</span></summary>'
             f'<ul>{"".join(items)}</ul></details>')
 
@@ -1602,13 +1635,124 @@ def crumbs(stage):
 # links and <details>, so it needs no script.
 
 def tabs_html(active, course, reference):
-    """The header's two halves of the site, the one this page is in marked."""
+    """
+    The header's two halves of the site, the one this page is in marked.
+
+    Each links to its half's front page. NAV_JS, where it runs, points the
+    other one at the page last read there instead.
+    """
     out = []
     for key, label, href in (('course', 'Course', course),
                              ('reference', 'Reference', reference)):
         here = ' aria-current="true"' if key == active else ''
-        out.append(f'<a href="{href}"{here}>{label}</a>')
+        out.append(f'<a href="{href}" data-tab="{key}"{here}>{label}</a>')
     return ''.join(out)
+
+
+#: The site's one script, written beside the pages as nav.js. The CSP
+#: allows a same-origin file (`script-src 'self'`), never an inline one.
+#: It only improves the tabs; with it blocked or storage off, every link
+#: still goes where its href says.
+NAV_JS = r"""// 3VN Robotics course site: the Course and Reference tabs remember the
+// page last read in each half, and how far down it, for this browser tab
+// (sessionStorage). Switching back lands where the reader left off.
+// Without this file the tabs go to each half's front page.
+(function () {
+  'use strict';
+  var tabs = document.querySelectorAll('nav.tabs a[data-tab]');
+  var brand = document.querySelector('.brand a');
+  var store;
+  try {
+    store = window.sessionStorage;
+    store.setItem('3vn-probe', '1');
+    store.removeItem('3vn-probe');
+  } catch (e) {
+    return;  // storage off or full: plain links it is
+  }
+  if (!tabs.length || !brand) return;
+
+  // Keyed by where the site is served, so two copies on one host never mix.
+  var root = new URL(brand.getAttribute('href'), location.href).pathname
+    .replace(/[^\/]*$/, '');
+  var here = null;
+  tabs.forEach(function (a) {
+    if (a.hasAttribute('aria-current')) here = a.getAttribute('data-tab');
+  });
+  if (!here) return;
+  var path = location.pathname;
+  // The header does not follow the page, so a reader scrolls back up to
+  // reach the tabs: where the page is when it is left says nothing. What
+  // is kept is where the reader last stopped, anywhere below the top.
+  var TOP = 300;
+  var STOPPED = 700;  // ms without scrolling
+
+  function key(name) { return '3vn-robotics ' + root + ' ' + name; }
+  function read(name) {
+    try { return JSON.parse(store.getItem(key(name))); } catch (e) { return null; }
+  }
+  function write(name, value) {
+    try { store.setItem(key(name), JSON.stringify(value)); } catch (e) { /* full */ }
+  }
+  var last = read(here);
+  var y = last && last.path === path && last.y > 0 ? last.y : 0;
+  function remember() { write(here, { path: path, y: y }); }
+  function point() {
+    // The open tab keeps its own front page; the other goes back to
+    // whatever was last read there.
+    tabs.forEach(function (a) {
+      var tab = a.getAttribute('data-tab');
+      var last = tab === here ? null : read(tab);
+      if (last && typeof last.path === 'string' && last.path.indexOf(root) === 0) {
+        a.setAttribute('href', last.path);
+      }
+    });
+  }
+
+  // Arrived by a tab: put the reader back where they were on this page.
+  // Back, forward and reload are the browser's to place; they keep the
+  // spot. Any other way in is a new visit, which starts at the top.
+  var arrived = read('arrived');
+  store.removeItem(key('arrived'));
+  var how = performance.getEntriesByType ?
+    (performance.getEntriesByType('navigation')[0] || {}).type : '';
+  if (arrived === path && y > 0) {
+    window.scrollTo(0, y);
+  } else if (arrived !== path && how !== 'back_forward' && how !== 'reload') {
+    y = 0;
+  }
+  remember();
+  point();
+
+  var timer = null;
+  window.addEventListener('scroll', function () {
+    clearTimeout(timer);
+    timer = setTimeout(function () {
+      if (window.scrollY > TOP) {
+        y = Math.round(window.scrollY);
+        remember();
+      }
+    }, STOPPED);
+  }, { passive: true });
+
+  document.addEventListener('click', function (event) {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey ||
+        event.altKey) return;
+    var a = event.target.closest && event.target.closest('nav.tabs a[data-tab]');
+    if (a && a.getAttribute('data-tab') !== here) {
+      write('arrived', new URL(a.href).pathname);
+    }
+  });
+  window.addEventListener('pagehide', remember);
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'hidden') remember();
+  });
+  // Back to a page kept in memory (the back button): it is the latest
+  // page of its half again, and the other tab may have moved on.
+  window.addEventListener('pageshow', function (event) {
+    if (event.persisted) { remember(); point(); }
+  });
+})();
+"""
 
 
 def map_link(href, label, current, number='', extra=''):
@@ -1631,6 +1775,34 @@ def fold(label, items, here, number=''):
             f'{items}</details>')
 
 
+def stages_nav(view, current):
+    """
+    Every stage of one robot's course, folding; the one holding `current`
+    is open with that page marked. Lessons not yet written for the robot
+    are greyed.
+    """
+    parts = ['<p class="map-title">Stages</p>']
+    for stage in view:
+        overview = f'stage-{stage["id"]}.html'
+        project = stage['project']
+        mine = {overview, f'project-{stage["id"]}.html'}
+        items = [f'<li>{map_link(overview, "Overview", current)}</li>']
+        for lesson in stage['lessons']:
+            href = f'lesson-{lesson["id"]}.html'
+            mine.add(href)
+            planned = ' class="planned"' if lesson.get('status') == 'planned' else ''
+            items.append(f'<li{planned}>' + map_link(
+                href, esc(lesson['title']), current, lesson['position'],
+                planned_mark(lesson)) + '</li>')
+        kind = 'proj planned' if project.get('status') == 'planned' else 'proj'
+        items.append(f'<li class="{kind}">' + map_link(
+            f'project-{stage["id"]}.html', 'Project: ' + esc(project['title']),
+            current, '&#9670;', planned_mark(project)) + '</li>')
+        parts.append(fold(esc(stage['title']), '<ol>' + ''.join(items) + '</ol>',
+                          current in mine, stage['number']))
+    return ''.join(parts)
+
+
 def course_nav(robot, view, current, ready_total):
     """
     The course map down the side of every page of one robot's course.
@@ -1651,25 +1823,7 @@ def course_nav(robot, view, current, ready_total):
     else:
         parts.append(f'<p class="sub">{len(view)} stages &middot; {total} lessons</p>')
 
-    parts.append('<p class="map-title">Stages</p>')
-    for stage in view:
-        overview = f'stage-{stage["id"]}.html'
-        project = stage['project']
-        mine = {overview, f'project-{stage["id"]}.html'}
-        items = [f'<li>{map_link(overview, "Overview", current)}</li>']
-        for lesson in stage['lessons']:
-            href = f'lesson-{lesson["id"]}.html'
-            mine.add(href)
-            planned = ' class="planned"' if lesson.get('status') == 'planned' else ''
-            items.append(f'<li{planned}>' + map_link(
-                href, esc(lesson['title']), current, lesson['position'],
-                planned_mark(lesson)) + '</li>')
-        kind = 'proj planned' if project.get('status') == 'planned' else 'proj'
-        items.append(f'<li class="{kind}">' + map_link(
-            f'project-{stage["id"]}.html', 'Project: ' + esc(project['title']),
-            current, '&#9670;', planned_mark(project)) + '</li>')
-        parts.append(fold(esc(stage['title']), '<ol>' + ''.join(items) + '</ol>',
-                          current in mine, stage['number']))
+    parts.append(stages_nav(view, current))
 
     parts.append('<p class="map-title">Look things up</p><ul class="flat">')
     for href, label in (('tags/index.html', 'Topics'), ('glossary.html', 'Glossary'),
@@ -1680,6 +1834,34 @@ def course_nav(robot, view, current, ready_total):
             link = link.replace('<a ', '<a aria-current="true" ', 1)
         parts.append(f'<li>{link}</li>')
     parts.append('</ul>')
+    return ''.join(parts)
+
+
+def chooser_nav(robots, counts, ref, ref_view):
+    """
+    The map on the front page, before a robot is chosen: the same map as
+    inside a course, its top box a choice of robot instead of the robot.
+
+    A lesson needs a robot to open on. Until one is chosen it is the
+    reference robot, whose text every lesson's is by default -- and the
+    map says so, so nobody lands on the Arm 1 by surprise.
+    """
+    parts = ['<a class="home" href="index.html" aria-current="page">Choose your robot</a>',
+             '<p class="sub">The same course on either arm</p><ul class="pick">']
+    for robot in robots:
+        ready, total = counts[robot['id']]
+        parts.append(
+            f'<li><a href="{robot["id"]}/index.html"><b>{esc(robot["name"])}</b>'
+            f'<span>{ready} of {total} lessons &middot; {esc(robot["price"])}</span>'
+            f'<span class="meter" aria-hidden="true"><span style="width:'
+            f'{round(100 * ready / total) if total else 0}%"></span></span></a></li>')
+    parts.append(f'</ul><p class="sub">Until you choose, lessons open on the '
+                 f'{esc(ref["name"])}.</p>')
+    parts.append(rebase(stages_nav(ref_view, ''), f'{ref["id"]}/'))
+    parts.append('<p class="map-title">Look things up</p><ul class="flat">'
+                 f'<li><a href="{ref["id"]}/tags/index.html">Topics</a></li>'
+                 f'<li><a href="{ref["id"]}/glossary.html">Glossary</a></li>'
+                 '<li><a href="reference.html">Reference docs</a></li></ul>')
     return ''.join(parts)
 
 
@@ -2387,30 +2569,30 @@ def build(root, out, stages, robots, tags):
             body = (f'<div class="frame{" has-toc" if toc else ""}">'
                     f'<aside class="side" aria-label="{label}">{side}</aside>'
                     f'<main>{body}</main>{toc}</div>')
-            toggle = '<input type="checkbox" id="menu" class="vh">'
+            # autocomplete=off: or Back would restore it ticked, the map open.
+            toggle = '<input type="checkbox" id="menu" class="vh" autocomplete="off">'
             menu = ('<label class="menu-btn" for="menu"><i aria-hidden="true"></i>'
                     '<span class="open">Menu</span><span class="shut">Close</span></label>')
             wide = ' wide'
         else:
             body = f'<main>{body}</main>'
+        # nav.js sits at the site root, beside the front page `home` names.
+        script = home[:-len('index.html')] + 'nav.js'
         return PAGE.format(title=esc(title), style=STYLE, meta=meta, body=body,
                            home=home, picker=picker, mark=MARK, tabs=tabs,
-                           toggle=toggle, menu=menu, wide=wide)
+                           toggle=toggle, menu=menu, wide=wide, script=script)
 
     written = [source.name for source in sorted(docs.glob('*.md'))]
     groups = reference_groups(docs, written)
     order = [(name, label, heading) for heading, items in groups for name, label in items]
 
-    def shared(name, title, body, active='reference', side=True):
+    def shared(name, title, body, side=None, active='reference', label='Reference'):
         # The pages every robot shares, at the top level: the reference and
-        # the front page. Their map is the reference's.
-        toc = ''
-        if side:
-            body, toc = outline(body)
+        # the front page. A reference page's map is the reference's.
+        body, toc = outline(body)
         (out / name).write_text(page(
             title, body, tabs=tabs_html(active, 'index.html', 'reference.html'),
-            side=reference_nav(groups, robots, name) if side else '',
-            label='Reference', toc=toc))
+            side=side or reference_nav(groups, robots, name), label=label, toc=toc))
 
     for position, (name, label, _) in enumerate(order):
         html = rewrite_links(render((docs / name).read_text()))
@@ -2495,8 +2677,10 @@ def build(root, out, stages, robots, tags):
         path.write_text(REDIRECT.format(target=f'{up}{ref["id"]}/{name}'))
 
     shared('index.html', 'Pick your robot', chooser_html(robots, counts, docs, groups),
-           active='course', side=False)
+           side=chooser_nav(robots, counts, ref, views[ref['id']]),
+           active='course', label='Course map')
     (out / 'robots.txt').write_text('User-agent: *\nDisallow: /\n')
+    (out / 'nav.js').write_text(NAV_JS)
     return len(list(out.rglob('*.html')))
 
 

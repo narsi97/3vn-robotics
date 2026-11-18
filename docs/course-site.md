@@ -129,7 +129,7 @@ the appendix, rather than the other way round.
 
 The site is two things, and the header names them: **Course**, which
 you follow in order, and **Reference**, which you look things up in.
-Every page except the front page sits in a frame of three columns:
+Every page sits in a frame of three columns:
 
 - **A map down the left.** On a course page it is that robot's course:
   every stage folds, the stage this page belongs to is open, and this
@@ -138,7 +138,11 @@ Every page except the front page sits in a frame of three columns:
   the robot, and the reference. On a reference page the map is the
   reference itself, in the reading order of `CURRICULUM` in
   `scripts/build_site.py`, then any doc it does not name, then the
-  decisions, with links back to each robot's course.
+  decisions, with links back to each robot's course. On the front
+  page, before a robot is chosen, the map is the course's, its top box
+  a choice of robot instead of the robot. A lesson needs a robot to
+  open on; until one is chosen it is the reference robot, the Arm 1,
+  and the map says so.
 - **The page.** Reference pages now carry what lessons always had: a
   breadcrumb above (`Reference / The system`) and previous/next below,
   in the map's order. `reference.html` is the reference's own index;
@@ -152,7 +156,24 @@ Below 1240 px wide the outline is dropped; below 900 px the map folds
 behind a **Menu** button. Opening a panel without a script takes a
 checkbox and its label, so that is what the button is: the checkbox is
 visually hidden but focusable, and the label shows its focus ring.
-Everything is links and `<details>`, so it all works under the CSP.
+
+**The header never moves.** It is the same width on every page, and
+every control in it (tabs, robot, Menu) is `--control` tall, so moving
+between pages that have a robot picker and pages that do not changes
+nothing above the page. Below 900 px it is two fixed rows, brand and
+Menu, then tabs and robot; a page without one leaves its cell empty.
+
+**The tabs remember.** Leave a lesson for the reference and come back
+by the Course tab, and you land on that lesson, where you stopped
+reading; the same the other way. The open tab still goes to its half's
+front page. That needs memory, so it is the site's one script,
+`nav.js` (`NAV_JS` in the generator), and `sessionStorage`, so it lasts
+as long as the browser tab. Because the header does not follow the
+page, a reader scrolls back up to reach the tabs, so where the page is
+when it is left means nothing: what is kept is where the reader last
+stopped scrolling, anywhere below the top 300 px. Back, forward and
+reload keep the spot; any other way into a page starts at its top.
+Without the script, the tabs are plain links to each half's front page.
 
 Tiers are **shown, not enforced**. The lock badge and the price are
 visible; nothing checks them. There are no accounts and no payment, so
@@ -172,10 +193,14 @@ It sits behind the shared 3VNSYSTEMS Caddy, at a public path,
   public, and it may live at a bare domain tomorrow. Per
   `projects-for-businesses/README.md`, each move is meant to be a config
   change rather than a rewrite, so nothing may hardcode the prefix.
-- **No JavaScript at all.** The enforced CSP is
+- **Nothing needs JavaScript.** The enforced CSP is
   `script-src 'self'` with no `'unsafe-inline'`, so an inline `<script>`
-  would be blocked. Styles are inline because `style-src` does permit
-  `'unsafe-inline'`. A reading site needs no script anyway.
+  would be blocked, and a file served beside the pages is not. The one
+  such file, `nav.js`, only makes the tabs remember (above); everything
+  else is links, `<details>` and one checkbox, and works with it
+  blocked. Styles are inline because `style-src` does permit
+  `'unsafe-inline'`. The server sends `nosniff`, so the file must keep
+  arriving as JavaScript: nginx's own MIME types do that.
 - **Two themes, no switch.** Paper by day and blueprint by night,
   following the reader's system setting through `prefers-color-scheme`;
   a switch would need a script. The accents are the three strokes of the
