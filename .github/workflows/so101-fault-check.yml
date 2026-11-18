@@ -1,0 +1,53 @@
+# TEMPORARY: one-off check for the "Integration tests without physics"
+# lesson. Runs the ROS integration layer for the SO-101 twice: as shipped,
+# then with enforce_command_limits set to false. Delete with the branch.
+name: SO-101 fault check
+
+on:
+  push:
+    branches: [claude/so101-fault-check]
+  workflow_dispatch:
+
+jobs:
+  fault:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch the SO-101 description
+        run: ./scripts/fetch_so101.sh
+      - name: Build the CI image
+        run: docker build --file docker/Dockerfile --target ci --tag threevn-robotics-ci:local .
+      - name: Start the container
+        run: |
+          docker run -d --name ros --init --shm-size 1g \
+            -e ROS_DOMAIN_ID=42 -e ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST \
+            -e RMW_IMPLEMENTATION=rmw_fastrtps_cpp \
+            -e FASTRTPS_DEFAULT_PROFILES_FILE=/etc/threevn/fastdds.xml \
+            -v "$PWD/docker/fastdds-udp-only.xml:/etc/threevn/fastdds.xml:ro" \
+            -v "$PWD/src:/ws/src" -v "$PWD/scripts:/ws/scripts:ro" \
+            -v "$PWD/vendor:/ws/vendor:ro" -v "$PWD/firmware:/ws/firmware:ro" \
+            -v "$PWD/VERSION:/ws/VERSION:ro" -v "$PWD/cad:/ws/cad" -w /ws \
+            threevn-robotics-ci:local sleep infinity
+          docker exec ros bash -lc 'source /opt/ros/jazzy/setup.bash && colcon build --symlink-install --event-handlers console_direct+'
+      - name: "Run 1: clamp on (as shipped)"
+        continue-on-error: true
+        run: |
+          grep -n "enforce_command_limits" src/threevn_bringup/config/so101_controllers.yaml
+          docker exec ros bash -lc 'source /opt/ros/jazzy/setup.bash && source /ws/install/setup.bash && cd /ws/src/threevn_bringup && THREEVN_PROFILE=so101_follower THREEVN_TARGET=mock python3 -m pytest test -m ros -v -rs' 2>&1 | tee run1.txt
+          exit ${PIPESTATUS[0]}
+      - name: "Run 2: the fault (enforce_command_limits: false)"
+        continue-on-error: true
+        run: |
+          sed -i 's/enforce_command_limits: true/enforce_command_limits: false/' src/threevn_bringup/config/so101_controllers.yaml
+          grep -n "enforce_command_limits" src/threevn_bringup/config/so101_controllers.yaml
+          docker exec ros bash -lc 'source /opt/ros/jazzy/setup.bash && source /ws/install/setup.bash && cd /ws/src/threevn_bringup && THREEVN_PROFILE=so101_follower THREEVN_TARGET=mock python3 -m pytest test -m ros -v -rs' 2>&1 | tee run2.txt
+          exit ${PIPESTATUS[0]}
+      - name: Summary
+        if: always()
+        run: |
+          for f in run1.txt run2.txt; do echo "== $f"; grep -E "PASSED|FAILED|SKIPPED|ERROR|passed|failed" $f || true; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: so101-fault-logs
+          path: run*.txt
