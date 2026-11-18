@@ -274,6 +274,7 @@ lessons:
       - docker.md
 
   - id: fast-tests-or-no-tests
+    scope: any
     title: A test suite people actually run
     tags: [testing, ros2]
     builds_on: [inside-the-container]

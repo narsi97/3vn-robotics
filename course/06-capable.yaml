@@ -1061,6 +1061,7 @@ lessons:
       - mlops.md
 
   - id: somebody-elses-robot
+    scope: any
     title: Somebody else's robot
     tags: [architecture, ros2, motion]
     builds_on: [the-seam, solve-the-arm]

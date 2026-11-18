@@ -335,6 +335,30 @@ lessons:
     tags: [ros2, architecture]
     builds_on: [drive-it]
     minutes: 40
+    flavors:
+      so101:
+        note: >-
+          Start it with `make so101` where the lesson says `make play`. The
+          SO-101 has no mobile base, so the base's velocity topic in the
+          table above does not exist on it.
+        steps:
+          - do: With `make so101` running, open a shell and list what is running.
+            run: |
+              make shell
+              ros2 node list
+              ros2 topic list -t
+          - do: Read one joint state message, then measure the rate.
+            run: |
+              ros2 topic echo /joint_states --once
+              ros2 topic hz /joint_states
+            expect: >-
+              Names, positions and velocities for `shoulder_pan` through
+              `wrist_roll` and the `gripper`; then a rate well below the
+              configured 50 Hz, roughly 50 times the real-time factor,
+              because the controllers run on simulated time. Ctrl-C to stop.
+          - do: List the long-running interfaces.
+            run: ros2 action list -t
+            expect: The arm's trajectory action and the gripper's command action.
     objective: Choose the right ROS 2 communication primitive, and inspect each on a live robot.
     body: |
       You know message buses, RPC and job queues. ROS 2 gives you three
@@ -454,6 +478,20 @@ lessons:
     tags: [simulation, ros2]
     builds_on: [headless-by-default]
     minutes: 30
+    flavors:
+      so101:
+        steps:
+          - do: With `make so101` running, sample the real-time factor five times.
+            run: |
+              make shell
+              gz topic -e -t /world/empty_bench/stats -n 5 | grep real_time_factor
+            expect: >-
+              Five numbers. The SO-101 runs in the same `empty_bench` world
+              as the 3VN arm on its own.
+          - do: Read the docstring that records the bug, and the polling loop that fixed it.
+            run: grep -n -A28 "def step" src/threevn_control/threevn_control/scenarios/base.py
+          - do: Find the client's simulated-time wait.
+            run: grep -n -A25 "def _wait" src/threevn_control/threevn_control/robot_client.py
     objective: Keep simulation time and wall time apart, and measure the real-time factor honestly.
     body: |
       A simulator keeps its own clock. When physics is fast, simulated time
@@ -663,6 +701,37 @@ lessons:
     tags: [testing, simulation]
     builds_on: [one-goal-two-backends]
     minutes: 35
+    flavors:
+      so101:
+        steps:
+          - do: List the scenarios.
+            run: |
+              make shell
+              ros2 run threevn_control run_scenario --list
+          - do: Start the SO-101 on mock hardware, then run every scenario against it from another terminal.
+            run: |
+              make mock PROFILE=so101_follower
+              make scenario NAME=all
+            expect: A report per scenario, each step with a time, each ending `PASS`.
+          - do: Stop it, start the SO-101 in Gazebo, and run the same set.
+            run: |
+              make stop
+              make so101
+              make scenario NAME=all
+          - do: >-
+              Read the gripper scenario. It was written on the 3VN arm's two
+              fingers; notice that it names no joint and no width, which is
+              why it passes on the SO-101's single jaw.
+            run: grep -n -A50 "class Gripper" src/threevn_control/threevn_control/scenarios/arm.py
+        # The 3VN arm's other pitfall is its mimic finger; the jaw has none.
+        pitfalls:
+          - symptom: 'A step fails with "post-condition not met within 15s".'
+            cause: >-
+              Either the step is genuinely wrong, or the simulator is running so
+              slowly that the motion has not finished.
+            fix: >-
+              Check the real-time factor first. If it is reasonable, the step is
+              telling you the truth.
     objective: Run scenarios that serve as tests and demos at once, against either backend.
     body: |
       A **scenario** is a named sequence of steps. Each step does something
