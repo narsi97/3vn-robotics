@@ -125,6 +125,35 @@ The project's documentation is still rendered, underneath, as reference
 that lessons link into. The course is the front page and the docs are
 the appendix, rather than the other way round.
 
+## Finding your way around
+
+The site is two things, and the header names them: **Course**, which
+you follow in order, and **Reference**, which you look things up in.
+Every page except the front page sits in a frame of three columns:
+
+- **A map down the left.** On a course page it is that robot's course:
+  every stage folds, the stage this page belongs to is open, and this
+  page is marked. Lessons not yet written for the robot are greyed (a
+  screen reader hears "planned"). Under the stages: topics, glossary,
+  the robot, and the reference. On a reference page the map is the
+  reference itself, in the reading order of `CURRICULUM` in
+  `scripts/build_site.py`, then any doc it does not name, then the
+  decisions, with links back to each robot's course.
+- **The page.** Reference pages now carry what lessons always had: a
+  breadcrumb above (`Reference / The system`) and previous/next below,
+  in the map's order. `reference.html` is the reference's own index;
+  `docs/reference.md` would collide with it, so `make course-check`
+  refuses one.
+- **"On this page" on the right**, built from the page's `<h2>`s, when
+  it has three or more. Lesson sections get their ids here; docs keep
+  the ones markdown gives them.
+
+Below 1240 px wide the outline is dropped; below 900 px the map folds
+behind a **Menu** button. Opening a panel without a script takes a
+checkbox and its label, so that is what the button is: the checkbox is
+visually hidden but focusable, and the label shows its focus ring.
+Everything is links and `<details>`, so it all works under the CSP.
+
 Tiers are **shown, not enforced**. The lock badge and the price are
 visible; nothing checks them. There are no accounts and no payment, so
 anyone with the link reads everything.
