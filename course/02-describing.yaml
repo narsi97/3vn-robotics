@@ -24,6 +24,97 @@ lessons:
     title: A robot is a tree
     tags: [ros2]
     minutes: 30
+    flavors:
+      so101:
+        note: >-
+          the tables above are the 3VN arm's. The SO-101 has five revolute
+          arm joints, `shoulder_pan`, `shoulder_lift`, `elbow_flex`,
+          `wrist_flex` and `wrist_roll`, and a `gripper` that is revolute
+          too: one jaw swings against a fixed one, so its positions are
+          radians, not millimetres, and there is no mimic joint. Its root is
+          `world`, which upstream's file does not have. This project adds it
+          because an unclamped 632 g arm topples the first time a joint
+          moves, and a real SO-101 is clamped to a bench.
+        steps:
+          - do: Print the expanded description and look at its shape.
+            run: make urdf PROFILE=so101_follower 2>/dev/null | head -80
+            expect: >-
+              `world`, the fixed joint that clamps `base_link` to it, then
+              `<link>` blocks whose visuals are upstream's meshes and whose
+              collisions are plain boxes.
+          - do: List every joint and its type.
+            run: make urdf PROFILE=so101_follower 2>/dev/null | grep '<joint name=.*type='
+            expect: >-
+              Six `revolute` joints and two `fixed` ones:
+              `world_to_base_link`, and `gripper_frame_joint` for the tool
+              frame.
+          - do: Read every joint's axis.
+            run: make urdf PROFILE=so101_follower 2>/dev/null | grep '<axis'
+            expect: >-
+              `0 0 1` for all six moving joints, and `0 0 0` for the fixed
+              one. They do not all turn the same way: an axis is written in
+              the joint's own frame, and each joint's `<origin rpy=...>`
+              rotates that frame first.
+          - do: Read the limits, in radians.
+            run: make urdf PROFILE=so101_follower 2>/dev/null | grep -B6 '<limit' | grep -E 'joint name|<limit'
+            expect: >-
+              From the jaw back to the base: `gripper` −0.17 to 1.75 (−10° to
+              +100°), `wrist_roll` −2.74 to 2.84, `wrist_flex` ±1.66,
+              `elbow_flex` ±1.69, `shoulder_lift` ±1.75, `shoulder_pan`
+              ±1.92.
+          - do: >-
+              Look at it. Start the viewer, then open
+              **http://localhost:8106/vnc.html** in a browser.
+            run: make view PROFILE=so101_follower
+            expect: RViz with upstream's meshes, and a window of six joint sliders.
+          - do: >-
+              Before dragging each slider, predict which way the arm will
+              move. Then drag it. Start with `shoulder_pan`: does a positive
+              value swing the arm to its left or to its right?
+            expect: >-
+              Positive `shoulder_pan` swings it to its right, toward negative
+              y. That joint's origin is rotated half a turn, so its `0 0 1`
+              axis points down. Every slider stops at its limit.
+        checkpoint: >-
+          You can name each of the SO-101's joints with its type and range,
+          and predict which way it moves before you drag its slider.
+        pitfalls:
+          - symptom: The browser page stays on "Connecting" or is blank.
+            cause: The container is not running, or another process holds port 8106.
+            fix: >-
+              `make up`, then check the port with
+              `lsof -nP -iTCP:8106 -sTCP:LISTEN`.
+          - symptom: '`make urdf PROFILE=so101_follower` prints nothing, or fails on a missing `so101.urdf`.'
+            cause: The upstream description has not been fetched. It is not committed to this repository.
+            fix: Run `make so101-fetch` once.
+        quiz:
+          - q: Every moving joint's axis is `0 0 1`. How can they turn in different directions?
+            a: >-
+              The axis is expressed in the joint's own frame, and the
+              joint's origin rotates that frame relative to the parent
+              link. The direction of motion is the axis and the origin
+              together; neither alone tells you.
+          - q: The SO-101's gripper has one actuated joint and no mimic. Why does it not need one?
+            a: >-
+              Only one jaw moves. It swings against a jaw that is part of the
+              gripper link, so there is no second part to copy the first.
+          - q: Why does this project add a `world` link that the upstream file does not have?
+            a: >-
+              Without it `base_link` is a free body, and a simulated arm with
+              nothing holding it down topples as soon as a joint moves. The
+              fixed joint is the bench clamp.
+        exercise:
+          task: >-
+            From the `make urdf PROFILE=so101_follower` output alone, sketch
+            the chain from `world` to `gripper_frame_link`. Then check it
+            against the running robot: with `make view PROFILE=so101_follower`
+            up, open `make shell` and run
+            `ros2 run tf2_ros tf2_echo base_link gripper_frame_link`. Move
+            `shoulder_lift` and watch the numbers change.
+        read:
+          - hardware.md
+          - ros2.md
+          - so101.md
     objective: Read a robot description as links and joints, and predict how each joint moves.
     body: |
       A robot description — URDF, the Unified Robot Description Format — is
@@ -141,6 +232,88 @@ lessons:
     tags: [ros2, architecture]
     builds_on: [links-and-joints]
     minutes: 35
+    flavors:
+      so101:
+        note: >-
+          the rule turns round. The 3VN arm's profile is its single source
+          of physical truth and its URDF is generated from it. The SO-101's
+          kinematic truth is upstream's URDF, fetched unmodified and pinned
+          to one commit, and `so101_follower.yaml` is an overlay: it adds
+          only what a URDF has no place for, such as which joints are the
+          arm, named poses, servo figures and the hardware target. It
+          restates no link length, origin or axis, because a second copy
+          could disagree with the first and nothing would say which was
+          right. The principle is the same: every number has exactly one
+          home.
+        steps:
+          - do: >-
+              Open the overlay and find three things: the list of arm
+              joints, a named pose, and a `provenance` line. Then look for a
+              link length, and notice there is none.
+            run: less src/threevn_robot_description/config/so101_follower.yaml
+          - do: Read the test that keeps it that way.
+            run: grep -n -A15 "def test_it_restates_no_kinematics" src/threevn_robot_description/test/test_so101_profile.py
+            expect: >-
+              Each joint entry may say which servo drives it, its bus id and
+              its calibration, and nothing else. Geometry and limits belong
+              to upstream.
+          - do: Compare upstream's joint origins with the ones that actually run.
+            run: |
+              diff -w <(grep -A1 'type="revolute"' vendor/so101/so101.urdf | grep "<origin") \
+                      <(make urdf PROFILE=so101_follower 2>/dev/null | grep -A1 'type="revolute"' | grep "<origin")
+              echo "exit status: $?"
+            expect: >-
+              No differences and `exit status: 0`. The overlay never moves a
+              joint.
+          - do: Now compare the limits.
+            run: |
+              diff -w <(grep "<limit" vendor/so101/so101.urdf) \
+                      <(make urdf PROFILE=so101_follower 2>/dev/null | grep "<limit")
+            expect: >-
+              Six changed lines, and only `effort` and `velocity` differ.
+              Every `lower` and `upper` is upstream's, untouched. Upstream
+              says how far a joint may go; this project says how hard and how
+              fast its servo can drive it. A later lesson in this stage is
+              about where those two numbers come from.
+        checkpoint: >-
+          You can point to where each kind of number about the SO-101 lives,
+          upstream or overlay, and show from the diffs that the overlay
+          changes what the motors can do and never where the joints are.
+        pitfalls:
+          - symptom: You edited `vendor/so101/so101.urdf` and the change vanished.
+            cause: >-
+              `vendor/` is fetched, not committed, and `make so101-fetch`
+              overwrites it. A test also checks that the overlay never
+              modifies the upstream file.
+            fix: >-
+              Put the change in the overlay if it is something a URDF has no
+              place for. If it is geometry, it belongs upstream: take a newer
+              pinned commit rather than editing a local copy.
+          - symptom: '`PROFILE=` names a new file you just created, and it is not found.'
+            cause: A new file has no installed symlink until the workspace is rebuilt.
+            fix: Run `make build` once after adding a profile.
+        quiz:
+          - q: Why does the SO-101's profile not simply copy upstream's link lengths, so that everything is in one file?
+            a: >-
+              Then there would be two copies of the same geometry, upstream's
+              and ours, and a newer upstream commit could change one without
+              the other. Nothing would say which was right.
+          - q: The overlay changes `effort` and `velocity` but never `lower` and `upper`. Why that split?
+            a: >-
+              Where a joint stops is a fact about the printed parts, which
+              upstream designed. How hard and how fast it can be driven is a
+              fact about the servos and the supply, which upstream left as
+              placeholders.
+        exercise:
+          task: >-
+            Read `scripts/fetch_so101.sh` and its comment on pinning. Suppose
+            upstream renames `elbow_flex` to `elbow` tomorrow. List
+            everything in this repository that would break if the fetch
+            followed upstream's `main`, and say which test would tell you
+            first now that it is pinned.
+        read:
+          - decisions/0005-yaml-single-source.md
+          - so101.md
     objective: Change a robot's dimensions without editing any model file.
     body: |
       The usual way to write a robot description is to type numbers into
@@ -247,6 +420,103 @@ lessons:
     tags: [ros2, testing]
     builds_on: [one-source-of-truth]
     minutes: 25
+    flavors:
+      so101:
+        note: >-
+          this robot reverses the lesson. Its inertias were not computed
+          here: they are upstream's, exported from CAD, and nothing in this
+          project derived them. So the lesson becomes **check a number you
+          did not derive**. The three checks above are the right ones, but
+          the suite runs them only on the 3VN profiles, so on the SO-101 you
+          run them yourself.
+        steps:
+          - do: Look at upstream's inertia tensors.
+            run: make urdf PROFILE=so101_follower 2>/dev/null | grep "<inertia " | head -8
+            expect: >-
+              Non-zero `ixy`, `ixz` and `iyz` on most links. CAD exports a
+              tensor about each link's own frame, not about its principal
+              axes, so the off-diagonal terms are real. The 3VN arm's boxes
+              have zeros there.
+          - do: Confirm this project left them exactly as upstream wrote them.
+            run: |
+              diff -w <(grep "<inertia " vendor/so101/so101.urdf) \
+                      <(make urdf PROFILE=so101_follower 2>/dev/null | grep "<inertia ")
+              echo "exit status: $?"
+            expect: '`exit status: 0`. Every tensor is upstream''s.'
+          - do: Run the three checks on every link, inside the container.
+            run: |
+              make shell
+              ros2 run threevn_robot_description describe so101_follower > /tmp/so101.urdf
+              python3 - <<'PY'
+              import xml.etree.ElementTree as ET
+              import numpy as np
+              total = 0.0
+              for link in ET.parse('/tmp/so101.urdf').getroot().iter('link'):
+                  inertial = link.find('inertial')
+                  if inertial is None:
+                      continue
+                  total += float(inertial.find('mass').get('value'))
+                  i = {k: float(v) for k, v in inertial.find('inertia').attrib.items()}
+                  t = np.array([[i['ixx'], i['ixy'], i['ixz']],
+                                [i['ixy'], i['iyy'], i['iyz']],
+                                [i['ixz'], i['iyz'], i['izz']]])
+                  a, b, c = sorted(np.linalg.eigvalsh(t))
+                  print(f"{link.get('name'):26} positive definite: {a > 0}   triangle: {a + b >= c}")
+              print(f'total mass {total:.3f} kg')
+              PY
+            expect: >-
+              Seven links pass both checks. `gripper_frame_link` fails
+              positive definite: its tensor is all zeros. Total mass
+              0.632 kg.
+          - do: Look at the link that failed.
+            run: grep -n -A8 '<link name="gripper_frame_link"' /tmp/so101.urdf
+            expect: >-
+              A mass of `1e-9` and a zero tensor. It is not a body at all:
+              it is the tool frame, on a fixed joint, and upstream gave it a
+              token inertial block.
+        checkpoint: >-
+          You ran all three checks on upstream's tensors, every real link
+          passed, and you can say why the one failure is a frame rather than
+          a broken body.
+        pitfalls:
+          - symptom: The `python3` step fails on `import numpy`.
+            cause: You ran it on the host rather than inside the container.
+            fix: Run `make shell` first. The container has numpy; your laptop may not.
+          - symptom: A check fails on `gripper_frame_link`, and the obvious fix is to give it a tensor.
+            cause: >-
+              The check assumes every link is a body, and this one is a
+              frame. Gazebo folds links on fixed joints into their parent, so
+              its token mass does nothing there. A tensor typed in to make
+              the check pass would be a number nobody derived.
+            fix: >-
+              Leave upstream's file alone. Teach the check to skip massless
+              frames, and write the reason into the test.
+        quiz:
+          - q: Why can you not check upstream's `upper_arm_link` by hand the way the lesson checks a box?
+            a: >-
+              It is a printed part with a servo inside, not a box. Its tensor
+              came from integrating a CAD model, and there is no closed form
+              to compare against. What you can check is that it describes a
+              possible body.
+          - q: '`gripper_frame_link` fails "positive definite". Is that a bug?'
+            a: >-
+              Not in the simulation: it is a massless frame on a fixed joint,
+              and Gazebo folds it into its parent. It is a finding about the
+              check, which assumes every link is a body.
+        exercise:
+          task: >-
+            The suite's inertia tests are parametrised over the 3VN
+            profiles only. Write down what it would take to run them on the
+            SO-101 too: which fixture would describe it, what the tests
+            should do with a massless frame, and whether a `min_inertia`
+            floor even makes sense for numbers this project did not choose.
+          hint: >-
+            Look at `ALL_PROFILES` in `src/threevn_robot_description/test/conftest.py`,
+            and at how `test_so101_profile.py` skips when the description has
+            not been fetched.
+        read:
+          - testing.md
+          - so101.md
     objective: Understand why inertia tensors are generated, never written, and check one by hand.
     body: |
       An inertia tensor describes how a body's mass is distributed — how
@@ -350,6 +620,77 @@ lessons:
     tags: [ros2, motion]
     builds_on: [links-and-joints]
     minutes: 30
+    flavors:
+      so101:
+        note: >-
+          the SO-101 has none of the three frames by those names, and that is
+          worth noticing. Its root is `world`, clamped to `base_link` by a
+          fixed joint, because the arm is bolted to a bench and has no base
+          to drive. Its tool frame is upstream's `gripper_frame_link`, at the
+          tip of the fixed jaw, rather than `tool0`. And it has no camera
+          frame yet, because this description has no camera. The ideas carry
+          over unchanged: one writer to TF, and a tool frame named once, in
+          the profile, so nothing else hard-codes it.
+        steps:
+          - do: Start the viewer, and open **http://localhost:8106/vnc.html**.
+            run: make view PROFILE=so101_follower
+          - do: Find where the tool frame and the base frame are named.
+            run: grep -n -E "base_frame|tool_frame" src/threevn_robot_description/config/so101_follower.yaml
+            expect: >-
+              `base_frame: base_link` and `tool_frame: gripper_frame_link`.
+              The scenarios and the robot client read these instead of
+              typing a frame name.
+          - do: In a second terminal, confirm the root of the tree.
+            run: |
+              make shell
+              ros2 run tf2_ros tf2_echo world base_link
+            expect: >-
+              Zero translation and zero rotation. This transform is the bench
+              clamp, and it is the same on every target.
+          - do: Read where the tool is, then move `shoulder_pan` in the slider window and read it again.
+            run: ros2 run tf2_ros tf2_echo base_link gripper_frame_link
+            expect: >-
+              With every slider at zero, the jaw tip about 0.39 m out along
+              x and 0.23 m up. Drag `shoulder_pan` positive and y goes
+              negative: the arm swings to its right.
+        checkpoint: >-
+          You can read the transform from `world` to `gripper_frame_link` on
+          the running SO-101, and say where its tool frame is named and why
+          nothing else names it.
+        pitfalls:
+          - symptom: '`tf2_echo base_link tool0` waits forever and prints nothing.'
+            cause: The SO-101 has no `tool0`. Its tool frame is upstream's `gripper_frame_link`.
+            fix: Check names against `make urdf PROFILE=so101_follower | grep "<link name="`.
+          - symptom: '`tf2_echo` waits forever for any pair of frames.'
+            cause: Nothing is publishing TF, because the viewer is not running.
+            fix: Keep `make view PROFILE=so101_follower` running in the first terminal.
+        quiz:
+          - q: The SO-101 has no `base_footprint`. Why does it not need one?
+            a: >-
+              `base_footprint` exists so a mobile base can be attached with
+              one joint. The SO-101 is clamped to a bench, so its root is
+              `world` and the clamp is that one joint.
+          - q: Why is the tool frame named in the profile rather than written into the scenarios as `gripper_frame_link`?
+            a: >-
+              The same scenarios drive the 3VN arm, whose tool frame has a
+              different name. Named once, in each robot's profile, the
+              scenarios work on both and neither robot's name leaks into
+              the other's code.
+        exercise:
+          task: >-
+            The SO-101 will get a wrist camera. Sketch the two frames it
+            needs, `camera_link` and `camera_optical_frame`, with the fixed
+            rotation between them. Then decide where they should live. The
+            overlay restates no geometry, and a camera mount is geometry that
+            upstream did not design. What does that leave?
+          hint: >-
+            Upstream published a wrist-camera variant of its URDF in
+            September 2026. Compare pinning a different upstream file with
+            adding a mount to the overlay.
+        read:
+          - architecture.md
+          - perception.md
+          - so101.md
     objective: Place the frames later phases assume, and read any transform between them on a live robot.
     body: |
       Every link carries a coordinate frame, and ROS keeps them all in one
@@ -453,6 +794,65 @@ lessons:
     tags: [ros2, testing]
     builds_on: [fast-tests-or-no-tests]
     minutes: 30
+    flavors:
+      so101:
+        note: >-
+          the SO-101 is not in either automatic check yet. `make lint` runs
+          `check_urdf` on every profile named `threevn_*.yaml`, and the
+          duplicate-name test is parametrised over the same set, so the
+          SO-101's overlay is skipped by both. Here you run the second parser
+          by hand, and look at the gap honestly. The SO-101 does keep the
+          other principle: its tests and its launch files get the
+          description from the same function, `describe()`.
+        steps:
+          - do: See why the automatic check skips this robot.
+            run: grep -n "threevn_\*" scripts/check_description.sh
+            expect: >-
+              The loop globs `threevn_*.yaml`. The SO-101's profile is named
+              so that it does not match, because its description is not
+              built from this project's xacro.
+          - do: Run the C++ parser on all three of the SO-101's targets, inside the container.
+            run: |
+              make shell
+              for t in mock gz feetech; do
+                ros2 run threevn_robot_description describe so101_follower --target $t > /tmp/so101_$t.urdf
+                check_urdf /tmp/so101_$t.urdf > /dev/null && echo "ok    $t" || echo "FAIL  $t"
+              done
+            expect: '`ok` for `mock`, `gz` and `feetech`.'
+          - do: Check for duplicate link names in the raw XML, the way the 3VN arm's test does.
+            run: grep -o '<link name="[^"]*"' /tmp/so101_gz.urdf | sort | uniq -d
+            expect: >-
+              No output: no name appears twice. A parsed model could not have
+              told you, because it keeps only one link per name.
+          - do: Confirm the launch files and the tests describe the robot the same way.
+            run: grep -n "describe(" src/threevn_robot_description/launch/view_robot.launch.py src/threevn_sim/launch/sim.launch.py src/threevn_bringup/launch/robot.launch.py
+            expect: >-
+              The viewer, the simulator and the real-hardware launch all call
+              `describe()`. The SO-101's tests call the same function, so
+              they check the description that actually runs.
+        checkpoint: >-
+          `check_urdf` accepts the SO-101 on all three targets, no link name
+          is duplicated, and you can say which automatic checks do not cover
+          this robot yet and why.
+        pitfalls:
+          - symptom: '`make lint` passes and you assume the SO-101 was checked.'
+            cause: The script globs `threevn_*.yaml`, and a green run only covers what it ran.
+            fix: Read the per-profile lines it prints. The SO-101 is not among them until the script learns about vendor arms.
+          - symptom: '`describe` fails, and every `check_urdf` line says `FAIL`.'
+            cause: The upstream description has not been fetched into `vendor/`, so there was nothing to check.
+            fix: Run `make so101-fetch` on the host, then try again.
+        exercise:
+          task: >-
+            Sketch the change that would put the SO-101 into `make lint`:
+            how `check_description.sh` should find vendor arms, which targets
+            it should expand for each, and what it should do when the upstream
+            description has not been fetched, as on a fresh CI runner.
+          hint: >-
+            `describe.py` has a `targets()` function, and `test_so101_profile.py`
+            shows one way to handle a missing description without hiding it.
+        read:
+          - testing.md
+          - so101.md
     objective: Check a description with independent tools, and know which bugs only raw XML reveals.
     body: |
       The description is checked by two parsers written by different people
@@ -535,6 +935,93 @@ lessons:
     tags: [ros2, hardware, safety]
     builds_on: [links-and-joints]
     minutes: 25
+    flavors:
+      so101:
+        note: >-
+          the servos are six Feetech STS3215s rather than MG996Rs and an
+          SG90, and the story is sharper. Upstream's URDF declares
+          `effort="10"` and `velocity="10"` on every joint. Those are
+          placeholders: 10 N·m is about five times what an STS3215 stalls
+          at. Left alone, the simulated arm would lift what the real one
+          cannot. So the overlay replaces both from the datasheet, derated
+          because the official bill of materials runs these 7.4 V servos
+          from a 5 V supply. That derating is an estimate, and the first
+          session on the physical arm is planned to measure it.
+        steps:
+          - do: Read the datasheet block.
+            run: grep -n -A14 "^servos:" src/threevn_robot_description/config/so101_follower.yaml
+            expect: >-
+              `stall_torque_nm: 1.912` and `no_load_speed_rads: 4.712`, with
+              `provenance: datasheet` and a comment on why sellers disagree.
+          - do: Read the derating, and work out the two limits by hand.
+            run: grep -n -A7 "^limit_derate:" src/threevn_robot_description/config/so101_follower.yaml
+            expect: >-
+              `effort: 0.68` and `velocity: 0.37`. So 1.912 × 0.68 and
+              4.712 × 0.37. Write both answers down.
+          - do: Compare upstream's limits with the ones that run.
+            run: |
+              grep -m1 "<limit" vendor/so101/so101.urdf
+              make urdf PROFILE=so101_follower 2>/dev/null | grep -m1 "<limit"
+            expect: >-
+              `effort="10" velocity="10"` upstream, then `effort="1.3002"
+              velocity="1.7434"`: your two answers, rounded. The position
+              limits are the same on both lines.
+          - do: >-
+              Break it. In `so101_follower.yaml`, raise
+              `limit_derate.effort` to `1.2` and run the suite.
+            run: make test
+            expect: >-
+              `test_limits_never_exceed_what_the_servo_can_deliver` fails,
+              and so does `test_upstreams_placeholder_limits_are_replaced`.
+              The first is the rule; the second notices that the limit is
+              climbing back toward upstream's placeholder.
+          - do: Revert, and confirm green.
+            run: |
+              git checkout src/threevn_robot_description/config/so101_follower.yaml
+              make test
+        checkpoint: >-
+          You derived the SO-101's effort and velocity limits by hand, found
+          them in the running description, and watched the suite reject a
+          derating above 1.
+        pitfalls:
+          - symptom: A motion works every time in simulation and stalls on the real arm.
+            cause: The simulated joint was allowed more torque than the real servo has. Upstream's `effort="10"` is exactly this.
+            fix: Derive effort from the datasheet, and let `test_so101_profile.py` hold the line.
+          - symptom: The limits look right but the arm is weaker than predicted on the bench.
+            cause: >-
+              The derating assumes a 5 V supply. A different supply, or a
+              seller's figure for a different voltage, changes the real
+              number.
+            fix: >-
+              Measure it. The servos report their own load, so a bench
+              session can replace `estimated` with `measured`.
+        quiz:
+          - q: Upstream's effort of 10 N·m is too high. Why is that a simulation bug rather than a hardware one?
+            a: >-
+              The real servo simply cannot exceed its stall torque. The
+              simulator can, so it validates motions the arm will never
+              perform.
+          - q: Why is the effort derated by 0.68 when the datasheet already gives a stall torque?
+            a: >-
+              The datasheet figure is for 7.4 V and the official build
+              supplies 5 V. Torque falls roughly with voltage, and 5 / 7.4 is
+              about 0.68. It is an estimate until someone measures it.
+        exercise:
+          task: >-
+            Estimate the torque `shoulder_lift` needs to hold the arm
+            straight out horizontally. Use the masses in the description
+            (`make urdf PROFILE=so101_follower | grep "<mass"`) and the joint
+            origins for the link lengths. Compare it to the 1.30 N·m the
+            joint is allowed. Then add a 100 g payload at the jaw and do it
+            again. How much headroom is left?
+          hint: >-
+            The upper arm is about 0.116 m from shoulder to elbow and the
+            forearm about 0.135 m from elbow to wrist. Treat each link's mass
+            as sitting at its middle, and put the wrist and gripper masses at
+            the wrist.
+        read:
+          - hardware.md
+          - so101.md
     objective: Derive effort and speed limits from the motors that must deliver them, and prove no joint exceeds them.
     body: |
       A joint's limits are not only *where* it may go. They also say how hard
