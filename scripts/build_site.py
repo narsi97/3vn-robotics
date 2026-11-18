@@ -70,9 +70,12 @@ Three constraints come from where this is served -- behind the shared
   * Every link is RELATIVE. The site lives under /rc-<something>/ today
     and may live at a bare domain tomorrow, and that move is supposed to
     be a config change rather than a rewrite.
-  * No JavaScript at all. The enforced CSP is `script-src 'self'` with
-    no 'unsafe-inline', so an inline <script> is dead on arrival. The
-    answers to self-check questions use <details>, which needs none.
+  * Nothing NEEDS JavaScript. The enforced CSP is `script-src 'self'`
+    with no 'unsafe-inline', so an inline <script> is dead on arrival.
+    Folding (self-check answers, the side map) is <details>; the phone
+    Menu is a checkbox. One same-origin file, nav.js (NAV_JS), makes the
+    Course and Reference tabs remember the page last read in each; with
+    it blocked they are plain links to each half's front page.
     Styles are inline because `style-src` does allow 'unsafe-inline'.
   * Every page carries noindex, and robots.txt disallows everything.
     Unlisted means unlisted; this is obscurity, not security, exactly as
@@ -186,6 +189,7 @@ STYLE = """
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
   --thread: linear-gradient(90deg, #2563eb, #7c3aed 50%, #14b8a6);
   --gutter: 20px;
+  --control: 34px;  /* every control in the header is this tall, so it never moves */
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
@@ -198,7 +202,7 @@ STYLE = """
   }
 }
 * { box-sizing: border-box; }
-html { -webkit-text-size-adjust: 100%; }
+html { -webkit-text-size-adjust: 100%; scrollbar-gutter: stable; }
 body {
   margin: 0; background: var(--bg); color: var(--ink);
   font: 16.5px/1.7 var(--sans);
@@ -221,6 +225,8 @@ code {
   background: var(--sunken); border: 1px solid var(--line); border-radius: 5px;
   padding: .08em .38em; font-size: .84em; font-family: var(--mono);
 }
+/* A long identifier in a sentence breaks rather than widen a phone's page. */
+:not(pre) > code { overflow-wrap: anywhere; }
 pre {
   background: var(--term); color: var(--term-ink); border-radius: 10px;
   border-left: 3px solid var(--teal); padding: 15px 18px; overflow-x: auto;
@@ -513,15 +519,17 @@ h2.stage-head .n { color: var(--dim); font: 600 11.5px var(--mono); letter-spaci
 /* --- the robot picker --- */
 details.picker { margin: 0 0 0 auto; padding: 0 14px; border-radius: 999px;
                  position: relative; max-width: 100%; }
-details.picker > summary { padding: 6px 18px 6px 0; font-weight: 500; font-size: 14px; }
+details.picker > summary { padding: 0 18px 0 0; font-weight: 500; font-size: 14px;
+                           line-height: calc(var(--control) - 2px); white-space: nowrap; }
 details.picker > summary::before { display: none; }
 details.picker > summary::after {
-  content: ""; position: absolute; right: 0; top: 50%; width: 6px; height: 6px;
+  content: ""; position: absolute; right: 3px; top: 50%; width: 6px; height: 6px;
   border-right: 2px solid var(--dim); border-bottom: 2px solid var(--dim);
   transform: translateY(-70%) rotate(45deg); transition: transform .15s;
 }
 details.picker[open] > summary::after { transform: translateY(-30%) rotate(225deg); }
 details.picker > summary span { color: var(--dim); margin-left: 6px; font: 12px var(--mono); }
+details.picker > summary i { font-style: normal; }
 details.picker[open] > summary { border-bottom: 0; margin-bottom: 0; }
 details.picker ul {
   list-style: none; margin: 0; padding: 6px 14px; position: absolute; right: 0;
@@ -535,6 +543,121 @@ details.picker li span { display: block; color: var(--dim); font: 400 12px/1.5 v
 .soon { font: 500 10.5px/1.6 var(--mono); color: var(--warn); text-transform: uppercase;
         letter-spacing: .06em; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--line));
         border-radius: 999px; padding: 0 7px; margin-left: 8px; white-space: nowrap; }
+
+/* --- the frame: course map, page, outline ---
+   Three columns on a wide screen, two on a laptop, one on a phone, where
+   the map folds behind a Menu button. The button is a checkbox's label,
+   because opening a panel without a script takes one. */
+.wrap.wide { max-width: 1380px; }
+nav.tabs { display: flex; gap: 2px; }
+nav.tabs a { display: block; height: var(--control); line-height: var(--control);
+             padding: 0 12px; border-radius: 999px; color: var(--dim);
+             text-decoration: none; font-size: 14.5px; font-weight: 550; }
+nav.tabs a:hover { color: var(--ink); background: var(--sunken); }
+nav.tabs a[aria-current] { color: var(--ink); background: var(--sunken);
+                           box-shadow: inset 0 0 0 1px var(--line); }
+.vh { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+      overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.menu-btn { display: none; align-items: center; gap: 8px; cursor: pointer;
+            border: 1px solid var(--line); border-radius: 999px; padding: 0 13px;
+            height: var(--control);
+            font-size: 14px; font-weight: 550; background: var(--panel); user-select: none; }
+.menu-btn i, .menu-btn i::before, .menu-btn i::after {
+  display: block; width: 14px; height: 2px; background: currentColor; border-radius: 2px; }
+.menu-btn i { position: relative; }
+.menu-btn i::before, .menu-btn i::after { content: ""; position: absolute; left: 0; }
+.menu-btn i::before { top: -5px; }
+.menu-btn i::after { top: 5px; }
+.menu-btn .shut, #menu:checked ~ header .menu-btn .open { display: none; }
+#menu:checked ~ header .menu-btn .shut { display: inline; }
+#menu:focus-visible ~ header .menu-btn { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.frame { display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 0 40px;
+         align-items: start; }
+.frame > main { min-width: 0; max-width: 820px; }
+.side, .toc { position: sticky; top: 16px; max-height: calc(100vh - 32px);
+              overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.side { font-size: 14px; line-height: 1.4; padding: 0 4px 24px 0; }
+.side a { color: var(--ink); text-decoration: none; }
+.side a:hover { color: var(--accent); }
+.side .home { display: block; font: 600 17px/1.3 var(--serif); }
+.side .sub { margin: 3px 0 0; color: var(--dim); font: 11.5px/1.5 var(--mono); }
+.side .meter { margin: 8px 0 0; height: 4px; }
+.side .map-title { margin: 22px 0 6px; font: 600 11px/1.5 var(--mono); color: var(--dim);
+                   text-transform: uppercase; letter-spacing: .12em; }
+.side details { border: 0; border-radius: 0; background: none; padding: 0; margin: 0; }
+.side details > summary { padding: 6px 0 6px 20px; font-weight: 600; font-size: 14px;
+                          display: flex; gap: 8px; align-items: baseline; }
+.side details > summary::before {
+  content: ""; left: 3px; top: 13px; width: 6px; height: 6px; border: 0; border-radius: 0;
+  border-right: 2px solid var(--dim); border-bottom: 2px solid var(--dim);
+  transform: rotate(-45deg); transition: transform .15s;
+}
+.side details[open] > summary::before { transform: rotate(45deg); top: 11px; }
+.side details[open] > summary { border-bottom: 0; margin-bottom: 0; }
+.side summary:hover { color: var(--accent); }
+.side summary.here { color: var(--violet); }
+.side .sn { flex: none; font: 600 11px/1 var(--mono); color: var(--dim); min-width: 1.2em; }
+.side summary.here .sn { color: var(--violet); }
+.side ol, .side ul { list-style: none; margin: 2px 0 8px 9px; padding: 0;
+                     border-left: 1px solid var(--line); }
+.side li a { display: flex; gap: 8px; padding: 4px 6px 4px 12px; margin-left: -1px;
+             border-left: 2px solid transparent; border-radius: 0 6px 6px 0; }
+.side li a .n { flex: none; min-width: 1.3em; color: var(--dim); font: 11px/1.75 var(--mono); }
+.side li a[aria-current] {
+  border-left-color: var(--violet); color: var(--violet); font-weight: 600;
+  background: color-mix(in srgb, var(--violet) 9%, transparent);
+}
+.side li a[aria-current] .n { color: var(--violet); }
+.side li.planned a { color: color-mix(in srgb, var(--dim) 75%, var(--bg)); }
+.side li.planned a[aria-current] { color: var(--violet); }
+.side li.proj .n { color: var(--warn); }
+.side ul.pick { border-left: 0; margin: 10px 0 0; display: grid; gap: 6px; }
+.side ul.pick a { display: block; margin: 0; padding: 9px 12px; border: 1px solid var(--line);
+                  border-radius: 10px; background: var(--panel); }
+.side ul.pick a:hover { border-color: var(--accent); }
+.side ul.pick b { display: block; font: 600 15px/1.3 var(--serif); }
+.side ul.pick span { display: block; color: var(--dim); font: 11px/1.5 var(--mono); }
+.side ul.pick .meter { margin: 6px 0 0; height: 4px; }
+.side ul.pick .meter span { height: 100%; }
+.side ul.pick + .sub { margin-top: 10px; }
+.side ul.flat { border-left: 0; margin-left: 0; }
+.side ul.flat a { padding-left: 0; border-left: 0; }
+.side ul.flat a[aria-current] { background: none; }
+
+.toc { display: none; font-size: 13.5px; line-height: 1.4; }
+.toc b { display: block; margin: 0 0 8px; font: 600 11px/1.5 var(--mono); color: var(--dim);
+         text-transform: uppercase; letter-spacing: .12em; }
+.toc ul { list-style: none; margin: 0; padding: 0; border-left: 1px solid var(--line); }
+.toc a { display: block; padding: 4px 0 4px 12px; color: var(--dim); text-decoration: none; }
+.toc a:hover { color: var(--accent); }
+h2[id] { scroll-margin-top: 16px; }
+
+@media (min-width: 1240px) {
+  .frame { grid-template-columns: 252px minmax(0, 1fr); gap: 0 52px; }
+  .frame.has-toc { grid-template-columns: 252px minmax(0, 1fr) 188px; }
+  .toc { display: block; }
+}
+@media (max-width: 899px) {
+  /* Two fixed rows on every page, whatever it has: the brand and Menu,
+     then the tabs and the robot. A page without Menu or a robot leaves
+     its cell empty rather than letting the rest move up. */
+  header.site .wrap { display: grid; gap: 10px 12px; align-items: center;
+                      grid-template-columns: auto minmax(0, 1fr) auto;
+                      grid-template-areas: "brand brand menu" "tabs picker picker"; }
+  .brand { grid-area: brand; min-height: var(--control); }
+  nav.tabs { grid-area: tabs; }
+  details.picker { grid-area: picker; justify-self: end; min-width: 0; max-width: 100%;
+                   margin: 0; }
+  details.picker > summary { overflow: hidden; text-overflow: ellipsis; }
+  .menu-btn { grid-area: menu; justify-self: end; }
+  .frame { display: block; }
+  .menu-btn { display: inline-flex; }
+  .side { display: none; position: static; max-height: none; overflow: visible;
+          border: 1px solid var(--line); border-radius: 12px; background: var(--panel);
+          padding: 14px 16px 6px; margin: -18px 0 30px; }
+  #menu:checked ~ .wrap .side { display: block; }
+}
 
 @media (max-width: 640px) {
   :root { --gutter: 16px; }
@@ -551,6 +674,12 @@ details.picker li span { display: block; color: var(--dim); font: 400 12px/1.5 v
   .pager { grid-template-columns: 1fr; }
   .pager .next { grid-column: 1; }
   footer.site { flex-direction: column; }
+  details.picker > summary span, details.picker > summary i { display: none; }
+}
+@media (max-width: 360px) {
+  .badge { display: none; }
+  nav.tabs a { padding: 0 9px; }
+  details.picker { padding: 0 10px; }
 }
 """
 
@@ -634,13 +763,15 @@ PAGE = """<!DOCTYPE html>
 <meta name="color-scheme" content="light dark">
 <title>{title} — 3VN Robotics</title>
 <style>{style}</style>
+<script src="{script}" defer></script>
 </head>
 <body>
-<header class="site"><div class="wrap">
+{toggle}<header class="site"><div class="wrap wide">
   <div class="brand"><a href="{home}">{mark}3VN Robotics</a><span class="badge">preview</span></div>
-  {picker}
+  <nav class="tabs" aria-label="Site">{tabs}</nav>
+  {picker}{menu}
 </div></header>
-<div class="wrap">
+<div class="wrap{wide}">
 {body}
 <footer class="site">
   {mark}
@@ -967,6 +1098,9 @@ def validate(stages, root, tags=None, robots=None):
     """
     errors = []
     docs = root / 'docs'
+    if (docs / 'reference.md').exists():
+        errors.append('docs/reference.md: reference.html is the reference\'s own '
+                      'index, which would overwrite it -- rename the doc')
     targets = make_targets(root)
     seen_ids, seen_terms = {}, {}
     order = {le.get('id'): le.get('index')
@@ -1466,7 +1600,7 @@ def picker_html(robot, robots, pages, counts, name):
     """
     The robot chooser at the top of every course page.
 
-    No JavaScript, per the CSP: a <details> that opens into links, each to
+    No script needed: a <details> that opens into links, each to
     THIS page on the other robot where it exists there, and to that
     robot's front page where it does not (a vacuum has no grasp lesson).
     """
@@ -1480,7 +1614,7 @@ def picker_html(robot, robots, pages, counts, name):
                      f'<span>{esc(other["price"])} &middot; {ready} of {total} '
                      f'lessons ready</span></a></li>')
     items.append('<li><a href="../index.html">Compare the robots</a></li>')
-    return (f'<details class="picker"><summary>Robot: <b>{esc(robot["name"])}</b>'
+    return (f'<details class="picker"><summary><i>Robot: </i><b>{esc(robot["name"])}</b>'
             f'<span>{esc(robot["price"])}</span></summary>'
             f'<ul>{"".join(items)}</ul></details>')
 
@@ -1490,6 +1624,341 @@ def crumbs(stage):
     return (f'<div class="crumbs"><a href="index.html">The course</a> / '
             f'<a href="stage-{stage["id"]}.html">{stage_word(stage)} '
             f'{stage["number"]}: {esc(stage["title"])}</a></div>')
+
+
+# ------------------------------------------------------------- navigation
+#
+# The site is two things: a course you follow in order, and the project's
+# reference you look things up in. The header names the two; a map down
+# the side shows where this page sits in whichever one it belongs to;
+# and a long page lists its own sections on the right. All of it is
+# links and <details>, so it needs no script.
+
+def tabs_html(active, course, reference):
+    """
+    The header's two halves of the site, the one this page is in marked.
+
+    Each links to its half's front page. NAV_JS, where it runs, points the
+    other one at the page last read there instead.
+    """
+    out = []
+    for key, label, href in (('course', 'Course', course),
+                             ('reference', 'Reference', reference)):
+        here = ' aria-current="true"' if key == active else ''
+        out.append(f'<a href="{href}" data-tab="{key}"{here}>{label}</a>')
+    return ''.join(out)
+
+
+#: The site's one script, written beside the pages as nav.js. The CSP
+#: allows a same-origin file (`script-src 'self'`), never an inline one.
+#: It only improves the tabs; with it blocked or storage off, every link
+#: still goes where its href says.
+NAV_JS = r"""// 3VN Robotics course site: the Course and Reference tabs remember the
+// page last read in each half, and how far down it, for this browser tab
+// (sessionStorage). Switching back lands where the reader left off.
+// Without this file the tabs go to each half's front page.
+(function () {
+  'use strict';
+  var tabs = document.querySelectorAll('nav.tabs a[data-tab]');
+  var brand = document.querySelector('.brand a');
+  var store;
+  try {
+    store = window.sessionStorage;
+    store.setItem('3vn-probe', '1');
+    store.removeItem('3vn-probe');
+  } catch (e) {
+    return;  // storage off or full: plain links it is
+  }
+  if (!tabs.length || !brand) return;
+
+  // Keyed by where the site is served, so two copies on one host never mix.
+  var root = new URL(brand.getAttribute('href'), location.href).pathname
+    .replace(/[^\/]*$/, '');
+  var here = null;
+  tabs.forEach(function (a) {
+    if (a.hasAttribute('aria-current')) here = a.getAttribute('data-tab');
+  });
+  if (!here) return;
+  var path = location.pathname;
+  // The header does not follow the page, so a reader scrolls back up to
+  // reach the tabs: where the page is when it is left says nothing. What
+  // is kept is where the reader last stopped, anywhere below the top.
+  var TOP = 300;
+  var STOPPED = 700;  // ms without scrolling
+
+  function key(name) { return '3vn-robotics ' + root + ' ' + name; }
+  function read(name) {
+    try { return JSON.parse(store.getItem(key(name))); } catch (e) { return null; }
+  }
+  function write(name, value) {
+    try { store.setItem(key(name), JSON.stringify(value)); } catch (e) { /* full */ }
+  }
+  var last = read(here);
+  var y = last && last.path === path && last.y > 0 ? last.y : 0;
+  function remember() { write(here, { path: path, y: y }); }
+  function point() {
+    // The open tab keeps its own front page; the other goes back to
+    // whatever was last read there.
+    tabs.forEach(function (a) {
+      var tab = a.getAttribute('data-tab');
+      var last = tab === here ? null : read(tab);
+      if (last && typeof last.path === 'string' && last.path.indexOf(root) === 0) {
+        a.setAttribute('href', last.path);
+      }
+    });
+  }
+
+  // Arrived by a tab: put the reader back where they were on this page.
+  // Back, forward and reload are the browser's to place; they keep the
+  // spot. Any other way in is a new visit, which starts at the top.
+  var arrived = read('arrived');
+  store.removeItem(key('arrived'));
+  var how = performance.getEntriesByType ?
+    (performance.getEntriesByType('navigation')[0] || {}).type : '';
+  if (arrived === path && y > 0) {
+    window.scrollTo(0, y);
+  } else if (arrived !== path && how !== 'back_forward' && how !== 'reload') {
+    y = 0;
+  }
+  remember();
+  point();
+
+  var timer = null;
+  window.addEventListener('scroll', function () {
+    clearTimeout(timer);
+    timer = setTimeout(function () {
+      if (window.scrollY > TOP) {
+        y = Math.round(window.scrollY);
+        remember();
+      }
+    }, STOPPED);
+  }, { passive: true });
+
+  document.addEventListener('click', function (event) {
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey ||
+        event.altKey) return;
+    var a = event.target.closest && event.target.closest('nav.tabs a[data-tab]');
+    if (a && a.getAttribute('data-tab') !== here) {
+      write('arrived', new URL(a.href).pathname);
+    }
+  });
+  window.addEventListener('pagehide', remember);
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'hidden') remember();
+  });
+  // Back to a page kept in memory (the back button): it is the latest
+  // page of its half again, and the other tab may have moved on.
+  window.addEventListener('pageshow', function (event) {
+    if (event.persisted) { remember(); point(); }
+  });
+})();
+"""
+
+
+def map_link(href, label, current, number='', extra=''):
+    """One entry in a side map, marked when it is the page being read."""
+    here = ' aria-current="page"' if href == current else ''
+    num = f'<span class="n">{number}</span>' if number != '' else ''
+    return f'<a href="{href}"{here}>{num}<span>{label}{extra}</span></a>'
+
+
+def planned_mark(item):
+    """In a side map a planned page is greyed; a screen reader is told in words."""
+    return '<span class="vh"> (planned)</span>' if item.get('status') == 'planned' else ''
+
+
+def fold(label, items, here, number=''):
+    """A folding group in a side map: open, and marked, if this page is in it."""
+    num = f'<span class="sn">{number}</span>' if number != '' else ''
+    opened, marked = (' open', ' class="here"') if here else ('', '')
+    return (f'<details{opened}><summary{marked}>{num}<span>{label}</span></summary>'
+            f'{items}</details>')
+
+
+def stages_nav(view, current):
+    """
+    Every stage of one robot's course, folding; the one holding `current`
+    is open with that page marked. Lessons not yet written for the robot
+    are greyed.
+    """
+    parts = ['<p class="map-title">Stages</p>']
+    for stage in view:
+        overview = f'stage-{stage["id"]}.html'
+        project = stage['project']
+        mine = {overview, f'project-{stage["id"]}.html'}
+        items = [f'<li>{map_link(overview, "Overview", current)}</li>']
+        for lesson in stage['lessons']:
+            href = f'lesson-{lesson["id"]}.html'
+            mine.add(href)
+            planned = ' class="planned"' if lesson.get('status') == 'planned' else ''
+            items.append(f'<li{planned}>' + map_link(
+                href, esc(lesson['title']), current, lesson['position'],
+                planned_mark(lesson)) + '</li>')
+        kind = 'proj planned' if project.get('status') == 'planned' else 'proj'
+        items.append(f'<li class="{kind}">' + map_link(
+            f'project-{stage["id"]}.html', 'Project: ' + esc(project['title']),
+            current, '&#9670;', planned_mark(project)) + '</li>')
+        parts.append(fold(esc(stage['title']), '<ol>' + ''.join(items) + '</ol>',
+                          current in mine, stage['number']))
+    return ''.join(parts)
+
+
+def course_nav(robot, view, current, ready_total):
+    """
+    The course map down the side of every page of one robot's course.
+
+    Every stage folds; the one this page belongs to is open, with this
+    page marked, so a reader always sees where they are and what is
+    either side. Lessons not yet written for this robot say so.
+    """
+    ready, total = ready_total
+    home = ' aria-current="page"' if current == 'index.html' else ''
+    parts = [f'<a class="home" href="index.html"{home}>The course on the '
+             f'{esc(robot["name"])}</a>']
+    if ready < total:
+        parts.append(f'<p class="sub">{ready} of {total} lessons written for it</p>'
+                     f'<div class="meter" aria-hidden="true"><span style="width:'
+                     f'{round(100 * ready / total)}%"></span></div>'
+                     f'<p class="sub">Greyed: planned, not written yet</p>')
+    else:
+        parts.append(f'<p class="sub">{len(view)} stages &middot; {total} lessons</p>')
+
+    parts.append(stages_nav(view, current))
+
+    parts.append('<p class="map-title">Look things up</p><ul class="flat">')
+    for href, label in (('tags/index.html', 'Topics'), ('glossary.html', 'Glossary'),
+                        ('robot.html', f'About the {esc(robot["name"])}'),
+                        ('../reference.html', 'Reference docs')):
+        link = map_link(href, label, current)
+        if href.startswith('tags/') and current.startswith('tags/') and current != href:
+            link = link.replace('<a ', '<a aria-current="true" ', 1)
+        parts.append(f'<li>{link}</li>')
+    parts.append('</ul>')
+    return ''.join(parts)
+
+
+def chooser_nav(robots, counts, ref, ref_view):
+    """
+    The map on the front page, before a robot is chosen: the same map as
+    inside a course, its top box a choice of robot instead of the robot.
+
+    A lesson needs a robot to open on. Until one is chosen it is the
+    reference robot, whose text every lesson's is by default -- and the
+    map says so, so nobody lands on the Arm 1 by surprise.
+    """
+    parts = ['<a class="home" href="index.html" aria-current="page">Choose your robot</a>',
+             '<p class="sub">The same course on either arm</p><ul class="pick">']
+    for robot in robots:
+        ready, total = counts[robot['id']]
+        parts.append(
+            f'<li><a href="{robot["id"]}/index.html"><b>{esc(robot["name"])}</b>'
+            f'<span>{ready} of {total} lessons &middot; {esc(robot["price"])}</span>'
+            f'<span class="meter" aria-hidden="true"><span style="width:'
+            f'{round(100 * ready / total) if total else 0}%"></span></span></a></li>')
+    parts.append(f'</ul><p class="sub">Until you choose, lessons open on the '
+                 f'{esc(ref["name"])}.</p>')
+    parts.append(rebase(stages_nav(ref_view, ''), f'{ref["id"]}/'))
+    parts.append('<p class="map-title">Look things up</p><ul class="flat">'
+                 f'<li><a href="{ref["id"]}/tags/index.html">Topics</a></li>'
+                 f'<li><a href="{ref["id"]}/glossary.html">Glossary</a></li>'
+                 '<li><a href="reference.html">Reference docs</a></li></ul>')
+    return ''.join(parts)
+
+
+def reference_groups(docs, written):
+    """
+    The reference in reading order, as (heading, [(doc, label)]) groups:
+    CURRICULUM's groups, then any doc it does not name -- so adding a doc
+    never means it silently fails to appear -- then the decisions.
+    """
+    listed = {name for _, items in CURRICULUM for name, _ in items}
+    groups = [(heading, [(n, label) for n, label in items if n in written])
+              for heading, items in CURRICULUM]
+    groups.append(('Everything else', [(n, doc_label(n))
+                                       for n in sorted(set(written) - listed)]))
+    groups.append(('Decisions', [('decisions/' + a.name, doc_label('decisions/' + a.name))
+                                 for a in sorted((docs / 'decisions').glob('*.md'))]))
+    return [(heading, items) for heading, items in groups if items]
+
+
+def reference_nav(groups, robots, current):
+    """The map down the side of a reference page, and the way back to a course."""
+    home = ' aria-current="page"' if current == 'reference.html' else ''
+    parts = [f'<a class="home" href="reference.html"{home}>Reference</a>',
+             '<p class="sub">The project\'s own documentation</p>',
+             '<p class="map-title">Sections</p>']
+    for heading, items in groups:
+        links = ''.join(f'<li>{map_link(doc_page(n), esc(label), current)}</li>'
+                        for n, label in items)
+        here = current in {doc_page(n) for n, _ in items}
+        parts.append(fold(esc(heading), f'<ul>{links}</ul>', here))
+    parts.append('<p class="map-title">The course</p><ul class="flat">')
+    parts.extend(f'<li><a href="{r["id"]}/index.html">On the {esc(r["name"])}</a></li>'
+                 for r in robots)
+    parts.append('<li><a href="index.html">Compare the robots</a></li></ul>')
+    return ''.join(parts)
+
+
+def doc_frame(order, position, html):
+    """
+    A reference page with where it sits above it and its neighbours below,
+    in the same reading order as the map, the way a lesson has them.
+    """
+    name, _, heading = order[position]
+
+    def link(pos, left):
+        other, label, _ = order[pos]
+        word = '&larr; Previous' if left else 'Next &rarr;'
+        return (f'<a class="{"prev" if left else "next"}" href="{doc_page(other)}">'
+                f'<small>{word}</small>{esc(label)}</a>')
+
+    prev = link(position - 1, True) if position else '<span></span>'
+    nxt = (link(position + 1, False) if position + 1 < len(order)
+           else '<a class="next" href="reference.html"><small>That is all</small>'
+                'Back to the reference</a>')
+    return (f'<div class="crumbs"><a href="reference.html">Reference</a> / '
+            f'{esc(heading)}</div>\n{html}\n<div class="pager">{prev}{nxt}</div>')
+
+
+def text_of(html):
+    """The words of an HTML fragment, for a label: tags dropped, spaces kept."""
+    text = re.sub(r'<[^>]+>', '', html.replace('</span>', '</span> '))
+    return ' '.join(htmllib.unescape(text).split())
+
+
+def outline(html, least=3):
+    """
+    Give every <h2> an id, and list them as the page's "On this page".
+
+    Docs arrive with ids from markdown's toc extension; lesson sections
+    are written here without, so they get one from their words, never
+    one the page already uses. A page with fewer than `least` sections
+    gets no outline: it would only repeat the page.
+    """
+    taken = set(re.findall(r'\sid="([^"]+)"', html))
+    found = []
+
+    def mark(match):
+        attrs, inner = match.group(1) or '', match.group(2)
+        has = re.search(r'\sid="([^"]+)"', attrs)
+        if has:
+            anchor = has.group(1)
+        else:
+            base = slug(text_of(inner)) or 'section'
+            anchor, n = base, 2
+            while anchor in taken:
+                anchor, n = f'{base}-{n}', n + 1
+            taken.add(anchor)
+            attrs += f' id="{anchor}"'
+        found.append((anchor, text_of(inner)))
+        return f'<h2{attrs}>{inner}</h2>'
+
+    html = re.sub(r'<h2(\s[^>]*)?>(.*?)</h2>', mark, html, flags=re.S)
+    if len(found) < least:
+        return html, ''
+    items = ''.join(f'<li><a href="#{a}">{esc(t)}</a></li>' for a, t in found)
+    return html, (f'<nav class="toc" aria-label="On this page"><b>On this page</b>'
+                  f'<ul>{items}</ul></nav>')
 
 
 # ------------------------------------------------------------------ pages
@@ -1932,7 +2401,7 @@ def index_html(stages, robot, ref, counts, vocab):
     parts.append('<p><a href="tags/index.html">Every topic, described &rarr;</a></p>')
     parts.append('<p><a href="glossary.html">Glossary of every term the course '
                  'introduces &rarr;</a></p>')
-    parts.append('<p><a href="../index.html#reference">The project\'s reference '
+    parts.append('<p><a href="../reference.html">The project\'s reference '
                  'documentation &rarr;</a></p>')
     return '\n'.join(parts)
 
@@ -1974,37 +2443,37 @@ def robot_page(robot, stages, ref, counts):
     return '\n'.join(parts)
 
 
-def reference_html(docs, written):
-    """The project's own documentation, grouped in reading order."""
-    listed = {name for _, items in CURRICULUM for name, _ in items}
-    parts = ['<h2 id="reference">Reference</h2>', render(
-        'The project\'s own documentation, linked from the lessons that '
-        'need it. You do not have to read it in order.')]
-    for heading, items in CURRICULUM:
-        rows = [f'<li><a href="{doc_page(n)}">{esc(label)}</a></li>'
-                for n, label in items if n in written]
-        if rows:
-            parts.append(f'<div class="group"><h3>{heading}</h3><ul>'
-                         + ''.join(rows) + '</ul></div>')
+REFERENCE_INTRO = ('The project\'s own documentation, linked from the lessons that '
+                   'need it. You do not have to read it in order.')
 
-    extra = sorted(set(written) - listed)
-    if extra:
-        rows = ''.join(f'<li><a href="{doc_page(n)}">{esc(doc_label(n))}</a></li>'
-                       for n in extra)
-        parts.append('<div class="group"><h3>Everything else</h3><ul>'
-                     + rows + '</ul></div>')
 
-    adrs = sorted((docs / 'decisions').glob('*.md'))
-    if adrs:
-        rows = ''.join(
-            f'<li><a href="decisions-{a.stem}.html">'
-            f'{esc(doc_label("decisions/" + a.name))}</a></li>' for a in adrs)
-        parts.append('<div class="group"><h3>Decisions</h3><ul>'
-                     + rows + '</ul></div>')
+def reference_list(groups):
+    """The reference's groups as lists of links."""
+    parts = []
+    for heading, items in groups:
+        rows = ''.join(f'<li><a href="{doc_page(n)}">{esc(label)}</a></li>'
+                       for n, label in items)
+        parts.append(f'<div class="group"><h3>{esc(heading)}</h3><ul>{rows}</ul></div>')
     return '\n'.join(parts)
 
 
-def chooser_html(robots, counts, docs, written):
+def reference_html(groups):
+    """The reference as a section of the front page."""
+    return '\n'.join(['<h2 id="reference">Reference</h2>', render(REFERENCE_INTRO),
+                      reference_list(groups)])
+
+
+def reference_page(groups):
+    """The reference's own index page, the Reference tab."""
+    count = sum(len(items) for _, items in groups)
+    return '\n'.join([
+        '<div class="eyebrow">Look it up</div><h1>Reference</h1>',
+        render(f'{REFERENCE_INTRO} {count} pages in {len(groups)} sections; '
+               'the map at the side follows you through them.'),
+        reference_list(groups)])
+
+
+def chooser_html(robots, counts, docs, groups):
     """
     The front page: one course, and the robots it can be taken on.
 
@@ -2050,7 +2519,7 @@ def chooser_html(robots, counts, docs, written):
             'being built, not a finished example. This is where it is:'))
         parts.append(render(table))
 
-    parts.append(reference_html(docs, written))
+    parts.append(reference_html(groups))
     return '\n'.join(parts)
 
 
@@ -2090,24 +2559,45 @@ def build(root, out, stages, robots, tags):
               or os.environ.get('THREEVN_GIT_COMMIT', '')[:7])
     meta = f'v{version} · {commit or "no commit"} · built {datetime.date.today().isoformat()}'
 
-    def page(title, body, home='index.html', picker=''):
+    def page(title, body, home='index.html', picker='', tabs='', side='', label='',
+             toc=''):
+        # A page with a side map is framed: map, page, and -- when the page
+        # is long enough to have one -- its outline. Without one (the front
+        # page) it is the page alone, at reading width.
+        toggle = menu = wide = ''
+        if side:
+            body = (f'<div class="frame{" has-toc" if toc else ""}">'
+                    f'<aside class="side" aria-label="{label}">{side}</aside>'
+                    f'<main>{body}</main>{toc}</div>')
+            # autocomplete=off: or Back would restore it ticked, the map open.
+            toggle = '<input type="checkbox" id="menu" class="vh" autocomplete="off">'
+            menu = ('<label class="menu-btn" for="menu"><i aria-hidden="true"></i>'
+                    '<span class="open">Menu</span><span class="shut">Close</span></label>')
+            wide = ' wide'
+        else:
+            body = f'<main>{body}</main>'
+        # nav.js sits at the site root, beside the front page `home` names.
+        script = home[:-len('index.html')] + 'nav.js'
         return PAGE.format(title=esc(title), style=STYLE, meta=meta, body=body,
-                           home=home, picker=picker, mark=MARK)
+                           home=home, picker=picker, mark=MARK, tabs=tabs,
+                           toggle=toggle, menu=menu, wide=wide, script=script)
 
-    def write(name, title, body):
-        (out / name).write_text(page(title, body))
+    written = [source.name for source in sorted(docs.glob('*.md'))]
+    groups = reference_groups(docs, written)
+    order = [(name, label, heading) for heading, items in groups for name, label in items]
 
-    written = []
-    for source in sorted(docs.glob('*.md')):
-        html = rewrite_links(render(source.read_text()))
-        write(source.stem + '.html', doc_label(source.name),
-              f'<a class="back" href="index.html">&larr; the course</a>\n{html}')
-        written.append(source.name)
+    def shared(name, title, body, side=None, active='reference', label='Reference'):
+        # The pages every robot shares, at the top level: the reference and
+        # the front page. A reference page's map is the reference's.
+        body, toc = outline(body)
+        (out / name).write_text(page(
+            title, body, tabs=tabs_html(active, 'index.html', 'reference.html'),
+            side=side or reference_nav(groups, robots, name), label=label, toc=toc))
 
-    for source in sorted((docs / 'decisions').glob('*.md')):
-        html = rewrite_links(render(source.read_text()))
-        write(f'decisions-{source.stem}.html', doc_label('decisions/' + source.name),
-              f'<a class="back" href="index.html">&larr; the course</a>\n{html}')
+    for position, (name, label, _) in enumerate(order):
+        html = rewrite_links(render((docs / name).read_text()))
+        shared(doc_page(name), label, doc_frame(order, position, html))
+    shared('reference.html', 'Reference', reference_page(groups))
     doc_pages = {p.name for p in out.glob('*.html')}
 
     ref = reference_of(robots)
@@ -2138,16 +2628,22 @@ def build(root, out, stages, robots, tags):
         folder.mkdir(exist_ok=True)
         by_id = {le['id']: le for st in view for le in st['lessons']}
 
-        def fwrite(name, title, body, robot=robot, folder=folder):
+        def fwrite(name, title, body, robot=robot, folder=folder, view=view):
             # Topic pages sit in tags/<slug>/ inside the robot's folder. Doc
             # links are pointed up at the shared docs first, then the whole
             # page is re-rooted for its depth.
             prefix = '../' * name.count('/')
+            body, toc = outline(body)
             html = page(f'{title} · {robot["name"]}',
                         rebase(relink_docs(body, doc_pages), prefix),
                         home=prefix + '../index.html',
                         picker=rebase(picker_html(robot, robots, pages, counts, name),
-                                      prefix))
+                                      prefix),
+                        tabs=rebase(tabs_html('course', 'index.html', '../reference.html'),
+                                    prefix),
+                        side=rebase(course_nav(robot, view, name, counts[robot['id']]),
+                                    prefix),
+                        label='Course map', toc=toc)
             path = folder / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(html)
@@ -2180,8 +2676,11 @@ def build(root, out, stages, robots, tags):
         up = '../' * name.count('/')
         path.write_text(REDIRECT.format(target=f'{up}{ref["id"]}/{name}'))
 
-    write('index.html', 'Pick your robot', chooser_html(robots, counts, docs, written))
+    shared('index.html', 'Pick your robot', chooser_html(robots, counts, docs, groups),
+           side=chooser_nav(robots, counts, ref, views[ref['id']]),
+           active='course', label='Course map')
     (out / 'robots.txt').write_text('User-agent: *\nDisallow: /\n')
+    (out / 'nav.js').write_text(NAV_JS)
     return len(list(out.rglob('*.html')))
 
 
