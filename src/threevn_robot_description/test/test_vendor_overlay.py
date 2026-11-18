@@ -32,6 +32,7 @@ import xml.etree.ElementTree as ET
 import pytest
 from threevn_robot_description import describe as describing
 from urdf_parser_py.urdf import URDF
+import yaml
 
 FIXTURES = pathlib.Path(__file__).parent / 'fixtures'
 TOY = FIXTURES / 'toy_arm.yaml'
@@ -480,3 +481,63 @@ def test_robot_facts_are_read_from_the_description():
     assert facts['gripper_joint'] == 'j_jaw'
     assert facts['gripper_followers'] == []
     assert facts['limits']['j_b'] == (-0.5, 1.5)
+
+
+def _self_reporting_toy(tmp_path):
+    """Write the toy arm, with servos that measure their own load and temperature."""
+    cfg = yaml.safe_load(TOY.read_text())
+    cfg['servos']['toy']['feedback'] = [
+        'position', 'velocity', 'load', 'voltage', 'temperature']
+    path = tmp_path / 'toy_arm.yaml'
+    path.write_text(yaml.safe_dump(cfg))
+    return path
+
+
+def _states(profile, target):
+    root = ET.fromstring(describing.describe(profile, target=target))
+    return {j.get('name'): [s.get('name') for s in j.findall('state_interface')]
+            for j in _control(root).findall('joint')}
+
+
+def test_a_servo_that_measures_its_load_gives_its_joint_an_effort_state(tmp_path):
+    """
+    Effort on every target, temperature only from real servos.
+
+    Effort is there in simulation so the dashboard's strain check can be
+    rehearsed before a servo is plugged in: the physics engine reports
+    what a joint is applying. Nothing simulates a temperature, so no
+    simulated target claims one.
+    """
+    toy = _self_reporting_toy(tmp_path)
+    assert _states(toy, 'feetech')['j_b'] == \
+        ['position', 'velocity', 'effort', 'temperature']
+    for target in ('mock', 'gz'):
+        assert _states(toy, target)['j_b'] == ['position', 'velocity', 'effort'], target
+
+
+def test_a_servo_that_measures_nothing_gets_no_effort_state():
+    """The fixture's servo lists no feedback: the interfaces are as they were."""
+    for target in ('mock', 'gz', 'feetech'):
+        assert _states(TOY, target)['j_b'] == ['position', 'velocity'], target
+
+
+def test_full_load_is_the_joints_effort_limit(tmp_path):
+    """
+    The hardware is told what 100 % load is, and it is the joint's limit.
+
+    Stall torque x derating, the same number as the URDF's <limit
+    effort>, so load and effort-against-limit can never disagree.
+    """
+    toy = _self_reporting_toy(tmp_path)
+    root = ET.fromstring(describing.describe(toy, target='feetech'))
+    full = {j.get('name'): p.text
+            for j in _control(root).findall('joint')
+            for p in j.findall('param') if p.get('name') == 'full_load_effort'}
+    assert {k: float(v) for k, v in full.items()} == \
+        {'j_a': 1.0, 'j_b': 1.0, 'j_jaw': 1.0}
+    limits = {j.get('name'): float(j.find('limit').get('effort'))
+              for j in root.findall('joint') if j.find('limit') is not None}
+    for name, value in full.items():
+        assert float(value) == pytest.approx(limits[name])
+    mock = ET.fromstring(describing.describe(toy, target='mock'))
+    assert not [p for p in mock.iter('param') if p.get('name') == 'full_load_effort']

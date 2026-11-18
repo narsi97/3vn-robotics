@@ -68,6 +68,24 @@ std::string velocity(const std::string & joint)
 {
   return joint + "/" + hardware_interface::HW_IF_VELOCITY;
 }
+
+std::string effort(const std::string & joint)
+{
+  return joint + "/" + hardware_interface::HW_IF_EFFORT;
+}
+
+/// Not one of ros2_control's standard names: a servo's own temperature,
+/// degrees C. joint_state_broadcaster publishes it on /dynamic_joint_states.
+constexpr char kTemperature[] = "temperature";
+
+std::string temperature(const std::string & joint)
+{
+  return joint + "/" + kTemperature;
+}
+
+/// Bytes from Present_Position (56) to Present_Temperature (63), inclusive.
+constexpr uint8_t kStatusBlockSize =
+  feetech::reg::kPresentTemperature - feetech::reg::kPresentPosition + 1;
 }  // namespace
 
 void FeetechSystemInterface::setTransport(std::unique_ptr<Transport> transport)
@@ -135,6 +153,8 @@ hardware_interface::CallbackReturn FeetechSystemInterface::on_init(
     Joint entry;
     entry.name = joint.name;
     entry.position = std::numeric_limits<double>::quiet_NaN();
+    entry.reports_effort = hasInterface(joint.state_interfaces, hardware_interface::HW_IF_EFFORT);
+    entry.reports_temperature = hasInterface(joint.state_interfaces, kTemperature);
     int id = -1;
     try {
       // No default for the id. A joint that does not say which servo
@@ -149,6 +169,22 @@ hardware_interface::CallbackReturn FeetechSystemInterface::on_init(
         "joint '" + joint.name + "' needs an integer `id` parameter "
         "(and integer zero_count and direction, if given)");
       return hardware_interface::CallbackReturn::ERROR;
+    }
+    if (entry.reports_effort) {
+      // No default here either. A load is a percentage; turning it into
+      // N.m needs to know what 100 % is, and a guess would put a number
+      // on /joint_states that looks measured and is not.
+      try {
+        entry.full_load_effort = std::stod(lookup(joint.parameters, "full_load_effort", ""));
+      } catch (const std::exception &) {
+        entry.full_load_effort = 0.0;
+      }
+      if (!(entry.full_load_effort > 0.0)) {
+        fail(
+          "joint '" + joint.name + "' has an effort state interface, so it needs a "
+          "positive `full_load_effort` parameter: the effort at 100 % servo load");
+        return hardware_interface::CallbackReturn::ERROR;
+      }
     }
     if (id < 0 || id > 253) {
       fail("joint '" + joint.name + "': id " + std::to_string(id) + " is not 0-253");
@@ -232,13 +268,17 @@ bool FeetechSystemInterface::transact(
 bool FeetechSystemInterface::readPositions(std::vector<uint8_t> & silent)
 {
   silent.clear();
-  // Position and speed are adjacent, so one request fetches both.
+  // Position, speed, load, voltage and temperature are adjacent, so one
+  // request fetches all five. Eight bytes instead of four per servo:
+  // at a megabaud that is 32 microseconds more for the whole arm.
   std::map<uint8_t, feetech::Status> replies;
-  transact(feetech::encodeSyncRead(feetech::reg::kPresentPosition, 4, ids_), ids_, replies);
+  transact(
+    feetech::encodeSyncRead(feetech::reg::kPresentPosition, kStatusBlockSize, ids_), ids_,
+    replies);
 
   for (auto & joint : joints_) {
     const auto it = replies.find(joint.id);
-    if (it == replies.end() || it->second.params.size() != 4) {
+    if (it == replies.end() || it->second.params.size() != kStatusBlockSize) {
       silent.push_back(joint.id);
       continue;
     }
@@ -248,6 +288,18 @@ bool FeetechSystemInterface::readPositions(std::vector<uint8_t> & silent)
     joint.position = feetech::toRadians(count, joint.calibration);
     set_state(position(joint.name), joint.position);
     set_state(velocity(joint.name), feetech::toRadiansPerSecond(speed, joint.calibration));
+    if (joint.reports_effort) {
+      // Tenths of a percent, sign in bit 10. The sign is the servo's
+      // direction of push, so it is turned into the joint's direction
+      // the same way position and speed are.
+      const int load = feetech::fromSignMagnitude(feetech::fromBytes(data[4], data[5]), 10);
+      set_state(
+        effort(joint.name),
+        joint.calibration.direction * (load / 1000.0) * joint.full_load_effort);
+    }
+    if (joint.reports_temperature) {
+      set_state(temperature(joint.name), static_cast<double>(data[7]));
+    }
 
     if (it->second.error != 0) {
       RCLCPP_WARN_THROTTLE(

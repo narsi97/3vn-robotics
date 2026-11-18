@@ -711,10 +711,112 @@ lessons:
       - architecture.md
 
   - id: alive-is-not-ready
-    scope: any
     title: Alive is not the same as ready
     tags: [robops]
     minutes: 35
+    flavors:
+      so101:
+        minutes: 45
+        note: >-
+          The SO-101 can answer a question the 3VN arm cannot. Its bus
+          servos measure their own load and temperature, so readiness here
+          has two more conditions: no joint **straining**, pushing at 90%
+          or more of its effort limit for half a second, and no servo at
+          65 °C or above. A gripper is exempt from the first, because a
+          gripper holding something is meant to push. In Gazebo the load
+          comes from the physics engine and there is no temperature; on
+          the real arm both come from the servos.
+        steps:
+          - do: Start the SO-101 in Gazebo, then the dashboard in a second terminal.
+            run: |
+              make so101
+              make dash
+          - do: >-
+              Open **http://localhost:8107/**. Each joint now has a load: its
+              effort as a share of its limit. Then ask the two questions from
+              a third terminal.
+            run: |
+              curl -s -o /dev/null -w "healthz %{http_code}\n" http://127.0.0.1:8107/healthz
+              curl -s -w "\n%{http_code}\n" http://127.0.0.1:8107/readyz
+            expect: >-
+              `healthz 200` and a ready verdict. `shoulder_lift` carries the
+              most load, about 40%: it is holding the arm up against gravity.
+          - do: Drive the arm down into the bench, on purpose.
+            run: |
+              make shell
+              ros2 action send_goal /arm_controller/follow_joint_trajectory \
+                control_msgs/action/FollowJointTrajectory \
+                "{trajectory: {joint_names: [shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll], points: [{positions: [0.0, 1.2, 0.8, 1.0, 0.0], time_from_start: {sec: 3}}]}}"
+            expect: '`SUCCEEDED`. Remember that.'
+          - do: Ask for readiness again, from the third terminal.
+            run: curl -s -w "\n%{http_code}\n" http://127.0.0.1:8107/readyz
+            expect: >-
+              `503`, with reasons: `shoulder_lift` and `elbow_flex` are
+              straining at about 100% of their limit. The arm stopped well
+              short of the goal, against the bench, and the controller
+              called the goal reached.
+          - do: Send it back to its `ready` pose, and ask once more.
+            run: |
+              ros2 action send_goal /arm_controller/follow_joint_trajectory \
+                control_msgs/action/FollowJointTrajectory \
+                "{trajectory: {joint_names: [shoulder_pan, shoulder_lift, elbow_flex, wrist_flex, wrist_roll], points: [{positions: [0.0, -0.6, 0.8, 0.5, 0.0], time_from_start: {sec: 3}}]}}"
+              curl -s -w "\n%{http_code}\n" http://127.0.0.1:8107/readyz
+            expect: '`200` again. Nothing latches: readiness describes now.'
+          - do: >-
+              Finally, stop the simulator with Ctrl-C in its terminal, wait ten
+              seconds, and ask again.
+            run: |
+              curl -s -o /dev/null -w "healthz %{http_code}\n" http://127.0.0.1:8107/healthz
+              curl -s -w "\n%{http_code}\n" http://127.0.0.1:8107/readyz
+            expect: >-
+              `healthz 200` still, and `/readyz` 503 because joint state is
+              stale and the controllers stopped answering. No word about
+              straining, even if you stopped it mid-push: an old effort
+              reading says nothing about now.
+        checkpoint: >-
+          You watched a goal report `SUCCEEDED` while readiness said the arm
+          was pushing against something, and you watched liveness stay 200
+          while readiness went to 503 when the robot went away.
+        pitfalls:
+          - symptom: A goal reports `SUCCEEDED` and the arm is not where it was sent.
+            cause: >-
+              The trajectory controller here sets no per-joint goal
+              tolerance, so it checks that time ran out, not that the joints
+              arrived.
+            fix: >-
+              Watch `/readyz`, which judges what the servos report, and
+              compare the final joint state with the goal yourself.
+          - symptom: The dashboard shows a load for every joint, but `/readyz` never mentions straining.
+            cause: The arm is not actually pushing against anything; 90% for half a second is a high bar on purpose.
+            fix: Check that the goal really drives it into the bench. A normal move peaks well under half its limit.
+          - symptom: A joint has no load, or no temperature.
+            cause: >-
+              Load needs an effort limit, read from `/robot_description`.
+              Temperature comes only from real servos, never from Gazebo.
+            fix: Start the dashboard while the robot is running, so it receives the description.
+          - symptom: '`make dash` dies at once with `OSError: [Errno 98] Address already in use`.'
+            cause: A dashboard from an earlier run still holds port 8107.
+            fix: '`make stop`.'
+        concepts:
+          - term: Strain
+            meaning: >-
+              A joint pushing at or near its effort limit and staying there.
+              Something is in its way, or the load is more than it can move.
+        quiz:
+          - q: The goal said `SUCCEEDED` and `/readyz` said 503. Which one was right, and why could the other be wrong?
+            a: >-
+              `/readyz`. The controller only checked that the trajectory's
+              time ran out; the servos reported that two joints were pushing
+              at their limit against something.
+          - q: Why is the gripper exempt from the strain check?
+            a: >-
+              A gripper closed on an object pushes at its limit by design.
+              Counting that would make every successful grasp a fault.
+          - q: Why does a second-old effort reading not count as straining?
+            a: >-
+              It says nothing about now. The robot is already not ready
+              because its state is stale, and blaming a joint would send
+              someone after the wrong fault.
     objective: Separate liveness from readiness, and make a dashboard that cannot report stale state as current.
     body: |
       The dashboard runs **on the robot**, not on a server — a dashboard that

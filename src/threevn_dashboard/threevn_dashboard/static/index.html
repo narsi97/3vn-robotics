@@ -134,9 +134,22 @@ function jointRow(name, data) {
           `<i style="left:${left}%;width:${Math.max(width, 1.2)}%"></i></div>`;
   }
   const short = name.replace(/_joint$/, '').replace(/_/g, ' ');
+  // Load, and temperature where the servo reports it. Only robots whose
+  // servos measure their own effort have a load column at all: the 3VN
+  // arm's hobby servos report nothing, and an empty column would read
+  // as a measured zero.
+  let extra = '';
+  if (data.load !== null && data.load !== undefined) {
+    const hot = data.load >= 0.9;
+    const temp = (data.temperature === null || data.temperature === undefined)
+      ? '' : ` ${data.temperature.toFixed(0)}°C`;
+    extra = `<td class="v" title="load: effort as a share of the joint's limit" ` +
+            `style="width:6.5em;padding-left:14px;color:var(${hot ? '--bad' : '--muted'})">` +
+            `${(data.load * 100).toFixed(0)}%${esc(temp)}</td>`;
+  }
   return `<tr><td class="k">${esc(short)}</td>` +
          `<td style="width:45%">${bar}</td>` +
-         `<td class="v">${value}</td></tr>`;
+         `<td class="v">${value}</td>${extra}</tr>`;
 }
 
 function render(s) {
