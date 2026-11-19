@@ -36,6 +36,8 @@
 ///     the calibration in the robot profile
 ///   * saying so, as an error the controller manager can act on, when
 ///     the bus stops answering
+///   * passing on what the servos measure about themselves, load and
+///     temperature, for joints whose description asks for them
 ///
 /// It talks to a Transport and not to a file descriptor, so all of that
 /// is tested against a simulated bus, and the same class runs unchanged
@@ -112,6 +114,15 @@ private:
     feetech::Calibration calibration;
     /// Last position the servo reported, radians. NaN until it has.
     double position = 0.0;
+    /// Effort at 100 % load, in the joint's units (N.m for a revolute
+    /// joint). The servo reports load as a share of what it can deliver;
+    /// this turns that share into an effort.
+    double full_load_effort = 0.0;
+    /// Whether the description gives this joint `effort` and
+    /// `temperature` state interfaces. Optional: without them the
+    /// interface behaves exactly as it did before they existed.
+    bool reports_effort = false;
+    bool reports_temperature = false;
   };
 
   /// Send `request` and collect one status packet from each id listed.
@@ -123,6 +134,8 @@ private:
     const std::vector<uint8_t> & request, const std::vector<uint8_t> & ids,
     std::map<uint8_t, feetech::Status> & replies);
 
+  /// Read position, speed, load, voltage and temperature from every
+  /// servo, in one request: the five registers are adjacent.
   bool readPositions(std::vector<uint8_t> & silent);
   bool writeTorque(bool enabled);
   bool writeGoals(const std::vector<double> & radians);

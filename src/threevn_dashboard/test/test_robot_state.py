@@ -25,9 +25,14 @@ sleeping.
 import pytest
 from threevn_dashboard.robot_state import (
     CONTROLLER_STALE_AFTER_SECONDS,
+    effort_limits_from_urdf,
+    gripper_joints_from_urdf,
     REQUIRED_CONTROLLERS,
     RobotState,
     STALE_AFTER_SECONDS,
+    STRAIN_AFTER_SECONDS,
+    STRAIN_FRACTION,
+    TEMPERATURE_LIMIT_C,
 )
 
 
@@ -236,3 +241,188 @@ def test_stale_hardware_list_is_marked_stale(state, clock):
     # The last known value is still reported, but flagged - the dashboard
     # shows it as stale rather than pretending it is current.
     assert snap['hardware'] == [{'name': 'threevn_arm', 'state': 'active'}]
+
+
+# -- effort, strain and temperature ----------------------------------------
+#
+# The SO-101's servos report their own load. A joint held still by a hand
+# or a block in the way pushes at its limit while its controller reports
+# nothing wrong; readiness is where that becomes visible.
+
+LIMIT = 1.3   # N.m: the SO-101's derived limit, stall torque x supply derate
+
+
+def _ready_with_effort(state, effort):
+    state.set_effort_limits({'shoulder_lift': LIMIT})
+    state.update_joints(['shoulder_lift'], [0.1], [0.0], [effort])
+    state.update_controllers([(name, 'active') for name in REQUIRED_CONTROLLERS])
+
+
+def test_snapshot_reports_effort_and_load(state):
+    """Effort is passed through, and load is effort as a share of the limit."""
+    _ready_with_effort(state, -0.65)
+    joint = state.snapshot()['joints']['shoulder_lift']
+    assert joint['effort'] == pytest.approx(-0.65)
+    assert joint['effort_limit'] == pytest.approx(LIMIT)
+    assert joint['load'] == pytest.approx(0.5)
+
+
+def test_a_robot_that_reports_no_effort_is_not_judged_on_it(state):
+    """
+    The 3VN arm's servos report no load. That is a check not made.
+
+    It must not count as straining, and it must not look like a measured
+    zero either.
+    """
+    state.set_effort_limits({'shoulder_pan_joint': 2.0})
+    _make_ready(state)
+    snap = state.snapshot()
+    assert snap['joints']['shoulder_pan_joint']['effort'] is None
+    assert snap['joints']['shoulder_pan_joint']['load'] is None
+    assert snap['load_reported'] is False
+    assert snap['ready']
+
+
+def test_a_joint_with_no_known_limit_is_not_judged(state):
+    """Effort without a limit cannot be called high or low."""
+    state.update_joints(['shoulder_lift'], [0.1], [0.0], [50.0])
+    state.update_controllers([(name, 'active') for name in REQUIRED_CONTROLLERS])
+    assert state.snapshot()['joints']['shoulder_lift']['load'] is None
+    assert state.is_ready()
+
+
+def test_a_burst_of_effort_is_not_strain(state, clock):
+    """A joint accelerating pushes hard for a moment. That is a move, not a fault."""
+    _ready_with_effort(state, LIMIT)
+    clock.advance(STRAIN_AFTER_SECONDS / 2)
+    state.update_joints(['shoulder_lift'], [0.1], [0.0], [LIMIT])
+    assert state.is_ready()
+    state.update_joints(['shoulder_lift'], [0.1], [0.0], [0.2])
+    clock.advance(STRAIN_AFTER_SECONDS)
+    state.update_joints(['shoulder_lift'], [0.1], [0.0], [0.2])
+    assert state.is_ready(), 'the burst ended, so the clock on it ends too'
+
+
+def test_a_joint_held_at_its_limit_is_not_ready(state, clock):
+    """Something in the way: full effort, sustained. Readiness says so, and why."""
+    _ready_with_effort(state, -1.25)
+    clock.advance(STRAIN_AFTER_SECONDS)
+    state.update_joints(['shoulder_lift'], [0.1], [0.0], [-1.25])
+    ready, reasons = state.readiness_detail()
+    assert not ready
+    assert len(reasons) == 1
+    assert "'shoulder_lift' is straining" in reasons[0]
+    assert '1.25 of 1.30' in reasons[0]
+    assert '96%' in reasons[0]
+    snap = state.snapshot()
+    assert [s['joint'] for s in snap['straining']] == ['shoulder_lift']
+
+
+def test_strain_threshold_is_inclusive(state, clock):
+    """Exactly at the threshold, for exactly the time, counts."""
+    effort = LIMIT * STRAIN_FRACTION
+    _ready_with_effort(state, effort)
+    clock.advance(STRAIN_AFTER_SECONDS)
+    state.update_joints(['shoulder_lift'], [0.1], [0.0], [effort])
+    assert not state.is_ready()
+
+
+def test_ready_again_as_soon_as_the_load_comes_off(state, clock):
+    """The hand lets go. Readiness recovers on the next message, with no latch."""
+    _ready_with_effort(state, LIMIT)
+    clock.advance(STRAIN_AFTER_SECONDS + 0.1)
+    state.update_joints(['shoulder_lift'], [0.1], [0.0], [LIMIT])
+    assert not state.is_ready()
+    state.update_joints(['shoulder_lift'], [0.1], [0.0], [0.3])
+    assert state.is_ready()
+
+
+def test_stale_effort_is_not_strain(state, clock):
+    """
+    Old effort says nothing about now.
+
+    The robot is not ready, but because its state stopped, not because a
+    second-old reading claims a joint is still pushing.
+    """
+    _ready_with_effort(state, LIMIT)
+    clock.advance(STALE_AFTER_SECONDS + 0.1)
+    ready, reasons = state.readiness_detail()
+    assert not ready
+    assert not any('straining' in r for r in reasons)
+    assert state.snapshot()['straining'] == []
+
+
+def test_a_hot_servo_is_not_ready(state):
+    """A servo near its own cut-out is a robot about to stop by itself."""
+    _ready_with_effort(state, 0.2)
+    state.update_temperatures({'shoulder_lift': TEMPERATURE_LIMIT_C + 1})
+    ready, reasons = state.readiness_detail()
+    assert not ready
+    assert any("'shoulder_lift' is at 66 C" in r for r in reasons)
+
+
+def test_a_warm_servo_is_fine(state):
+    """Below the limit, temperature is shown and not judged."""
+    _ready_with_effort(state, 0.2)
+    state.update_temperatures({'shoulder_lift': 41.0})
+    assert state.is_ready()
+    assert state.snapshot()['joints']['shoulder_lift']['temperature'] == 41.0
+
+
+def test_a_temperature_that_stopped_arriving_is_shown_as_unknown(state, clock):
+    """A stale reading is neither hot nor cool. It is missing, and says so."""
+    _ready_with_effort(state, 0.2)
+    state.update_temperatures({'shoulder_lift': TEMPERATURE_LIMIT_C + 5})
+    clock.advance(STALE_AFTER_SECONDS + 0.1)
+    state.update_joints(['shoulder_lift'], [0.1], [0.0], [0.2])
+    snap = state.snapshot()
+    assert snap['joints']['shoulder_lift']['temperature'] is None
+    assert snap['hot'] == []
+    assert snap['ready']
+
+
+def test_effort_limits_come_from_the_urdf():
+    """Joints with an effort limit are read; others, and transmissions, are not."""
+    urdf = """
+    <robot name="toy">
+      <joint name="a" type="revolute"><limit effort="1.3002" velocity="1"/></joint>
+      <joint name="fixed" type="fixed"/>
+      <joint name="b" type="revolute"><limit lower="0" upper="1"/></joint>
+      <transmission name="t"><joint name="a"/></transmission>
+    </robot>
+    """
+    assert effort_limits_from_urdf(urdf) == {'a': pytest.approx(1.3002)}
+
+
+def test_an_unreadable_urdf_gives_no_limits():
+    """No limits means no strain check, not a crash in a ROS callback."""
+    assert effort_limits_from_urdf('<robot') == {}
+
+
+def test_a_gripper_holding_something_is_not_straining(state, clock):
+    """
+    A gripper closed on a cube pushes at its limit, and that is the point.
+
+    Its load is still shown. It just never makes the robot not ready.
+    """
+    state.set_effort_limits({'gripper': LIMIT}, holding={'gripper'})
+    state.update_controllers([(name, 'active') for name in REQUIRED_CONTROLLERS])
+    state.update_joints(['gripper'], [0.2], [0.0], [LIMIT])
+    clock.advance(STRAIN_AFTER_SECONDS * 4)
+    state.update_joints(['gripper'], [0.2], [0.0], [LIMIT])
+    snap = state.snapshot()
+    assert snap['joints']['gripper']['load'] == pytest.approx(1.0)
+    assert snap['straining'] == []
+    assert snap['ready']
+
+
+def test_the_gripper_is_named_by_the_descriptions_semantics():
+    """Both robots' descriptions carry the block; read it, do not guess a name."""
+    urdf = """
+    <robot name="toy">
+      <threevn_semantics profile="toy"><gripper joint="j_jaw" open="1" closed="0"/>
+      </threevn_semantics>
+    </robot>
+    """
+    assert gripper_joints_from_urdf(urdf) == {'j_jaw'}
+    assert gripper_joints_from_urdf('<robot name="x"/>') == set()

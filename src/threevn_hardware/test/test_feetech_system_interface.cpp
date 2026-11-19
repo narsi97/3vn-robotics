@@ -29,6 +29,7 @@
 
 #include <gmock/gmock.h>
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 #include <string>
@@ -104,8 +105,15 @@ private:
   bool deaf_ = false;
 };
 
+/// Effort at 100 % load: the SO-101's derived joint limit, N.m.
+constexpr double kFullLoad = 1.3002;
+
 /// A HardwareInfo shaped like the <ros2_control> block describe() emits.
-hardware_interface::HardwareInfo makeInfo()
+///
+/// `self_reporting` adds what the SO-101's servos measure about
+/// themselves: an effort and a temperature state interface per joint.
+/// Without it, the shape the interface had before it read either.
+hardware_interface::HardwareInfo makeInfo(bool self_reporting = true)
 {
   hardware_interface::HardwareInfo info;
   info.name = "so101_follower";
@@ -132,6 +140,11 @@ hardware_interface::HardwareInfo makeInfo()
     joint.command_interfaces.push_back(make_interface("position"));
     joint.state_interfaces.push_back(make_interface("position"));
     joint.state_interfaces.push_back(make_interface("velocity"));
+    if (self_reporting) {
+      joint.parameters["full_load_effort"] = std::to_string(kFullLoad);
+      joint.state_interfaces.push_back(make_interface("effort"));
+      joint.state_interfaces.push_back(make_interface("temperature"));
+    }
     info.joints.push_back(joint);
   }
   return info;
@@ -262,9 +275,120 @@ TEST(Init, RefusesADirectionThatIsNotASign)
 TEST(Init, RefusesAJointWithNoVelocityState)
 {
   auto info = makeInfo();
-  info.joints[1].state_interfaces.pop_back();
+  auto & states = info.joints[1].state_interfaces;
+  states.erase(
+    std::remove_if(
+      states.begin(), states.end(),
+      [](const hardware_interface::InterfaceInfo & i) {return i.name == "velocity";}),
+    states.end());
   Rig rig(info);
   EXPECT_FALSE(rig.init_ok);
+}
+
+TEST(Init, RefusesAnEffortStateWithNoFullLoadEffort)
+{
+  // The servo reports a percentage. Without knowing what 100 % is, any
+  // N.m put on /joint_states would look measured and be invented.
+  auto info = makeInfo();
+  info.joints[3].parameters.erase("full_load_effort");
+  Rig rig(info);
+  EXPECT_FALSE(rig.init_ok);
+  EXPECT_THAT(rig.interface.lastFault(), HasSubstr("wrist_flex"));
+  EXPECT_THAT(rig.interface.lastFault(), HasSubstr("full_load_effort"));
+}
+
+TEST(Init, LoadAndTemperatureAreOptional)
+{
+  // A description that asks for neither gets the interface as it was.
+  Rig rig(makeInfo(false));
+  ASSERT_TRUE(rig.init_ok) << rig.interface.lastFault();
+  ASSERT_TRUE(rig.configureAndActivate());
+  rig.command("shoulder_pan", 0.5);
+  rig.cycles(100);
+  EXPECT_NEAR(rig.state("shoulder_pan"), 0.5, ft::kRadiansPerCount);
+}
+
+// ---------------------------------------------------- self-reporting --
+//
+// What the 3VN arm cannot tell you: that it has been stopped. A bus
+// servo held still keeps trying, and says how hard.
+
+TEST(Load, AJointAtRestPushesOnNothing)
+{
+  Rig rig;
+  ASSERT_TRUE(rig.init_ok);
+  ASSERT_TRUE(rig.configureAndActivate());
+  rig.cycles(5);
+  EXPECT_NEAR(rig.state("shoulder_lift", "effort"), 0.0, 1e-9);
+}
+
+TEST(Load, AJointHeldStillReportsItsFullEffort)
+{
+  Rig rig;
+  ASSERT_TRUE(rig.init_ok);
+  ASSERT_TRUE(rig.configureAndActivate());
+  rig.bus().servo(2).blocked = true;
+  rig.command("shoulder_lift", 0.5);
+  rig.cycles(25);   // half a second of pushing
+
+  EXPECT_NEAR(rig.state("shoulder_lift"), 0.0, 1e-9) << "it has not moved";
+  EXPECT_NEAR(rig.state("shoulder_lift", "effort"), kFullLoad, 1e-6)
+    << "and it is pushing as hard as it can, toward the goal";
+  EXPECT_NEAR(rig.state("elbow_flex", "effort"), 0.0, 1e-9) << "nobody else is";
+}
+
+TEST(Load, PushingTheOtherWayIsANegativeEffort)
+{
+  Rig rig;
+  ASSERT_TRUE(rig.init_ok);
+  ASSERT_TRUE(rig.configureAndActivate());
+  rig.bus().servo(2).blocked = true;
+  rig.command("shoulder_lift", -0.5);
+  rig.cycles(5);
+  EXPECT_NEAR(rig.state("shoulder_lift", "effort"), -kFullLoad, 1e-6);
+}
+
+TEST(Load, EffortIsInTheJointsDirectionNotTheServos)
+{
+  // A servo mounted the other way round pushes toward LOWER counts to
+  // drive the joint positive. The effort reported must still be
+  // positive, or a strain check would read a push as a pull.
+  auto info = makeInfo();
+  info.joints[1].parameters["direction"] = "-1";
+  Rig rig(info);
+  ASSERT_TRUE(rig.init_ok);
+  ASSERT_TRUE(rig.configureAndActivate());
+  rig.bus().servo(2).blocked = true;
+  rig.command("shoulder_lift", 0.5);
+  rig.cycles(5);
+  EXPECT_LT(rig.bus().goal(2), ft::kCentreCount) << "the servo is driven down";
+  EXPECT_NEAR(rig.state("shoulder_lift", "effort"), kFullLoad, 1e-6);
+}
+
+TEST(Load, ReleasedTheJointMovesAndTheEffortFalls)
+{
+  Rig rig;
+  ASSERT_TRUE(rig.init_ok);
+  ASSERT_TRUE(rig.configureAndActivate());
+  rig.bus().servo(2).blocked = true;
+  rig.command("shoulder_lift", 0.5);
+  rig.cycles(10);
+  ASSERT_GT(rig.state("shoulder_lift", "effort"), 1.0);
+  rig.bus().servo(2).blocked = false;
+  rig.cycles(100);
+  EXPECT_NEAR(rig.state("shoulder_lift"), 0.5, ft::kRadiansPerCount);
+  EXPECT_NEAR(rig.state("shoulder_lift", "effort"), 0.0, 1e-9);
+}
+
+TEST(Temperature, IsTheServosOwnReading)
+{
+  Rig rig;
+  ASSERT_TRUE(rig.init_ok);
+  rig.bus().servo(4).table[ft::reg::kPresentTemperature] = 58;
+  ASSERT_TRUE(rig.configureAndActivate());
+  rig.cycles(2);
+  EXPECT_DOUBLE_EQ(rig.state("wrist_flex", "temperature"), 58.0);
+  EXPECT_DOUBLE_EQ(rig.state("shoulder_pan", "temperature"), 25.0);
 }
 
 // -------------------------------------------------------- configure --

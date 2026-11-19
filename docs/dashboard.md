@@ -38,6 +38,31 @@ would stay green through a total robot outage.
 
 `/readyz` is what a deploy gate, an alert or an operator should watch.
 
+### On a robot whose servos report their own load
+
+The SO-101's bus servos measure their load and temperature, and its
+description gives each joint an `effort` state (and, on the real arm, a
+`temperature` one). Where those exist, `/readyz` has two more
+conditions:
+
+- **No joint straining**: effort at 90% or more of the joint's limit,
+  sustained for 0.5 s. The limit is read from `/robot_description`. A
+  normal move peaks well under half of it; a joint pressed against the
+  bench sits at 100%. The gripper named in the description's semantics
+  is exempt, because a gripper holding something is meant to push.
+- **No servo hot**: 65 °C or more, five degrees short of the STS3215's
+  own 70 °C cut-out. Read from `/dynamic_joint_states`.
+
+Stale effort or temperature never counts against the robot: a robot
+whose state has stopped is already not ready for that reason. A joint
+with no effort reading, like every joint of the 3VN arm, shows no load
+and is never judged; the check is missing, not passed.
+
+This matters because the trajectory controller can report `SUCCEEDED`
+for an arm that stopped against an obstacle: it sets no per-joint goal
+tolerance. Lesson *Alive is not the same as ready* shows exactly that,
+on the SO-101 in Gazebo.
+
 ## Everything ages out
 
 Two bugs were found by killing a running robot and watching the screen,

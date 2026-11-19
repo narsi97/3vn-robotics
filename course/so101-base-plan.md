@@ -206,7 +206,7 @@ is expected to work.
 | 32 | Parts generated from the same numbers | Not on this path: the SO-101's parts are upstream's STLs | |
 | 33 | A decision with a number attached | Not on this path | |
 | 34 | Deploy, and roll back with a pull | Version: needs lesson 24's image | no |
-| 35 | Alive is not the same as ready | Version, and a better one: the servo reports load and temperature. See R5. | the dashboard against the SO-101 in Gazebo: `/readyz` ready, six joints in `/api/state` |
+| 35 | Alive is not the same as ready | **Written.** Readiness also fails when a joint strains at 90% of its limit for half a second, or a servo reaches 65 °C. The gripper is exempt from strain. | in Gazebo, every step as written: `/readyz` 200, then 503 naming `shoulder_lift` and `elbow_flex` at 99 to 101% while the goal that pressed them into the bench reported `SUCCEEDED`, then 200 again. All 6 scenarios passed with `/readyz` sampled 257 times, never 503. Temperature end to end on the simulated bus only. |
 | 36 | Metrics from a robot behind a home router | Runs | robot-agnostic |
 
 ### Stage 6: Make it capable
@@ -352,7 +352,10 @@ arm, with one argument changed.
   rises and the readiness check says so. On the 3VN arm nothing would
   notice.
 - **Evidence:** the readiness check, with a test, and one recorded
-  trace.
+  trace. The check and its tests exist (the strain and temperature
+  rules in `threevn_dashboard`, the load and temperature reads in the
+  Feetech interface) and the Gazebo rehearsal is lesson 35's SO-101
+  steps. Still to come: the trace from the real arm.
 
 R1 to R3 are "the first few". R4 and R5 follow as soon as R3 passes.
 

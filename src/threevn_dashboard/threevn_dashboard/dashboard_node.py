@@ -26,17 +26,21 @@ network must degrade observability, never motion.
 
 import sys
 
+from control_msgs.msg import DynamicJointState
 from controller_manager_msgs.srv import ListControllers, ListHardwareComponents
 import rclpy
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState
+from std_msgs.msg import String
 
 from threevn_dashboard.fleet_reporter import FleetReporter
 from threevn_dashboard.http_server import make_server, serve_in_background
 from threevn_dashboard.otlp_metrics import OtlpMetricsExporter
-from threevn_dashboard.robot_state import RobotState
+from threevn_dashboard.robot_state import (
+    effort_limits_from_urdf, gripper_joints_from_urdf, RobotState)
 from threevn_dashboard.version import missing_fields, version_info
 
 #: Controller and hardware lists change rarely, so they are polled rather
@@ -61,6 +65,20 @@ class DashboardNode(Node):
 
         self.create_subscription(
             JointState, '/joint_states', self._on_joint_state, 10)
+
+        # Effort limits come from the description the robot is running.
+        # robot_state_publisher latches it (transient local), so a
+        # dashboard started after the robot still gets it.
+        self.create_subscription(
+            String, '/robot_description', self._on_description,
+            QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+
+        # Every state interface the hardware exports, including ones that
+        # /joint_states has no field for. The SO-101's servos export
+        # `temperature`; a robot whose hardware does not simply never
+        # sends one, and the dashboard shows it as not reported.
+        self.create_subscription(
+            DynamicJointState, '/dynamic_joint_states', self._on_dynamic_state, 10)
 
         # Service calls must not share a callback group with the timer
         # that makes them, or the timer blocks waiting on itself and the
@@ -132,7 +150,24 @@ class DashboardNode(Node):
     # -- ROS callbacks -------------------------------------------------
 
     def _on_joint_state(self, msg):
-        self.state.update_joints(msg.name, msg.position, msg.velocity)
+        self.state.update_joints(msg.name, msg.position, msg.velocity, msg.effort)
+
+    def _on_description(self, msg):
+        limits = effort_limits_from_urdf(msg.data)
+        holding = gripper_joints_from_urdf(msg.data)
+        self.state.set_effort_limits(limits, holding=holding)
+        self.get_logger().info(
+            f'effort limits for {len(limits)} joints from /robot_description '
+            f'(not judged for strain: {", ".join(sorted(holding)) or "none"})')
+
+    def _on_dynamic_state(self, msg):
+        temperatures = {}
+        for name, values in zip(msg.joint_names, msg.interface_values):
+            for interface, value in zip(values.interface_names, values.values):
+                if interface == 'temperature':
+                    temperatures[name] = value
+        if temperatures:
+            self.state.update_temperatures(temperatures)
 
     def _poll(self):
         """Refresh controller and hardware lists."""

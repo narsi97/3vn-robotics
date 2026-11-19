@@ -534,6 +534,7 @@ def _ros2_control(root, cfg, target, plugin):
                 f'which the upstream URDF does not have or does not limit '
                 f'(it has {sorted(limits)})')
         joint = ET.SubElement(block, 'joint', name=name)
+        reports = _self_reported(cfg, name)
         if target not in VENDOR_PLUGINS:
             # Only real hardware needs to know which servo on the bus,
             # and how that servo's counts map onto this joint's radians.
@@ -542,13 +543,37 @@ def _ros2_control(root, cfg, target, plugin):
             for key in ('zero_count', 'direction'):
                 if key in spec:
                     _param(joint, key, spec[key])
+            if 'load' in reports:
+                # The servo reports load as a share of what it can
+                # deliver. 100 % is the joint's effort limit, derived
+                # from the same datasheet and derating, so a load of
+                # 0.9 and an effort of 0.9 x limit are the same claim.
+                _param(joint, 'full_load_effort', joint_limits_for(cfg, name)[0])
         command = ET.SubElement(joint, 'command_interface', name='position')
         _param(command, 'min', limits[name][0])
         _param(command, 'max', limits[name][1])
         state = ET.SubElement(joint, 'state_interface', name='position')
         _param(state, 'initial_value', '0.0')
         ET.SubElement(joint, 'state_interface', name='velocity')
+        # Effort, where the servo measures its own. Every target gets it,
+        # so the dashboard's strain check can be rehearsed in Gazebo,
+        # where the physics engine reports the effort a joint is
+        # applying, before it is relied on with a real arm. Mock has no
+        # physics and reports zero.
+        if 'load' in reports:
+            ET.SubElement(joint, 'state_interface', name='effort')
+        # Temperature only from real servos: nothing simulates one, and a
+        # simulated 25 C would be a number that looks measured.
+        if 'temperature' in reports and target not in VENDOR_PLUGINS:
+            ET.SubElement(joint, 'state_interface', name='temperature')
     return block
+
+
+def _self_reported(cfg, joint):
+    """Return what a joint's servo measures about itself, from its datasheet."""
+    spec = (cfg.get('joints') or {}).get(joint) or {}
+    servo = (cfg.get('servos') or {}).get(spec.get('servo')) or {}
+    return set(servo.get('feedback') or ())
 
 
 def _param(parent, name, value):
