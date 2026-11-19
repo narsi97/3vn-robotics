@@ -1,0 +1,368 @@
+# A side track, not a numbered stage: `kind: track`, no `number`, filed
+# after every stage. It is not counted in any robot's "lessons written for
+# it", and every lesson in it is `scope: any`, because its worked example
+# is the 3VN Arm 1's design whichever robot you learn on.
+id: make-your-own-robot
+kind: track
+title: Make your own robot
+price: free
+summary: >-
+  The course treats each robot as an open design to build on: the SO-101
+  is TheRobotStudio's, and the 3VN Arm 1 is this project's, published the
+  same way. This track is the other side of that. It follows how the 3VN
+  Arm 1 itself was designed, from one YAML profile that the simulator,
+  the printed parts and the tests all read, and ends with you designing
+  an arm of your own the same way.
+
+outcomes:
+  - Emit target-specific content from one description without falling into xacro's two classic traps.
+  - Generate printable parts from the robot profile, and let the CAD correct the simulation rather than the reverse.
+  - Make a mechanical decision with a number attached, and write a bill of materials that does not flatter the robot.
+  - Design an arm profile of your own without editing a single model file, and watch every test widen to cover it.
+
+prerequisites:
+  - Stage 2 complete. The first lesson builds on the seam and on one source of physical truth.
+  - No hardware. The CAD lessons run in the dev container; the geometry kernel is already in the image, and is most of the reason it is 6 GB.
+  - Any robot. The worked example is the 3VN Arm 1's design, so these lessons are the same whichever robot you picked.
+
+lessons:
+  - id: one-file-three-targets
+    title: One file, three targets, two traps
+    scope: any
+    tags: [ros2, simulation]
+    builds_on: [the-seam, one-source-of-truth]
+    minutes: 30
+    objective: Emit target-specific content from one description, and avoid the traps that come with it.
+    body: |
+      The seam from Stage 1 lives in one xacro file. A block called
+      `<ros2_control>` lists each joint's command and state interfaces and
+      names a hardware plugin, and a conditional picks the plugin by target.
+      Everything else in the description is identical across all three.
+
+      Simulator-specific content goes in `<gazebo>` tags, which every URDF
+      parser ignores. Ignoring them would be enough to keep them harmless —
+      but this project goes further and emits them only for the `gz` target,
+      because a description destined for hardware should contain no
+      simulator content at all. That is asserted, not hoped.
+
+      Two traps, both met in this project:
+
+      **The bare-token conditional.** `${target == 'mock'}` looks right and
+      raises `NameError`: xacro substitutes the argument as a bare word,
+      which Python then tries to resolve as a variable. The working form
+      quotes the substitution — `${'$(arg target)' == 'mock'}`.
+
+      **Double hyphens in XML comments.** `--` is illegal inside an XML
+      comment, and the parser's complaint — "not well-formed (invalid
+      token)" — does not mention comments at all. This project has a test
+      that scans every xacro and world file for it. It caught one in a
+      world file, and the first automated fix removed the comment's own
+      delimiters along with the offending hyphens. The test caught that
+      too. Mechanical fixes to text deserve the same suspicion as any other
+      code.
+
+      A third trap shows up in Stage 3, and it is worth meeting here: if the
+      simulator takes its description from a *topic* rather than from the
+      same launch substitution, a stale node left over from an earlier run
+      can hand it the wrong robot. The error arrives half a minute later and
+      blames a plugin.
+    steps:
+      - do: Find the three branches.
+        run: grep -n -B1 -A3 "xacro:if" src/threevn_robot_description/urdf/ros2_control/arm.ros2_control.xacro
+      - do: Count Gazebo extension tags per target.
+        run: |
+          make urdf TARGET=gz   | grep -c "<gazebo"
+          make urdf TARGET=mock | grep -c "<gazebo"
+        expect: A positive count for `gz`; `0` for `mock`.
+      - do: Read the test that scans for the comment trap.
+        run: less src/threevn_robot_description/test/test_xacro_comments.py
+    checkpoint: >-
+      You can show that the `mock` and `esp32` expansions contain no
+      simulator content, and explain both traps from memory.
+    pitfalls:
+      - symptom: '`make urdf` raises `NameError: name ''mock'' is not defined` or similar.'
+        cause: A conditional using the bare-token form.
+        fix: "Quote the substitution: `${'$(arg target)' == 'mock'}`."
+      - symptom: An XML file fails with "not well-formed (invalid token)" and the line looks fine.
+        cause: A `--` inside a comment, often several lines earlier.
+        fix: Use a single hyphen. `test_xacro_comments.py` finds them before the parser does.
+    concepts:
+      - term: ros2_control block
+        meaning: >-
+          The part of a description listing each joint's command and state
+          interfaces and naming the hardware plugin that serves them.
+      - term: Gazebo extension tag
+        meaning: >-
+          A `<gazebo>` element carrying simulator-only content. URDF parsers
+          ignore it; this project also omits it from non-simulator builds.
+    quiz:
+      - q: URDF parsers ignore `<gazebo>` tags anyway. Why bother omitting them from the hardware build?
+        a: >-
+          So the hardware build contains no simulator content at all — a
+          property a test can assert. "Present but ignored" is a convention;
+          "absent" is checkable.
+      - q: Why does `${target == 'mock'}` fail?
+        a: >-
+          The argument is substituted as a bare word, so Python sees
+          `mock == 'mock'` and looks for a variable called `mock`.
+    exercise:
+      task: >-
+        On a scratch branch, change one conditional in
+        `arm.ros2_control.xacro` to the bare-token form and run `make test`.
+        Record the exact error text a future teammate would see, then
+        revert. Would that message have led you to the cause?
+    read:
+      - gazebo.md
+      - troubleshooting.md
+
+  - id: cad-from-the-same-yaml
+    title: Parts generated from the same numbers
+    scope: any
+    tags: [hardware, ros2]
+    builds_on: [one-source-of-truth]
+    minutes: 40
+    objective: Generate printable parts from the robot profile, and let the CAD correct the model.
+    body: |
+      The profile already holds every length, and the simulation reads it
+      directly. Drawing the parts by hand in a CAD program would make the
+      printed arm and the simulated arm two independent statements about one
+      robot — and they would disagree within a week, silently, because
+      neither knows about the other.
+
+      So the parts are **generated** from the profile, with a parametric CAD
+      library. Two tests keep that honest: the printed beam must equal the
+      profile's link length, and scaling the profile must scale the part —
+      otherwise a generator that ignored its input would pass everything.
+
+      Then the printability tests — each the cheap version of a mistake that
+      otherwise costs a print: the part is a closed solid; it fits a 220 mm
+      bed; no hole is smaller than the nozzle; M3 holes carry the clearance
+      an FDM printer needs; every part prints without support.
+
+      One caught a real bug at once. The first servo bracket was sized to
+      the servo's **body**, 40.7 mm. The mounting screws sit **49.5 mm**
+      apart, outside the body — so both holes fell outside the material and
+      cut nothing. The part exported fine and looked right.
+
+      And then **the CAD changed the robot.** The pan servo stands in the
+      base, and an MG996R is **42.9 mm** tall. The base was **30 mm**. It could
+      not contain the part it existed to hold. The simulation never noticed,
+      because a URDF box does not have to hold anything. The base is now
+      45 mm, the shoulder joint moved up with it, and three hand-computed
+      test heights were updated.
+
+      Some mistakes only show in the whole assembly. The first turret held
+      the lift servo upright, like the pan servo below it — which would have
+      put the lift axis about 44 mm up instead of the 20 mm the description
+      says. No single measurement was wrong; the part was simply the wrong
+      shape. `make cad` now writes the whole arm, placed at its joint
+      origins, as one file — and checks every pair of parts for collisions.
+    steps:
+      - do: Generate every part, for both candidate mechanisms.
+        run: make cad
+        expect: STL and STEP files under `cad/out/`, plus a generated `PRINTING.md`.
+      - do: Run the geometry and printability tests.
+        run: make cad-test
+      - do: Read the generated print guide — orientations, quantities, fasteners.
+        run: less cad/out/direct/PRINTING.md
+      - do: >-
+          Open `cad/out/direct/assembly.step` in any STEP viewer (FreeCAD is
+          free) and look at the whole arm at its home pose.
+    checkpoint: >-
+      The parts generate, `make cad-test` passes, and you have looked at the
+      assembled arm and can find the two parts closest to colliding.
+    pitfalls:
+      - symptom: '`make cad` fails because `$CAD_PYTHON` is empty or `build123d` is missing.'
+        cause: >-
+          Your dev image predates the `cad` Dockerfile stage. The CAD library
+          lives in its own virtual environment inside the image, because it
+          needs newer Python packages than the system ones ROS depends on.
+        fix: Rebuild the image with `make setup`.
+      - symptom: Every check passes and the assembled arm is the wrong shape.
+        cause: Checks test one number at a time; a part can satisfy all of them and still be oriented wrongly.
+        fix: Look at the assembly. It is the cheapest review the design gets before filament is spent.
+    concepts:
+      - term: Parametric CAD
+        meaning: >-
+          Geometry generated by code from parameters — here, the robot
+          profile — rather than drawn by hand.
+      - term: Support-free printing
+        meaning: >-
+          A part designed so no overhang needs temporary support material.
+          Enforced here by a test.
+      - term: Print clearance
+        meaning: >-
+          Extra size added to holes and fits because an FDM printer prints
+          holes undersized. A nominal 3.0 mm hole will not take an M3 screw.
+    quiz:
+      - q: Why is "the generator reads the profile" not enough on its own?
+        a: >-
+          It must be shown that changing the profile changes the part. A
+          generator that ignored its input could still produce one correct
+          part and pass a single-value check.
+      - q: How did generating the CAD change the simulated robot?
+        a: >-
+          The base had to grow from 30 to 45 mm to contain the pan servo,
+          which moved the shoulder joint up — in the profile, so the
+          simulation followed.
+    exercise:
+      task: >-
+        Find the test that checks where the lift axis sits relative to the
+        joint origin. Explain in two sentences why no test on the turret's
+        own dimensions could have caught the upright-servo mistake.
+      hint: Look in `cad/tests/` for a test mentioning the lift axis.
+    read:
+      - cad.md
+
+  - id: decide-with-numbers
+    title: A decision with a number attached
+    scope: any
+    tags: [hardware]
+    builds_on: [cad-from-the-same-yaml]
+    minutes: 35
+    objective: Make a mechanical decision with measured evidence, and price the robot honestly.
+    body: |
+      Two mechanisms were possible for this arm. **Direct drive** puts a
+      servo at each joint — simple, but the servos' mass rides out on the
+      arm. A **parallel linkage** keeps servos at the base and drives distal
+      joints through rods — much better mass distribution, and the clever
+      part of many hobby arm designs.
+
+      The decision was deliberately left unmade until it had a number.
+      Because the CAD takes the mechanism as a parameter, both were generated
+      from the same profile:
+
+      | | PLA | lifted at the shoulder |
+      |---|---|---|
+      | **direct drive** (chosen) | 168 g | 140 g |
+      | parallel linkage | 264 g | 85 g |
+
+      The linkage lifts 39% less at the joint with the least margin. That is
+      real. It was not enough, because a linkage is a **closed kinematic
+      chain**, which a URDF cannot express. Every test, every kinematics
+      check, every tipping margin and every machine-learning label in this
+      project rests on the simulation being faithful to the robot. A
+      mechanism that forces the model into an approximation costs more than
+      the grams it saves. It also needs 96 g more plastic.
+
+      The decision then settled the masses. For fifteen phases every link
+      mass had been a guess. Generated geometry gave **computed** values, and
+      they were wrong in both directions: the base 2.3× too heavy, the
+      shoulder 40% too light. That is worse than being uniformly wrong — a
+      margin computed from them could have been optimistic or pessimistic
+      and nobody could tell which. `computed` is kept distinct from
+      `measured`: plastic density is nominal, fasteners are not counted, and
+      **nothing has been weighed**.
+
+      And the price is stated twice, on purpose. **About $30 for the moving
+      arm.** **About $45–55 for a system that works**, once you add the
+      controller, the servo driver and a power supply that will not brown it
+      out. Quoting the first and implying the second would be a
+      misrepresentation. Two upgrades are priced in, not hidden: a $2 gyro
+      that turns out to be essential on the mobile base, and a $100 lidar
+      that navigation would need — which would roughly triple the robot's
+      cost, and is therefore a product decision, not a software one.
+    steps:
+      - do: Compare declared and computed masses, link by link.
+        run: make cad-masses
+        expect: Each link's declared mass beside its computed one — matching, now that the profile has been updated.
+      - do: Count how the profile's numbers are sourced.
+        run: |
+          grep -o "provenance: [a-z]*" src/threevn_robot_description/config/threevn_arm_v1.yaml | sort | uniq -c
+      - do: Read the two-figure bill of materials.
+        run: less docs/bom-hardware.md
+    checkpoint: >-
+      You can state why direct drive won despite lifting more, and give both
+      prices for the robot without being asked which.
+    pitfalls:
+      - symptom: A tipping margin, or any derived safety number, looks comfortable.
+        cause: It was computed from estimated masses.
+        fix: Check the provenance of every input. A margin is only as good as its least-measured number.
+    concepts:
+      - term: Closed kinematic chain
+        meaning: >-
+          A mechanism whose links form a loop, like a parallel linkage. A URDF
+          tree cannot represent it exactly.
+      - term: Bill of materials (BOM)
+        meaning: >-
+          Every part and its cost. Here stated twice — the moving arm, and
+          the complete working system.
+    quiz:
+      - q: The linkage lifts 39% less. Why was that not enough?
+        a: >-
+          Because URDF cannot express its closed chain, the simulation would
+          become an approximation of the robot — and every test, kinematics
+          check, margin and label depends on it being faithful.
+      - q: Why keep `computed` separate from `measured`?
+        a: >-
+          Computed masses use nominal plastic density and datasheet servo
+          masses and ignore fasteners. Calling them measured would claim a
+          precision nobody has, and nothing has been weighed.
+    exercise:
+      task: >-
+        Price the complete working system from `docs/bom-hardware.md` at
+        current prices where you live. Then price the version with feedback
+        servos instead. What would you have to believe about the course's
+        students to choose the second?
+    read:
+      - cad.md
+      - bom-hardware.md
+      - so101-spike.md
+
+project:
+  title: Design your own arm
+  scope: any
+  minutes: 75
+  brief: |
+    Make a third arm profile — yours — without editing a single xacro
+    file. You will change its geometry, watch every test widen to cover it,
+    look at it, and then try to make it lie about itself. Each lie should be
+    caught by a test you can name.
+
+    This is the mechanism a student with a different printed arm would use
+    to bring their own robot into this stack.
+  tasks:
+    - do: Copy the default profile to a new one named after you.
+      run: cp src/threevn_robot_description/config/threevn_arm_v1.yaml src/threevn_robot_description/config/threevn_arm_v1_yourname.yaml
+    - do: >-
+        In your copy, set `model: threevn_arm_v1_yourname` and give it a
+        `display_name`. Lengthen the forearm by 20% and shorten the upper
+        arm by 10% — remember to move the joint origins that sit at the end
+        of each link, not just the link boxes.
+    - do: Rebuild once, because you added a file. Then run the suite.
+      run: |
+        make build
+        make test
+    - do: Look at your arm.
+      run: make view PROFILE=threevn_arm_v1_yourname
+    - do: >-
+        Make it lie, three ways, one at a time, running `make test` after
+        each and reverting before the next: remove a `provenance` line from
+        a link; set a joint's effort above its servo's stall torque; give a
+        link a negative dimension.
+    - do: >-
+        Decide whether to keep your profile. If you keep it, every test runs
+        against it forever. If you delete it, run `make build` again and read
+        what it prints: it removes the link your profile left behind in
+        `install/`. Before that step existed, deleting a profile broke the
+        whole suite.
+  done_when:
+    - '`make test` is green with your profile included, and the test count went up.'
+    - '`make view PROFILE=threevn_arm_v1_yourname` shows your arm, visibly different.'
+    - Three lies were each caught by a named test.
+    - '`git diff --stat` shows no change to any `.xacro` file.'
+  hints:
+    - title: The forearm got longer, but the wrist did not move
+      body: >-
+        A link's box and the joint at its far end are separate numbers. The
+        `elbow_joint` origin sits at the end of the upper arm; the
+        `wrist_joint` origin at the end of the forearm. Change the box and
+        the origin together.
+    - title: How many more tests should run?
+      body: >-
+        Every description test is parametrised over every profile, and many
+        over every target as well. Compare the summary line from before and
+        after — the difference is the cost, and the coverage, of one robot.
+  read:
+    - development.md
+    - decisions/0005-yaml-single-source.md

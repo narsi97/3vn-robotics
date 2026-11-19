@@ -1,5 +1,9 @@
-# The robot the course was written on. Every lesson's default text is
-# this robot's version; the others replace only what has to change.
+# An open design the course builds on, like the SO-101: this project's,
+# published the same way TheRobotStudio publishes theirs. It is also the
+# robot the course was first written on, so for now every lesson's
+# default text is its version and the others replace only what has to
+# change (`reference: true`). How it was designed is the side track
+# "Make your own robot".
 id: 3vn-arm1
 name: 3VN Arm 1
 order: 1
@@ -15,16 +19,17 @@ price_note: >-
 kind: Four-joint arm, with an optional mobile base
 has: [arm, gripper, wheels, camera]
 summary: >-
-  Our own arm: hobby servos, printed parts generated from the same YAML as
-  the simulation, and an ESP32 as a deliberately dumb driver. The cheapest
-  way through the whole stack, and the only robot here whose every part you
-  can regenerate and change.
+  An open arm design, published in this repository: hobby servos, printed
+  parts generated from the same YAML as the simulation, and an ESP32 as a
+  deliberately dumb driver. The cheapest way through the whole stack, and
+  the robot whose design the *Make your own robot* side track takes apart,
+  because every part of it can be regenerated and changed.
 status: >-
   The whole course runs on it **in simulation**. Its parts have been
   printed; nothing has been bought, assembled or powered yet. The masses
   are computed rather than weighed, and it has never picked anything up:
   the grasp lesson ends on that open problem.
 teaches:
-  - Designing the robot itself, because every part is CAD generated from one profile
+  - Changing the design itself, because every part is CAD generated from one profile
   - Living without feedback, because hobby servos report nothing back
   - Composing an arm with a mobile base into one robot
