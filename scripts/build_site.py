@@ -61,6 +61,11 @@ of three kinds:
 So a robot's coverage is counted, never claimed, the same way stage
 durations are summed rather than typed.
 
+A SIDE TRACK is a course file with `kind: track`: unnumbered, filed
+after every stage, shown on its own below the course, and left out of a
+robot's count. Make your own robot is one: the design story of the 3VN
+Arm 1, which every robot's student can take.
+
 Each robot's copy carries its own topic pages, so a topic lists the
 lessons that robot's student will actually meet.
 
@@ -148,6 +153,10 @@ CURRICULUM = [
 #: a field some page renders as a hole.
 STAGE_FIELDS = ('id', 'number', 'kind', 'title', 'price', 'summary',
                 'outcomes', 'lessons', 'project')
+#: A `stage` and a `tier` are the numbered path. A `track` is a side
+#: track: off that path, unnumbered, filed after every stage, and not in
+#: a robot's count of lessons written for it.
+STAGE_KINDS = ('stage', 'tier', 'track')
 LESSON_FIELDS = ('id', 'title', 'tags', 'minutes', 'objective', 'body',
                  'steps', 'checkpoint')
 PROJECT_FIELDS = ('title', 'minutes', 'brief', 'tasks', 'done_when')
@@ -1057,8 +1066,11 @@ def flavor_view(stages, robot, ref):
 
 
 def coverage(view):
-    """(ready, total) lessons on one robot. Counted, never claimed."""
-    lessons = [le for st in view for le in st['lessons']]
+    """
+    (ready, total) lessons on one robot's numbered course. Counted, never
+    claimed. A side track is off that path, so it is not in the count.
+    """
+    lessons = [le for st in view if not is_track(st) for le in st['lessons']]
     return sum(le['status'] == 'ready' for le in lessons), len(lessons)
 
 
@@ -1322,12 +1334,28 @@ def validate(stages, root, tags=None, robots=None):
             check_doc(rwhere, name)
 
     # ---- the course
-    for expected, stage in enumerate(stages, 1):
-        where = f'stage {stage.get("id", expected)}'
-        need(where, stage, STAGE_FIELDS)
-        if stage.get('number') != expected:
-            errors.append(f'{where}: numbered {stage.get("number")}, '
-                          f'but it is stage {expected} in file order')
+    expected, seen_track = 0, None
+    for stage in stages:
+        where = f'stage {stage.get("id", expected + 1)}'
+        if stage.get('kind') not in STAGE_KINDS:
+            errors.append(f'{where}: kind {stage.get("kind")!r} is not one of '
+                          f'{", ".join(STAGE_KINDS)}')
+        if is_track(stage):
+            # Off the numbered path: after every stage, and unnumbered.
+            seen_track = stage.get('id')
+            need(where, stage, tuple(f for f in STAGE_FIELDS if f != 'number'))
+            if 'number' in stage:
+                errors.append(f'{where}: a side track is not numbered; '
+                              f'remove `number`')
+        else:
+            expected += 1
+            need(where, stage, STAGE_FIELDS)
+            if seen_track:
+                errors.append(f'{where}: comes after side track {seen_track}; '
+                              f'side tracks go after every numbered stage')
+            if stage.get('number') != expected:
+                errors.append(f'{where}: numbered {stage.get("number")}, '
+                              f'but it is stage {expected} in file order')
         price = str(stage.get('price', ''))
         if price != 'free' and not re.fullmatch(r'\$\d+', price):
             errors.append(f'{where}: price {price!r} is neither "free" nor "$N"')
@@ -1457,7 +1485,26 @@ def phase_table(docs):
 
 def stage_word(stage):
     """`kind: tier` marks the stages planned as paid; free or not, they keep the name."""
+    if is_track(stage):
+        return 'Side track'
     return 'Tier' if stage.get('kind') == 'tier' else 'Stage'
+
+
+def is_track(stage):
+    """A side track: off the numbered path, taken after it or alongside it."""
+    return stage.get('kind') == 'track'
+
+
+def stage_name(stage):
+    """How a page names a stage: "Stage 2", "Tier 5", or "Side track"."""
+    if is_track(stage):
+        return stage_word(stage)
+    return f'{stage_word(stage)} {stage["number"]}'
+
+
+def stage_mark(stage, width=1):
+    """The short mark beside a stage in a map or on the ladder: its number, or + for a track."""
+    return '+' if is_track(stage) else f'{stage["number"]:0{width}d}'
 
 
 def price_badge(stage):
@@ -1518,7 +1565,7 @@ def mentioning(name, stages):
 def where(lesson):
     """Where a lesson sits: stage, position, length."""
     stage = lesson['stage']
-    return (f'{stage_word(stage)} {stage["number"]} &middot; lesson '
+    return (f'{stage_name(stage)} &middot; lesson '
             f'{lesson["position"]} &middot; {lesson["minutes"]} min')
 
 
@@ -1667,8 +1714,8 @@ def picker_html(robot, robots, pages, counts, name):
 def crumbs(stage):
     """Breadcrumb back to the course and the stage."""
     return (f'<div class="crumbs"><a href="index.html">The course</a> / '
-            f'<a href="stage-{stage["id"]}.html">{stage_word(stage)} '
-            f'{stage["number"]}: {esc(stage["title"])}</a></div>')
+            f'<a href="stage-{stage["id"]}.html">{stage_name(stage)}: '
+            f'{esc(stage["title"])}</a></div>')
 
 
 # ------------------------------------------------------------- navigation
@@ -1911,7 +1958,7 @@ def stages_nav(view, current):
             f'project-{stage["id"]}.html', 'Project: ' + esc(project['title']),
             current, '&#9670;', planned_mark(project)) + '</li>')
         parts.append(fold(esc(stage['title']), '<ol>' + ''.join(items) + '</ol>',
-                          current in mine, stage['number']))
+                          current in mine, stage_mark(stage)))
     return ''.join(parts)
 
 
@@ -1933,7 +1980,8 @@ def course_nav(robot, view, current, ready_total):
                      f'{round(100 * ready / total)}%"></span></div>'
                      f'<p class="sub">Greyed: planned, not written yet</p>')
     else:
-        parts.append(f'<p class="sub">{len(view)} stages &middot; {total} lessons</p>')
+        path = sum(not is_track(st) for st in view)
+        parts.append(f'<p class="sub">{path} stages &middot; {total} lessons</p>')
 
     parts.append(stages_nav(view, current))
 
@@ -2090,7 +2138,7 @@ def lesson_page(lesson, sequence, position, vocab, by_id):
                    for n in range(1, count + 1))
     parts = [
         crumbs(stage),
-        f'<div class="lesson-head">{stage_word(stage)} {stage["number"]} '
+        f'<div class="lesson-head">{stage_name(stage)} '
         f'&middot; lesson {lesson["position"]} of {count} &middot; '
         f'{hours(lesson["minutes"])}<span class="dots" aria-hidden="true">'
         f'{dots}</span></div>',
@@ -2186,7 +2234,7 @@ def project_page(stage, sequence, position):
     project = stage['project']
     parts = [
         crumbs(stage),
-        f'<div class="lesson-head">{stage_word(stage)} {stage["number"]} '
+        f'<div class="lesson-head">{stage_name(stage)} '
         f'&middot; project &middot; {hours(project["minutes"])}</div>',
         f'<h1>Project: {esc(project["title"])}</h1>',
         rewrite_links(render(project['brief'])),
@@ -2225,7 +2273,7 @@ def stage_page(stage, sequence, vocab):
     lessons = stage['lessons']
     parts = [
         '<div class="crumbs"><a href="index.html">The course</a></div>',
-        f'<div class="lesson-head">{stage_word(stage)} {stage["number"]} '
+        f'<div class="lesson-head">{stage_name(stage)} '
         f'&middot; {len(lessons)} lessons and a project &middot; '
         f'{hours(stage["minutes"])}</div>',
         f'<h1>{esc(stage["title"])} {price_badge(stage)}</h1>',
@@ -2290,8 +2338,8 @@ def glossary_page(stages):
         stage = lesson['stage']
         parts.append(
             f'<dt id="{slug(term)}">{esc(term)}</dt><dd>{inline(meaning)} '
-            f'<a href="lesson-{lesson["id"]}.html">{stage_word(stage)} '
-            f'{stage["number"]}, lesson {lesson["position"]}</a></dd>')
+            f'<a href="lesson-{lesson["id"]}.html">{stage_name(stage)}, '
+            f'lesson {lesson["position"]}</a></dd>')
     parts.append('</dl>')
     return '\n'.join(parts)
 
@@ -2318,8 +2366,8 @@ def tag_page(tag, stages, vocab):
     ]
     for stage, rows in groups:
         parts.append(
-            f'<h2 class="stage-head"><span class="n">{stage_word(stage)} '
-            f'{stage["number"]}</span><a href="stage-{stage["id"]}.html">'
+            f'<h2 class="stage-head"><span class="n">{stage_name(stage)}'
+            f'</span><a href="stage-{stage["id"]}.html">'
             f'{esc(stage["title"])}</a></h2><ul class="picks">')
         for le in rows:
             parts.append(
@@ -2407,9 +2455,9 @@ def ladder_html(stages):
                    if stage.get('skipped') else '')
         out.append(
             f'<section class="stage">'
-            f'<div class="num" aria-hidden="true">{stage["number"]:02d}</div>'
+            f'<div class="num" aria-hidden="true">{stage_mark(stage, 2)}</div>'
             f'<div class="card"><header>'
-            f'<span class="n">{stage_word(stage)} {stage["number"]}</span>'
+            f'<span class="n">{stage_name(stage)}</span>'
             f'<h2><a href="stage-{stage["id"]}.html">{esc(stage["title"])}</a></h2>'
             f'{price_badge(stage)}</header>'
             f'<p class="blurb">{inline(stage["summary"])}</p>'
@@ -2450,6 +2498,8 @@ def how_it_works():
 
 def index_html(stages, robot, ref, counts, vocab):
     """Render one robot's front page: its course, and how far it has got."""
+    tracks = [st for st in stages if is_track(st)]
+    stages = [st for st in stages if not is_track(st)]
     lessons = [le for st in stages for le in st['lessons']]
     total_minutes = sum(st['minutes'] for st in stages)
     free = [st for st in stages if st.get('price') == 'free']
@@ -2499,6 +2549,13 @@ def index_html(stages, robot, ref, counts, vocab):
     parts.append(how_it_works())
     parts.append('<h2>The course</h2>')
     parts.append(ladder_html(stages))
+    if tracks:
+        parts.append('<h2>Side tracks</h2>')
+        parts.append(render(
+            'Off the numbered path, for when you want to go further in one '
+            'direction. Take one after the stage it builds on, or after the '
+            'whole course. They are not counted in the lessons above.'))
+        parts.append(ladder_html(tracks))
 
     tag_counts = {name: 0 for name in vocab}
     for le in lessons:
@@ -2540,15 +2597,19 @@ def robot_page(robot, stages, ref, counts):
 
     parts.append('<h2>The course on this robot</h2><table class="syllabus"><tr>'
                  '<th>Stage</th><th>Ready</th><th>Planned</th><th>Not on this robot</th></tr>')
-    for st in stages:
+    def row(st):
         done = sum(le['status'] == 'ready' for le in st['lessons'])
-        parts.append(
-            f'<tr><td><a href="stage-{st["id"]}.html">{stage_word(st)} '
-            f'{st["number"]}: {esc(st["title"])}</a></td><td class="m">{done}</td>'
-            f'<td class="m">{len(st["lessons"]) - done}</td>'
-            f'<td class="m">{len(st.get("skipped") or [])}</td></tr>')
+        return (f'<tr><td><a href="stage-{st["id"]}.html">{stage_name(st)}: '
+                f'{esc(st["title"])}</a></td><td class="m">{done}</td>'
+                f'<td class="m">{len(st["lessons"]) - done}</td>'
+                f'<td class="m">{len(st.get("skipped") or [])}</td></tr>')
+
+    path = [st for st in stages if not is_track(st)]
+    parts.extend(row(st) for st in path)
     parts.append(f'<tr><th>All</th><th>{ready}</th><th>{total - ready}</th>'
-                 f'<th>{sum(len(st.get("skipped") or []) for st in stages)}</th></tr>')
+                 f'<th>{sum(len(st.get("skipped") or []) for st in path)}</th></tr>')
+    # Side tracks after the total, which they are not part of.
+    parts.extend(row(st) for st in stages if is_track(st))
     parts.append('</table>')
     if robot.get('read'):
         parts.append('<h2>Going deeper</h2>' + read_list(robot['read']))
@@ -2822,10 +2883,15 @@ def main(argv=None):
             print(f'    {error}', file=sys.stderr)
         return 1
 
-    lessons = sum(len(st['lessons']) for st in stages)
-    minutes = sum(st['minutes'] for st in stages)
-    print(f'  course ok: {len(stages)} stages, {lessons} lessons, '
-          f'{len(stages)} projects, {len(tags)} topics, {hours(minutes)}')
+    path = [st for st in stages if not is_track(st)]
+    tracks = [st for st in stages if is_track(st)]
+    lessons = sum(len(st['lessons']) for st in path)
+    minutes = sum(st['minutes'] for st in path)
+    print(f'  course ok: {len(path)} stages, {lessons} lessons, '
+          f'{len(path)} projects, {len(tags)} topics, {hours(minutes)}')
+    for track in tracks:
+        print(f'    side track {track["id"]}: {len(track["lessons"])} lessons '
+              f'and a project, {hours(track["minutes"])}')
     ref = reference_of(robots)
     for robot in robots:
         ready, total = coverage(flavor_view(stages, robot, ref))

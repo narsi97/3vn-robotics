@@ -13,8 +13,8 @@ outcomes:
   - Change a robot's dimensions by editing data, never a model file, and watch every consumer follow.
   - Explain why inertia is computed rather than typed, and what a wrong tensor does to a physics engine.
   - Place the frames later stages depend on, and read any transform between them on a live robot.
-  - Emit target-specific content from one description without falling into xacro's two classic traps.
   - Test a description with two independent parsers, and derive joint limits from a datasheet rather than a guess.
+  - Make a description lie on purpose, and name the test that catches each lie.
 
 prerequisites:
   - Stage 1 complete — `make setup` and `make test` both pass.
@@ -61,7 +61,7 @@ lessons:
       constraint, not a metaphor. A description has exactly one root and no
       loops — which is why a parallel linkage, a mechanism with a closed
       loop in it, cannot be described directly. That fact comes back to
-      decide a design in Tier 5.
+      decide a design in the *Make your own robot* side track.
     steps:
       - do: Print the expanded description and look at its shape.
         run: make urdf | head -80
@@ -448,94 +448,6 @@ lessons:
       - architecture.md
       - perception.md
 
-  - id: one-file-three-targets
-    title: One file, three targets, two traps
-    tags: [ros2, simulation]
-    builds_on: [the-seam, one-source-of-truth]
-    minutes: 30
-    objective: Emit target-specific content from one description, and avoid the traps that come with it.
-    body: |
-      The seam from Stage 1 lives in one xacro file. A block called
-      `<ros2_control>` lists each joint's command and state interfaces and
-      names a hardware plugin, and a conditional picks the plugin by target.
-      Everything else in the description is identical across all three.
-
-      Simulator-specific content goes in `<gazebo>` tags, which every URDF
-      parser ignores. Ignoring them would be enough to keep them harmless —
-      but this project goes further and emits them only for the `gz` target,
-      because a description destined for hardware should contain no
-      simulator content at all. That is asserted, not hoped.
-
-      Two traps, both met in this project:
-
-      **The bare-token conditional.** `${target == 'mock'}` looks right and
-      raises `NameError`: xacro substitutes the argument as a bare word,
-      which Python then tries to resolve as a variable. The working form
-      quotes the substitution — `${'$(arg target)' == 'mock'}`.
-
-      **Double hyphens in XML comments.** `--` is illegal inside an XML
-      comment, and the parser's complaint — "not well-formed (invalid
-      token)" — does not mention comments at all. This project has a test
-      that scans every xacro and world file for it. It caught one in a
-      world file, and the first automated fix removed the comment's own
-      delimiters along with the offending hyphens. The test caught that
-      too. Mechanical fixes to text deserve the same suspicion as any other
-      code.
-
-      A third trap shows up in Stage 3, and it is worth meeting here: if the
-      simulator takes its description from a *topic* rather than from the
-      same launch substitution, a stale node left over from an earlier run
-      can hand it the wrong robot. The error arrives half a minute later and
-      blames a plugin.
-    steps:
-      - do: Find the three branches.
-        run: grep -n -B1 -A3 "xacro:if" src/threevn_robot_description/urdf/ros2_control/arm.ros2_control.xacro
-      - do: Count Gazebo extension tags per target.
-        run: |
-          make urdf TARGET=gz   | grep -c "<gazebo"
-          make urdf TARGET=mock | grep -c "<gazebo"
-        expect: A positive count for `gz`; `0` for `mock`.
-      - do: Read the test that scans for the comment trap.
-        run: less src/threevn_robot_description/test/test_xacro_comments.py
-    checkpoint: >-
-      You can show that the `mock` and `esp32` expansions contain no
-      simulator content, and explain both traps from memory.
-    pitfalls:
-      - symptom: '`make urdf` raises `NameError: name ''mock'' is not defined` or similar.'
-        cause: A conditional using the bare-token form.
-        fix: "Quote the substitution: `${'$(arg target)' == 'mock'}`."
-      - symptom: An XML file fails with "not well-formed (invalid token)" and the line looks fine.
-        cause: A `--` inside a comment, often several lines earlier.
-        fix: Use a single hyphen. `test_xacro_comments.py` finds them before the parser does.
-    concepts:
-      - term: ros2_control block
-        meaning: >-
-          The part of a description listing each joint's command and state
-          interfaces and naming the hardware plugin that serves them.
-      - term: Gazebo extension tag
-        meaning: >-
-          A `<gazebo>` element carrying simulator-only content. URDF parsers
-          ignore it; this project also omits it from non-simulator builds.
-    quiz:
-      - q: URDF parsers ignore `<gazebo>` tags anyway. Why bother omitting them from the hardware build?
-        a: >-
-          So the hardware build contains no simulator content at all — a
-          property a test can assert. "Present but ignored" is a convention;
-          "absent" is checkable.
-      - q: Why does `${target == 'mock'}` fail?
-        a: >-
-          The argument is substituted as a bare word, so Python sees
-          `mock == 'mock'` and looks for a variable called `mock`.
-    exercise:
-      task: >-
-        On a scratch branch, change one conditional in
-        `arm.ros2_control.xacro` to the bare-token form and run `make test`.
-        Record the exact error text a future teammate would see, then
-        revert. Would that message have led you to the cause?
-    read:
-      - gazebo.md
-      - troubleshooting.md
-
   - id: two-parsers
     title: Test it with two parsers, not one
     tags: [ros2, testing]
@@ -710,58 +622,103 @@ lessons:
       - bom-hardware.md
 
 project:
-  title: Design your own arm
-  minutes: 75
+  title: Make the description lie
+  minutes: 45
   brief: |
-    Make a third arm profile — yours — without editing a single xacro
-    file. You will change its geometry, watch every test widen to cover it,
-    look at it, and then try to make it lie about itself. Each lie should be
-    caught by a test you can name.
+    A robot description is only as trustworthy as the checks that would
+    notice it lying. Change your robot's profile in three small, wrong
+    ways, one at a time, and for each one name the test that catches it.
+    Then find a lie that nothing catches. That is the better result,
+    because it is a test this project does not have yet.
 
-    This is the mechanism a student with a different printed arm would use
-    to bring their own robot into this stack.
+    Designing a profile of your own, rather than breaking one, is the
+    project in the *Make your own robot* side track.
   tasks:
-    - do: Copy the default profile to a new one named after you.
-      run: cp src/threevn_robot_description/config/threevn_arm_v1.yaml src/threevn_robot_description/config/threevn_arm_v1_yourname.yaml
+    - do: Run the suite once and write down its summary line, so you know what green looks like.
+      run: make test
     - do: >-
-        In your copy, set `model: threevn_arm_v1_yourname` and give it a
-        `display_name`. Lengthen the forearm by 20% and shorten the upper
-        arm by 10% — remember to move the joint origins that sit at the end
-        of each link, not just the link boxes.
-    - do: Rebuild once, because you added a file. Then run the suite.
+        First lie: in `src/threevn_robot_description/config/threevn_arm_v1.yaml`,
+        delete one link's `provenance` line. Run the suite and write down
+        the test that fails. Revert before the next lie.
       run: |
-        make build
         make test
-    - do: Look at your arm.
-      run: make view PROFILE=threevn_arm_v1_yourname
+        git checkout src/threevn_robot_description/config/threevn_arm_v1.yaml
     - do: >-
-        Make it lie, three ways, one at a time, running `make test` after
-        each and reverting before the next: remove a `provenance` line from
-        a link; set a joint's effort above its servo's stall torque; give a
-        link a negative dimension.
+        Second lie: raise `shoulder_lift_joint`'s `effort` to `1.5`, above
+        what its servo can stall at. Run the suite, write down the failing
+        test, and revert.
+      run: |
+        make test
+        git checkout src/threevn_robot_description/config/threevn_arm_v1.yaml
     - do: >-
-        Decide whether to keep your profile. If you keep it, every test runs
-        against it forever. If you delete it, run `make build` again and read
-        what it prints: it removes the link your profile left behind in
-        `install/`. Before that step existed, deleting a profile broke the
-        whole suite.
+        Third lie: give one link a negative dimension. Run the suite, write
+        down the failing test, and revert.
+      run: |
+        make test
+        git checkout src/threevn_robot_description/config/threevn_arm_v1.yaml
+    - do: >-
+        Now invent a lie of your own that the suite does not catch. Make the
+        change, confirm `make test` stays green, and write two lines: what
+        the lie is, and the test that would catch it. Revert.
   done_when:
-    - '`make test` is green with your profile included, and the test count went up.'
-    - '`make view PROFILE=threevn_arm_v1_yourname` shows your arm, visibly different.'
-    - Three lies were each caught by a named test.
-    - '`git diff --stat` shows no change to any `.xacro` file.'
+    - Three lies, each caught by a test you can name.
+    - One lie the suite does not catch, written down with the test that would catch it.
+    - '`git status` shows the profile unchanged.'
   hints:
-    - title: The forearm got longer, but the wrist did not move
+    - title: Which test caught it?
       body: >-
-        A link's box and the joint at its far end are separate numbers. The
-        `elbow_joint` origin sits at the end of the upper arm; the
-        `wrist_joint` origin at the end of the forearm. Change the box and
-        the origin together.
-    - title: How many more tests should run?
+        pytest prints a header for each failure with the test's name, and
+        the assertion message usually names the link or joint. Read the
+        first failure, not the summary.
+    - title: Nothing failed
       body: >-
-        Every description test is parametrised over every profile, and many
-        over every target as well. Compare the summary line from before and
-        after — the difference is the cost, and the coverage, of one robot.
+        Check that you saved the file, and that the summary line shows the
+        same number of tests as your green run. If it does, you may have
+        found your uncaught lie early.
   read:
+    - testing.md
     - development.md
-    - decisions/0005-yaml-single-source.md
+  flavors:
+    so101:
+      note: >-
+        the lies go into `so101_follower.yaml`, the overlay. Upstream's URDF
+        is fetched, not committed, so you cannot lie in it here; and the
+        overlay restates no geometry, so there is no dimension to make
+        negative.
+      tasks:
+        - do: Run the suite once and write down its summary line, so you know what green looks like.
+          run: make test
+        - do: >-
+            First lie: in `src/threevn_robot_description/config/so101_follower.yaml`,
+            raise `limit_derate.effort` from `0.68` to `1.2`, so the joints
+            may push harder than the servo can. Run the suite, write down
+            the test that fails, and revert.
+          run: |
+            make test
+            git checkout src/threevn_robot_description/config/so101_follower.yaml
+        - do: >-
+            Second lie: set the gripper's `open` to `1.7`, a few degrees
+            short of the jaw's hard stop. Run the suite, write down the
+            failing test, and revert.
+          run: |
+            make test
+            git checkout src/threevn_robot_description/config/so101_follower.yaml
+        - do: >-
+            Third lie: delete the last value from the `ready` pose, leaving
+            four positions for five joints. That is the bug that once stopped
+            every scenario at `home`. Run the suite, write down the first
+            failing test, and revert.
+          run: |
+            make test
+            git checkout src/threevn_robot_description/config/so101_follower.yaml
+        - do: >-
+            Now invent a lie of your own that the suite does not catch. Make
+            the change, confirm `make test` stays green, and write two lines:
+            what the lie is, and the test that would catch it. Revert.
+      done_when:
+        - Three lies, each caught by a test you can name.
+        - One lie the suite does not catch, written down with the test that would catch it.
+        - '`git status` shows the profile unchanged.'
+      read:
+        - testing.md
+        - so101.md
