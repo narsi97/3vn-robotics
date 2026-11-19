@@ -189,7 +189,7 @@ is expected to work.
 | 20 | Four layers of test | Runs | all four: the acceptance run passed 6 of 6 in Gazebo |
 | 21 | Tests that cannot pass by accident | Runs | robot-agnostic |
 | 22 | Keeping the suite fast | Runs | robot-agnostic |
-| 23 | Integration tests without physics | Runs | `make test-ros PROFILE=so101_follower` |
+| 23 | Integration tests without physics | Runs, and the planted fault fails the clamp test alone | `make test-ros PROFILE=so101_follower`, with and without `enforce_command_limits` |
 | 24 | An image that carries no simulator | Version: the runtime image has no `vendor/`. It needs the pinned fetch as a build step. | no |
 | 25 | CI that runs what you run | Runs. The SO-101 is not in the pipeline yet. | no |
 | 26 | A release is a tag plus evidence | Runs | robot-agnostic |

@@ -330,7 +330,9 @@ lessons:
         note: >-
           The layer itself has been run on the SO-101: 14 passed, and one
           skipped with its reason. The fault the last step plants has been
-          checked on the 3VN arm, not yet on the SO-101.
+          run on the SO-101 too: with the clamp off, the out-of-limit test
+          fails (the pan reached 200° against its 110° limit) while the
+          in-limit test still passes.
         steps:
           - do: Run the integration layer against the SO-101.
             run: make test-ros PROFILE=so101_follower
