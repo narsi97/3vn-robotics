@@ -158,15 +158,27 @@ checkbox and its label, so that is what the button is: the checkbox is
 visually hidden but focusable, and the label shows its focus ring.
 
 **The header never moves.** It is the same width on every page, and
-every control in it (tabs, robot, Menu) is `--control` tall, so moving
-between pages that have a robot picker and pages that do not changes
-nothing above the page. Below 900 px it is two fixed rows, brand and
-Menu, then tabs and robot; a page without one leaves its cell empty.
+every control in it (tabs, robot, theme, Menu) is `--control` tall, so
+moving between pages that have a robot picker and pages that do not
+changes nothing above the page. Below 900 px it is two fixed rows,
+brand, theme and Menu, then tabs and robot; a page without one leaves
+its cell empty. To fit the theme switch, the `preview` badge goes below
+460 px and Menu becomes its icon alone below 400 px.
+
+**The theme switch.** Auto, Light and Dark, at the right of the header.
+Auto follows the reader's system setting; Light and Dark override it on
+every page, kept in `localStorage` so the choice outlasts the tab. It is
+three radios and a second script, `theme.js` (`THEME_JS`), loaded in
+`<head>` without `defer` so the chosen theme is on `<html>` (as
+`data-theme`) before the first paint, with no flash of the other one.
+The switch only shows where that script ran: without it nothing could
+carry the choice to the next page, so the system setting decides, as
+before.
 
 **The tabs remember.** Leave a lesson for the reference and come back
 by the Course tab, and you land on that lesson, where you stopped
 reading; the same the other way. The open tab still goes to its half's
-front page. That needs memory, so it is the site's one script,
+front page. That needs memory, so it is a script,
 `nav.js` (`NAV_JS` in the generator), and `sessionStorage`, so it lasts
 as long as the browser tab. Because the header does not follow the
 page, a reader scrolls back up to reach the tabs, so where the page is
@@ -196,14 +208,15 @@ It sits behind the shared 3VNSYSTEMS Caddy, at a public path,
 - **Nothing needs JavaScript.** The enforced CSP is
   `script-src 'self'` with no `'unsafe-inline'`, so an inline `<script>`
   would be blocked, and a file served beside the pages is not. The one
-  such file, `nav.js`, only makes the tabs remember (above); everything
-  else is links, `<details>` and one checkbox, and works with it
-  blocked. Styles are inline because `style-src` does permit
-  `'unsafe-inline'`. The server sends `nosniff`, so the file must keep
+  such files, `nav.js` and `theme.js`, only make the tabs remember and
+  the theme switch work (above); everything else is links, `<details>`
+  and one checkbox, and works with them blocked. Styles are inline because `style-src` does permit
+  `'unsafe-inline'`. The server sends `nosniff`, so the files must keep
   arriving as JavaScript: nginx's own MIME types do that.
-- **Two themes, no switch.** Paper by day and blueprint by night,
-  following the reader's system setting through `prefers-color-scheme`;
-  a switch would need a script. The accents are the three strokes of the
+- **Two themes.** Paper by day and blueprint by night, following the
+  reader's system setting through `prefers-color-scheme` unless they
+  pick one with the switch (above). Blueprint's colours are written
+  once (`DARK`) and used for both. The accents are the three strokes of the
   3VN mark. Headings use the system's serif and code its monospace, so
   no font is downloaded. Each robot's drawing (`ROBOT_ART`) is inline SVG
   coloured by the stylesheet, so it follows the theme; a robot without

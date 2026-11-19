@@ -73,9 +73,11 @@ Three constraints come from where this is served -- behind the shared
   * Nothing NEEDS JavaScript. The enforced CSP is `script-src 'self'`
     with no 'unsafe-inline', so an inline <script> is dead on arrival.
     Folding (self-check answers, the side map) is <details>; the phone
-    Menu is a checkbox. One same-origin file, nav.js (NAV_JS), makes the
+    Menu is a checkbox. Two same-origin files: nav.js (NAV_JS) makes the
     Course and Reference tabs remember the page last read in each; with
-    it blocked they are plain links to each half's front page.
+    it blocked they are plain links to each half's front page. theme.js
+    (THEME_JS) runs the header's Auto / Light / Dark switch; with it
+    blocked the switch is hidden and the system setting decides.
     Styles are inline because `style-src` does allow 'unsafe-inline'.
   * Every page carries noindex, and robots.txt disallows everything.
     Unlisted means unlisted; this is obscurity, not security, exactly as
@@ -174,10 +176,22 @@ LESSON_OVERRIDES = ('steps', 'checkpoint', 'pitfalls', 'quiz', 'exercise',
 PROJECT_OVERRIDES = ('brief', 'tasks', 'done_when', 'hints', 'read', 'note',
                      'minutes')
 
+#: Blueprint, the dark theme's colours. Written out twice in STYLE: once
+#: for a reader whose system is dark and who has not picked Light, once
+#: for a reader who picked Dark.
+DARK = """
+    --bg: #0d1322; --panel: #131b2d; --sunken: #0a101c; --line: #26324b;
+    --ink: #e8ecf4; --dim: #9ba6bc; --accent: #8ab4ff; --violet: #b9a2ff;
+    --teal: #4fd1c1; --warn: #f2b84b; --good: #6fdcae; --bad: #ff8f85;
+    --grid: rgba(138, 180, 255, .075); --term: #080d18; --term-ink: #e4e8f1;
+    color-scheme: dark;
+"""
+
 STYLE = """
-/* Two themes, chosen by the reader's system setting (no script, per the
-   CSP): paper by day, blueprint by night. The three accents are the
-   strokes of the 3VN mark -- blue, violet, teal. */
+/* Two themes: paper by day, blueprint by night. The reader's system
+   setting chooses, unless they picked one with the header's switch
+   (theme.js sets data-theme on <html>; without it, the system decides).
+   The three accents are the strokes of the 3VN mark -- blue, violet, teal. */
 :root {
   --bg: #f6f2e8; --panel: #fffcf5; --sunken: #eee8da; --line: #dcd4c1;
   --ink: #1c2230; --dim: #5b6271; --accent: #1d4ed8; --violet: #6d28d9;
@@ -193,14 +207,9 @@ STYLE = """
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0d1322; --panel: #131b2d; --sunken: #0a101c; --line: #26324b;
-    --ink: #e8ecf4; --dim: #9ba6bc; --accent: #8ab4ff; --violet: #b9a2ff;
-    --teal: #4fd1c1; --warn: #f2b84b; --good: #6fdcae; --bad: #ff8f85;
-    --grid: rgba(138, 180, 255, .075); --term: #080d18; --term-ink: #e4e8f1;
-    color-scheme: dark;
-  }
+  :root:not([data-theme="light"]) {@DARK@}
 }
+:root[data-theme="dark"] {@DARK@}
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; scrollbar-gutter: stable; }
 body {
@@ -572,6 +581,26 @@ nav.tabs a[aria-current] { color: var(--ink); background: var(--sunken);
 #menu:checked ~ header .menu-btn .shut { display: inline; }
 #menu:focus-visible ~ header .menu-btn { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+/* --- the theme switch: Auto, Light, Dark ---
+   Three radios. Only theme.js can keep the choice from page to page, so
+   the switch shows only where it ran (it sets data-theme); without it the
+   system setting decides, as it always did. */
+.theme { display: none; margin: 0 0 0 auto; padding: 2px; border: 1px solid var(--line);
+         border-radius: 999px; height: var(--control); gap: 2px; background: var(--panel); }
+:root[data-theme] .theme { display: inline-flex; }
+details.picker ~ .theme { margin-left: 0; }  /* the picker already pushed right */
+.theme legend { position: absolute; width: 1px; height: 1px; overflow: hidden;
+                clip: rect(0 0 0 0); white-space: nowrap; }
+.theme label { display: grid; place-items: center; width: calc(var(--control) - 6px);
+               border-radius: 999px; color: var(--dim); cursor: pointer; }
+.theme label:hover { color: var(--ink); background: var(--sunken); }
+.theme svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8;
+             stroke-linecap: round; }
+.theme svg .fill { fill: currentColor; stroke: none; }
+.theme input:checked + label { color: var(--ink); background: var(--sunken);
+                               box-shadow: inset 0 0 0 1px var(--line); }
+.theme input:focus-visible + label { outline: 2px solid var(--accent); outline-offset: 1px; }
+
 .frame { display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 0 40px;
          align-items: start; }
 .frame > main { min-width: 0; max-width: 820px; }
@@ -644,8 +673,9 @@ h2[id] { scroll-margin-top: 16px; }
      its cell empty rather than letting the rest move up. */
   header.site .wrap { display: grid; gap: 10px 12px; align-items: center;
                       grid-template-columns: auto minmax(0, 1fr) auto;
-                      grid-template-areas: "brand brand menu" "tabs picker picker"; }
+                      grid-template-areas: "brand theme menu" "tabs picker picker"; }
   .brand { grid-area: brand; min-height: var(--control); }
+  .theme { grid-area: theme; justify-self: end; }
   nav.tabs { grid-area: tabs; }
   details.picker { grid-area: picker; justify-self: end; min-width: 0; max-width: 100%;
                    margin: 0; }
@@ -676,12 +706,26 @@ h2[id] { scroll-margin-top: 16px; }
   footer.site { flex-direction: column; }
   details.picker > summary span, details.picker > summary i { display: none; }
 }
+@media (max-width: 460px) {
+  .badge { display: none; }  /* room in the top row for the theme switch */
+}
 @media (max-width: 360px) {
-  .badge { display: none; }
   nav.tabs a { padding: 0 9px; }
   details.picker { padding: 0 10px; }
 }
-"""
+@media (max-width: 400px) {
+  /* The brand, the theme switch and Menu share the top row: on the
+     narrowest phones Menu is its icon alone (the word is still read out). */
+  header.site .wrap { column-gap: 8px; }
+  .menu-btn { padding: 0 11px; }
+  .menu-btn span { position: absolute; width: 1px; height: 1px; overflow: hidden;
+                   clip: rect(0 0 0 0); white-space: nowrap; }
+  .theme label { width: 26px; }
+}
+@media (max-width: 340px) {
+  .theme label { width: 22px; }
+}
+""".replace('@DARK@', DARK)
 
 # The 3VN mark: the logo's three strokes and its dot (brand/3vn-mark.svg
 # in the homepage repository), the dot recoloured to follow the theme.
@@ -763,13 +807,14 @@ PAGE = """<!DOCTYPE html>
 <meta name="color-scheme" content="light dark">
 <title>{title} — 3VN Robotics</title>
 <style>{style}</style>
+<script src="{theme_js}"></script>
 <script src="{script}" defer></script>
 </head>
 <body>
 {toggle}<header class="site"><div class="wrap wide">
   <div class="brand"><a href="{home}">{mark}3VN Robotics</a><span class="badge">preview</span></div>
   <nav class="tabs" aria-label="Site">{tabs}</nav>
-  {picker}{menu}
+  {picker}{theme}{menu}
 </div></header>
 <div class="wrap{wide}">
 {body}
@@ -1649,7 +1694,7 @@ def tabs_html(active, course, reference):
     return ''.join(out)
 
 
-#: The site's one script, written beside the pages as nav.js. The CSP
+#: The tabs' script, written beside the pages as nav.js. The CSP
 #: allows a same-origin file (`script-src 'self'`), never an inline one.
 #: It only improves the tabs; with it blocked or storage off, every link
 #: still goes where its href says.
@@ -1750,6 +1795,73 @@ NAV_JS = r"""// 3VN Robotics course site: the Course and Reference tabs remember
   // page of its half again, and the other tab may have moved on.
   window.addEventListener('pageshow', function (event) {
     if (event.persisted) { remember(); point(); }
+  });
+})();
+"""
+
+
+#: The header's theme switch. Hidden unless theme.js ran (see STYLE).
+#: autocomplete=off, or Back would restore a stale choice over the one
+#: theme.js reads from storage.
+THEME_SWITCH = (
+    '<fieldset class="theme"><legend>Theme</legend>'
+    '<input type="radio" name="theme" id="theme-auto" value="auto" class="vh" autocomplete="off">'
+    '<label for="theme-auto" title="Auto: follow the system"><span class="vh">Auto</span>'
+    '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6"/>'
+    '<path class="fill" d="M8 2a6 6 0 0 1 0 12z"/></svg></label>'
+    '<input type="radio" name="theme" id="theme-light" value="light" class="vh" autocomplete="off">'
+    '<label for="theme-light" title="Light"><span class="vh">Light</span>'
+    '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3"/>'
+    '<path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3 3l1.1 1.1M11.9 11.9 13 13'
+    'M3 13l1.1-1.1M11.9 4.1 13 3"/></svg></label>'
+    '<input type="radio" name="theme" id="theme-dark" value="dark" class="vh" autocomplete="off">'
+    '<label for="theme-dark" title="Dark"><span class="vh">Dark</span>'
+    '<svg viewBox="0 0 16 16" aria-hidden="true">'
+    '<path d="M13.5 9.6A5.8 5.8 0 0 1 6.4 2.5a5.8 5.8 0 1 0 7.1 7.1z"/></svg></label>'
+    '</fieldset>')
+
+#: The theme switch's script, written beside the pages as theme.js. It is
+#: loaded in <head> without `defer` so the chosen theme is on <html>
+#: before the first paint; a deferred script would flash the other theme.
+#: localStorage, so the choice outlasts the browser tab. Without it the
+#: switch stays hidden and the system setting decides.
+THEME_JS = r"""// 3VN Robotics course site: the header's Auto / Light / Dark switch.
+// Sets data-theme on <html>, which the stylesheet follows, and keeps the
+// choice in localStorage. Without this file the system setting decides.
+(function () {
+  'use strict';
+  var root = document.documentElement;
+  var KEY = '3vn-robotics theme';
+  function stored() {
+    var value = null;
+    try { value = window.localStorage.getItem(KEY); } catch (e) { /* off */ }
+    return value === 'light' || value === 'dark' ? value : 'auto';
+  }
+  function show(theme) {
+    root.setAttribute('data-theme', theme);
+    var input = document.getElementById('theme-' + theme);
+    if (input) input.checked = true;
+  }
+  show(stored());
+
+  document.addEventListener('DOMContentLoaded', function () {
+    show(root.getAttribute('data-theme'));
+    document.addEventListener('change', function (event) {
+      var input = event.target;
+      if (input.name !== 'theme') return;
+      show(input.value);
+      try {
+        if (input.value === 'auto') window.localStorage.removeItem(KEY);
+        else window.localStorage.setItem(KEY, input.value);
+      } catch (e) { /* storage off: this page only */ }
+    });
+  });
+  // Another tab changed it, or Back brought this page from the cache.
+  window.addEventListener('storage', function (event) {
+    if (event.key === KEY || event.key === null) show(stored());
+  });
+  window.addEventListener('pageshow', function (event) {
+    if (event.persisted) show(stored());
   });
 })();
 """
@@ -2576,11 +2688,14 @@ def build(root, out, stages, robots, tags):
             wide = ' wide'
         else:
             body = f'<main>{body}</main>'
-        # nav.js sits at the site root, beside the front page `home` names.
+        # nav.js and theme.js sit at the site root, beside the front page
+        # `home` names.
         script = home[:-len('index.html')] + 'nav.js'
+        theme_js = home[:-len('index.html')] + 'theme.js'
         return PAGE.format(title=esc(title), style=STYLE, meta=meta, body=body,
                            home=home, picker=picker, mark=MARK, tabs=tabs,
-                           toggle=toggle, menu=menu, wide=wide, script=script)
+                           toggle=toggle, menu=menu, wide=wide, script=script,
+                           theme_js=theme_js, theme=THEME_SWITCH)
 
     written = [source.name for source in sorted(docs.glob('*.md'))]
     groups = reference_groups(docs, written)
@@ -2681,6 +2796,7 @@ def build(root, out, stages, robots, tags):
            active='course', label='Course map')
     (out / 'robots.txt').write_text('User-agent: *\nDisallow: /\n')
     (out / 'nav.js').write_text(NAV_JS)
+    (out / 'theme.js').write_text(THEME_JS)
     return len(list(out.rglob('*.html')))
 
 
