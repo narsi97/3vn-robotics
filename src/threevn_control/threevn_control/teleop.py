@@ -340,12 +340,12 @@ class Teleop(RobotClient):
     def _on_gripper(self, direction):
         """Open or close the gripper without waiting for the result."""
         # Between closed and open as the robot's own description gives
-        # them, NOT between the joint's limits. On the 3VN arm those are
-        # the same two numbers. On a jaw whose limits include slack past
-        # closed and past open they are not, and the difference is not
-        # cosmetic in the simulator: a joint parked exactly on a hard
-        # stop can stay there, because the physics engine stops driving
-        # a joint that is on a limit.
+        # them, NOT between the joint's limits. Both robots' limits now
+        # include slack past closed and past open (the 3VN arm's by 1 mm
+        # since its gripper stopped moving in Gazebo), and the difference
+        # is not cosmetic in the simulator: a joint parked exactly on a
+        # hard stop can stay there, because the physics engine stops
+        # driving a joint that is on a limit. Four presses span the travel.
         travel = self.gripper_travel()
         limits = (min(travel), max(travel))
         span = limits[1] - limits[0]
