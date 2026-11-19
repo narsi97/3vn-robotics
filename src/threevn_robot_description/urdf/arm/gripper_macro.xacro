@@ -3,10 +3,15 @@
   Two-finger parallel gripper.
 
   The right finger follows the left through the URDF <mimic> tag rather
-  than being commanded independently. Both mock_components and
-  gz_ros2_control parse <mimic>, so one command interface drives both
-  jaws - which is what a real single-servo gripper actually does.
-  Consequently the right finger gets NO entry in the ros2_control block.
+  than being commanded independently, which is what a real single-servo
+  gripper actually does. Consequently the right finger gets NO entry in
+  the ros2_control block.
+
+  Gazebo does not enforce it. gz-sim's DART engine reports that it does
+  not support mimic constraints and creates none, so in physics the
+  right finger is passive and only the left one pushes. RViz and TF
+  still show both moving, because robot_state_publisher applies the
+  mimic itself. See docs/manipulation.md.
 -->
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro">
 

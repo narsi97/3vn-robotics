@@ -177,14 +177,99 @@ and open.
 ```
 
 The jaws close to about a millimetre on a 35 mm cube that should be
-between them, meeting no resistance, and the cube does not move. The
-leading hypothesis is the gripper's `<mimic>` joint: the right finger
-follows the left in the description, has no `ros2_control` interface of
-its own, and `gz_ros2_control` may not enforce that coupling in physics
-— leaving one finger that does not push. The fallback, planned since the
-first design and tracked in [risks.md](risks.md), is two independently
-driven fingers on one controller. Not yet ruled out: that the jaws are
-not around the cube when they close.
+between them, meeting no resistance, and the cube does not move.
+
+Two things were wrong underneath this, found on 2026-11-18. The first
+is fixed; the second is now a fact instead of a hypothesis.
+
+**The gripper could not be relied on to move at all.** On the arm-only
+robot (`make sim`) a gripper goal could come back `stalled: true,
+reached_goal: false` with the finger at −5.4e‑21 m, and every goal after
+it did the same. Not every time: on six other fresh spawns it worked.
+
+The cause was in the profile. The finger's travel was its limits, 0 to
+18 mm both, so it **spawned on its lower stop and was commanded onto
+both stops**. Gazebo's physics engine, DART, gives each joint one
+constraint per step, in the order position limit, velocity limit,
+servo (`JointConstraint::update()`, DART 6.13.2). A joint at or past
+its stop gets the stop, and the servo that `gz_ros2_control` drives a
+position command through is skipped. The finger came to rest within
+1e‑10 m of the stop, and rounding decided the side: 7e‑15 to 2e‑11 m
+above it on the spawns measured here, and it moved; −5.4e‑21 m once,
+and it never did.
+
+Waiting for rounding cannot be tested, so the test pushes instead. The
+closed finger is pressed toward its closed end with 0.05 N, a
+twentieth of its 10 N effort limit, and told to open:
+
+```
+                       BEFORE: stops = travel        AFTER: stops 1 mm outside
+  spawned              2.0e-11 m from its stop       1 mm from its stop
+  closed, pressed      -2.5e-14 m: PAST its stop     -4.9e-12 m: 1 mm clear
+  told to open         stalled: true                 stalled: false
+                       reached_goal: false           reached 17.998 mm
+                       never moved                   moving after 0.06 s
+```
+
+Without the press the old gripper usually worked, which is why it was
+hard to see. With a 0.5 N press the finger stayed past its stop at
+−2.5e‑13 m even after the press was taken away, and every open after
+that stalled. That is the state the stalled run was in, reached from the
+other direction.
+
+The fix is in the profile and the description:
+
+- each finger's `<limit>` is its **hard stop**, now 1 mm outside the
+  travel: −1 to 19 mm of slide, 0 to 18 mm commanded. `open` and
+  `closed` did not change;
+- the gripper's `ros2_control` command range is its **travel**, not its
+  limits. ros2_control enforces the tighter of the two, so a raw goal
+  sent to a stop now stops 1 mm short of it.
+
+A real servo wants the same gap: one driven into a hard stop is a
+stalled servo. Three test tiers hold it: the travel and command range in
+`make test` (`test_limits_match_yaml.py`, `test_describe.py`), the clamp
+against a running controller in `make test-ros`, and the spawn position
+and the press in `make test-sim` (`test_gz_gripper.py`).
+
+One limit remains. A press above about **0.1 N** still beats the servo:
+mass × velocity limit ÷ time step, 0.002 kg × 0.05 m/s ÷ 1 ms. Anything
+that hard takes the finger to its velocity limit in one step, the
+velocity-limit constraint replaces the servo, and the finger runs into
+its stop at 0.05 m/s. Measured: 0.05 N held at 9 mm, 0.1 N ran it into
+the stop. This is what gravity did to the SO-101's jaw
+([so101.md](so101.md)). Arm motion is nowhere near it: 0.1 N is 50 m/s²
+on the finger, which at the grasp's 230 mm reach would take a pan
+acceleration over 200 rad/s². A contact force along the finger's axis
+could exceed it.
+
+**The right finger does not push.** The mimic hypothesis is confirmed.
+At every spawn gz-sim prints:
+
+```
+Attempting to create a mimic constraint for joint [gripper_right_finger_joint]
+but the chosen physics engine does not support mimic constraints, so no
+constraint will be created.
+```
+
+Measured from Gazebo's own link poses, `/world/empty_bench/dynamic_pose/info`:
+
+```
+                              left finger    right finger   (world y)
+  closed                      +10.000 mm     -10.000 mm
+  left commanded to 18 mm     +28.000 mm     -10.000 mm    <- would be -28.000
+```
+
+RViz shows both jaws opening, because `robot_state_publisher` applies
+the mimic itself. In physics the right finger never moves on its own; it
+slides between its stops when something pushes it.
+
+So the grasp is one finger pushing the cube against a finger that slides
+away, which fits "close to about a millimetre, meeting no resistance".
+The fallback, planned since the first design and tracked in
+[risks.md](risks.md), is two independently driven fingers on one
+controller, and it is the next thing to do. Not yet ruled out: that the
+jaws are not around the cube when they close.
 
 ### The control did not use to run
 
@@ -196,11 +281,27 @@ it. The control now grasps the cube's own position swung 35° about the
 arm's yaw axis — same radius, same height, so reachable whenever the
 grasp is — and a control that cannot run is now a failure.
 
-It runs now, and it found one more thing nobody has explained yet: on
-the control the fingers stayed at **18 mm, fully open**. `holding()`
-said no — but because the gripper never closed, not because it closed on
-nothing. The case the control exists for, a gripper closed on empty air,
-has still not been observed.
+It runs now, and it found one more thing: on the control the fingers
+stayed at **18 mm, fully open**. `holding()` said no, but because the
+gripper never closed, not because it closed on nothing.
 
-None of this is explained yet, and it is the next thing to settle. The
-verifier exists so that "it works" will be a measurement when it does.
+That was the hard-stop lockout above, from the other end: `open` was
+then exactly the upper stop. Re-run on 2026-11-18 with the stops moved
+out:
+
+```
+  GRASP the cube
+    fingers stopped at  0.36 mm  -> holding=False
+    cube rose -0 mm            -> lifted=False
+
+  CONTROL: grasp empty air
+    fingers stopped at  0.40 mm  -> holding=False
+    cube rose +0 mm            -> lifted=False
+```
+
+The control now closes on empty air and `holding()` says no, which is
+the case the control exists for, observed for the first time. The grasp
+still does not lift the cube, which is what a passive right finger
+predicts. Two independently driven fingers are the next thing to settle.
+The verifier exists so that "it works" will be a measurement when it
+does.

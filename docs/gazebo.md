@@ -71,6 +71,40 @@ ros2 run tf2_ros tf2_echo gripper_base_link gripper_right_finger_link
 Looking in `/joint_states` reports a perfectly working gripper as broken,
 which is exactly what the gripper scenario did on first writing.
 
+**TF is not physics, though.** gz-sim's DART engine does not support
+mimic constraints, and says so once at spawn:
+
+```
+[Err] [Physics.cc:1906] Attempting to create a mimic constraint for joint
+[gripper_right_finger_joint] but the chosen physics engine does not support
+mimic constraints, so no constraint will be created.
+```
+
+So in the simulator the right finger is passive: RViz shows it following,
+and it pushes nothing. See [manipulation.md](manipulation.md).
+
+## A joint on its hard stop is not driven
+
+DART gives each joint ONE constraint per step, in the order position
+limit, velocity limit, servo (`JointConstraint::update()` in DART
+6.13.2). A joint at or past its stop gets the stop, and its servo, which
+is how `gz_ros2_control` drives a position command, is skipped. Two ways
+in:
+
+- **Sitting on the stop.** The 3VN gripper's travel used to equal its
+  limits, so it spawned on its lower stop and was commanded onto both.
+  Rounding left it at −5.4e‑21 m once, and from there every command
+  stalled.
+- **Being pushed onto it.** A force big enough to take the joint to its
+  velocity limit in one step, mass × velocity limit ÷ time step, makes
+  the velocity-limit constraint win instead of the servo. For a 2 g
+  finger with a 0.05 m/s limit that is 0.1 N: measured, 0.05 N held and
+  0.1 N ran the finger from 9 mm into its stop.
+
+The rule that follows: a commanded position, a named pose or a spawn
+position is never ON a stop. See [manipulation.md](manipulation.md) and
+[so101.md](so101.md), where gravity on the jaw did the pushing.
+
 ## `<gazebo>` tags
 
 Ignored by URDF parsers, which is what lets simulation-specific content
