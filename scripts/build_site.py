@@ -64,7 +64,9 @@ durations are summed rather than typed.
 A SIDE TRACK is a course file with `kind: track`: unnumbered, filed
 after every stage, shown on its own below the course, and left out of a
 robot's count. Make your own robot is one: the design story of the 3VN
-Arm 1, which every robot's student can take.
+Arm 1, which every robot's student can take. Put it on wheels is
+another, and a robot that can do none of a track's lessons does not see
+it. Promoting a track to a stage is a rename, a `number` and a `kind`.
 
 Each robot's copy carries its own topic pages, so a topic lists the
 lessons that robot's student will actually meet.
@@ -1053,6 +1055,10 @@ def flavor_view(stages, robot, ref):
                 skipped.append((base, sorted(missing)))
                 continue
             lessons.append(resolve(base, robot, ref['id'], LESSON_OVERRIDES))
+        if is_track(stage) and not lessons:
+            # A side track none of whose lessons this robot can do (no
+            # wheels, no wheels track) is not shown to it at all.
+            continue
         for position, lesson in enumerate(lessons, 1):
             number += 1
             lesson.update(index=number, position=position, stage=st)

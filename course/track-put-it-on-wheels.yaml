@@ -1,0 +1,378 @@
+# A side track, not a numbered stage: `kind: track`, no `number`, filed
+# after every stage, and not counted in any robot's "lessons written for
+# it". Its lessons need wheels, so a robot without any (the SO-101 today)
+# does not see the track at all.
+#
+# To promote it to stage 7, for example once the SO-101 has a mobile
+# base: rename this file to 07-put-it-on-wheels.yaml, set `kind: tier`
+# and `number: 7`, and nothing else changes. Lesson ids, and so every
+# link to them, stay the same.
+id: put-it-on-wheels
+kind: track
+title: Put it on wheels
+price: free
+summary: >-
+  Put the arm on a mobile base, and find out how much a moving robot can
+  trust what it believes about itself. Measure wheel odometry against
+  ground truth, fuse two bad heading sources into a better one, and
+  compose the arm and the base into one robot without editing either,
+  then check that it cannot tip itself over.
+
+outcomes:
+  - Measure a robot's own estimates against ground truth, and fuse two bad sensors into a better one.
+  - Compose two robots into one without editing either, and compute whether the result can tip itself over.
+
+prerequisites:
+  - Stage 3 complete. The first lesson builds on driving the robot yourself.
+  - A robot with wheels. On the 3VN Arm 1 that is its optional mobile base, in simulation.
+  - Docker with 8 GB if you can spare it. The mobile manipulator is the heaviest thing in the course.
+
+lessons:
+  - id: it-drives
+    needs: [wheels]
+    title: Odometry lies, and by how much
+    tags: [motion, simulation]
+    builds_on: [drive-it]
+    minutes: 35
+    objective: Measure the gap between where the wheels think the robot is and where it actually is.
+    body: |
+      The base is its own robot first: four wheels, skid steer, which is what
+      cheap chassis kits are. Its wheels are **velocity-commanded** — you
+      never tell a wheel where to be — and their joints are **continuous**,
+      because a travel limit on a wheel makes the controller fight it after a
+      few metres.
+
+      Wheel odometry is dead reckoning: count wheel turns, integrate, believe
+      the answer. It is wrong immediately and increasingly, and skid steer is
+      worse than most, because turning *scrubs* the wheels sideways rather
+      than rolling them, and the model does not represent that.
+
+      What matters is that it is **measured**, and against the right thing.
+      Comparing odometry to the *command* proves only that the controller
+      tracks its setpoint — both sides come from the same wheel encoders, so
+      neither can see slip. A base bolted to the floor would report a perfect
+      turn. The simulator offers ground truth for free, and that is the one
+      place you can grade your own estimator honestly:
+
+      | leg | odometry | ground truth | error |
+      |---|---|---|---|
+      | forward 0.9 m | 0.882 m | 0.882 m | 0.0% |
+      | rotate 114.6° | 112.3° | 89.0° | **+26%** |
+
+      Straight lines are essentially exact. Heading is not. The standard
+      correction — a multiplier on the track width — was measured too, and it
+      **saturates**: from +63% error at 1.0 down to +26% at 2.4, and no
+      further, because it scales the command and the odometry together. A
+      single constant cannot represent scrub. About a quarter of every turn
+      is simply lost.
+
+      Two cautions about your own measurements. Restart the simulator before
+      trusting a number: a degraded, long-running Gazebo once produced a "12%
+      shortfall" that was not a physics finding at all. And print the number
+      from a script you can re-run — a figure from a hand run, once, is a
+      memory, not a measurement.
+    steps:
+      - do: Start the base on its own.
+        run: make base-sim
+      - do: In a second terminal, drive a fixed path and compare odometry against ground truth.
+        run: make base-drive
+        expect: >-
+          Linear error near 0%, and a heading error in the tens of percent.
+          The doc's table says +26%; the run that verified this lesson said
+          +16.7%. Same code, same world — which is the next lesson's warning
+          about single measurements, arriving early.
+      - do: Find the correction constant, and the covariances that admit heading is weak.
+        run: grep -n -E "wheel_separation_multiplier|covariance" src/threevn_bringup/config/base_controllers.yaml
+      - do: Check the velocity topic's type, the fastest diagnosis for a base that will not move.
+        run: |
+          make shell
+          ros2 topic info /base_controller/cmd_vel
+    checkpoint: >-
+      You have a heading error for the base, measured against ground truth by
+      a script, rather than assumed.
+    pitfalls:
+      - symptom: The base drives forward but refuses to rotate.
+        cause: Wheel friction equal in both directions. Skid steer turns by sliding sideways.
+        fix: Sideways friction (`mu2`) much lower than rolling friction (`mu1`).
+      - symptom: A measurement looks like a physics finding and does not reproduce.
+        cause: A long-running simulator in a degraded state.
+        fix: Restart `make base-sim` before measuring.
+      - symptom: The base will not move at all, and no log shows an error.
+        cause: A velocity publisher of the wrong message type. A parameter meant to fix this did not exist on this ROS version and was silently ignored.
+        fix: '`ros2 topic info /base_controller/cmd_vel` and publish `TwistStamped`.'
+    concepts:
+      - term: Odometry
+        meaning: >-
+          Estimating position by integrating motion — here, wheel rotation.
+          Drifts without bound.
+      - term: Skid steer
+        meaning: >-
+          Steering by driving the wheels on each side at different speeds, so
+          turns scrub the wheels sideways.
+      - term: Ground truth
+        meaning: >-
+          The true value, known exactly — available in simulation, expensive
+          or impossible on a real robot.
+    quiz:
+      - q: Why does comparing odometry to the command prove nothing about slip?
+        a: >-
+          Both come from the wheel encoders. If a wheel slips, the encoder and
+          the odometry agree with each other and are both wrong.
+      - q: Why does the track-width multiplier stop helping?
+        a: >-
+          It scales the command and the odometry together, so it can shrink
+          the error but never close it. Scrub is not a fixed track-width
+          error.
+    exercise:
+      task: >-
+        Run `make base-drive` three times against the same running simulator,
+        then three times against freshly started ones. Do the two sets agree?
+        What does that tell you about when a measurement should be trusted?
+    read:
+      - mobile-base.md
+
+  - id: two-wrong-answers
+    needs: [wheels]
+    title: Two wrong answers, one better one
+    tags: [motion]
+    builds_on: [it-drives]
+    minutes: 35
+    objective: Fuse a gyro with wheel odometry, and prove with the right metric that it helped.
+    body: |
+      The wheels are bad at heading, because they scrub. A gyroscope is good
+      at heading over seconds and bad over minutes, because integrating a
+      slightly biased rate accumulates. Neither is right; together they are
+      better — heading from the gyro, distance from the wheels.
+
+      The gyro costs about **$2**. Driving four turns against ground truth:
+
+      | source | mean error per turn |
+      |---|---|
+      | wheel odometry | 17.6° |
+      | gyro alone | 0.2° |
+      | fused | 0.2° |
+
+      Roughly 88 times better than the calibration constant that provably
+      could not fix it.
+
+      Position uses the wheel *distance* carried along the *gyro* heading. A
+      model that thinks it turned 45° when it turned 68° travels the right
+      distance in the wrong direction, and the error compounds every leg even
+      though the odometer was right.
+
+      The gyro's bias is measured while the robot is still — and "still" is
+      judged by the **wheels**, not by the gyro. Using the gyro to decide
+      whether to trust the gyro is a loop that would calibrate away a real
+      slow rotation. Each sensor covers the other's weakness.
+
+      Now the lesson that cost real time. The first summary metric reported
+      *net* heading error after a sequence of turns that netted to zero. By
+      that measure the wheels scored **better** than the gyro, +0.4° against
+      −0.6°. Wheel error is proportional to rotation, so equal and opposite
+      turns cancelled it — every individual turn was 30% short while the
+      total looked perfect. The gyro was fine. The metric had stopped
+      telling apart two things known to differ, which means the
+      **measurement** was broken, not the system. It was replaced with
+      per-leg absolute error.
+
+      And the claim is stated with its limit: the fused heading still
+      drifts. Nothing on this robot provides an absolute heading, so the
+      error is a random walk. The claim is much slower drift, not bounded
+      drift.
+    steps:
+      - do: Start the whole robot in the target world.
+        run: make mm-sim WORLD=bench_with_target
+      - do: Start the fusion node in a second terminal.
+        run: make fused-odom
+      - do: In a third, drive the four turns and compare every source against ground truth.
+        run: make heading
+        expect: A per-leg table — wheel, gyro, fused, truth — with wheel odometry many degrees out and the gyro within a fraction of a degree.
+    checkpoint: >-
+      Per-leg heading error is lower with the gyro than without it, by the
+      per-leg metric, on your machine.
+    pitfalls:
+      - symptom: 'The fused column reads `nan`, and the script says `/odometry/filtered absent`.'
+        cause: >-
+          The fusion node is not running yet, or is still estimating the
+          gyro's bias — it waits for the robot to be still before it
+          publishes anything.
+        fix: >-
+          Start `make fused-odom` first and wait for its "estimating gyro
+          bias" message to pass before running `make heading`.
+      - symptom: The IMU topic exists, the bridge exists, and nothing ever arrives.
+        cause: The world lacks Gazebo's IMU system plugin. The general sensors plugin drives only rendering sensors.
+        fix: Add `gz-sim-imu-system` to the world.
+      - symptom: The robot appears to jitter between two positions in RViz.
+        cause: Two nodes publishing the same transform.
+        fix: One owner per transform. The fusion node does not publish TF by default for exactly this reason.
+    concepts:
+      - term: Sensor fusion
+        meaning: >-
+          Combining sensors so each covers another's weakness — here, gyro
+          heading with wheel distance.
+      - term: Gyro bias
+        meaning: >-
+          A small constant offset a gyroscope reads at rest. Integrated, it
+          becomes drift.
+      - term: Per-leg error
+        meaning: >-
+          Error measured for each segment separately and in absolute value,
+          so that opposite errors cannot cancel.
+    quiz:
+      - q: Why judge "stationary" from the wheels rather than the gyro?
+        a: >-
+          Using the gyro to decide when to recalibrate the gyro would absorb
+          a real slow rotation into the bias estimate.
+      - q: How did the wheels "beat" the gyro on the first metric?
+        a: >-
+          Net error over turns that netted to zero. Wheel error is
+          proportional to rotation, so it cancelled across opposite turns.
+    exercise:
+      task: >-
+        Design a path for which net heading error would make wheel odometry
+        look *worse* than it is. What does that tell you about choosing a
+        metric after seeing the data?
+    read:
+      - navigation.md
+
+  - id: composing-robots
+    needs: [arm, wheels]
+    title: Composing two robots into one
+    tags: [ros2, architecture, safety]
+    builds_on: [links-and-joints, one-source-of-truth, inertia-is-computed]
+    minutes: 35
+    objective: Put the arm on the base without editing either, and compute whether it can tip itself over.
+    body: |
+      Two descriptions become one. The arm keeps its file, the base keeps its
+      file, and a third mounts one on the other. **Neither is modified**, and
+      both still build and run alone — a test asserts it. This is what the
+      spare mount frames from Stage 2 were for.
+
+      Composition surfaces problems that a single robot hides. Every macro
+      read its configuration from a property called `cfg`; with two robots
+      in one document, whichever was assigned last would win, and the arm
+      would be built from base numbers. Both descriptions also started their
+      own controller manager — fine alone, wrong together. Both fixed without
+      changing what either robot is.
+
+      The detail that will catch you is **naming**. The arm's joints gain an
+      `arm_` prefix, so `shoulder_pan_joint` becomes
+      `arm_shoulder_pan_joint`. Controller names do not change, so every
+      topic and action is the same as before. But any code that hardcoded a
+      joint list now drives nothing — and fails *silently*, because a
+      trajectory with unknown joint names is simply rejected. The fix was to
+      ask the controller which joints it drives, rather than assume. That
+      one change is why the same client later drove a foreign robot.
+
+      Composition also changes physics. The arm is a large fraction of the
+      total mass and it **moves**, so the centre of mass depends on the joint
+      angles. Whether the robot can tip itself over is a question about the
+      whole reachable workspace, carrying a payload — answered by a test that
+      sweeps the joint limits against all four wheel contacts, with no
+      simulator.
+
+      It found that the binding edge is the **rear**, not the front: mounting
+      the arm behind centre buys forward margin and spends it at the back.
+      And its first answers were arithmetic on guessed masses. When real
+      masses were computed from the CAD, the worst margin moved from 38.8 mm
+      to 43.2 mm. Still nothing has been weighed.
+    steps:
+      - do: Start the composed robot.
+        run: make mm-sim
+      - do: In a second terminal, drive and move the arm at the same time.
+        run: make mm-verify
+        expect: '`ok` lines confirming one `/joint_states` with every joint, an arm goal accepted while the base was driving, and both moving.'
+      - do: See the prefixed names the controller now drives.
+        run: |
+          make shell
+          ros2 param get /arm_controller joints
+      - do: Find the tipping test, and the margin it requires.
+        run: grep -n -A20 "def test_the_robot_cannot_tip_itself_over" src/threevn_control/test/test_mobile_manipulator_kinematics.py
+    checkpoint: >-
+      The composed robot drives and moves its arm concurrently, and you can
+      say which edge limits its stability and why.
+    pitfalls:
+      - symptom: Arm goals are rejected on the composed robot and work on the arm alone.
+        cause: Hardcoded, unprefixed joint names.
+        fix: Ask `/arm_controller` for its `joints` parameter, as the robot client does.
+      - symptom: Two links with the same name, and no error.
+        cause: Both components declared `imu_link`; the parser kept one.
+        fix: Prefix the component; a test asserts both links survive.
+    concepts:
+      - term: Composition
+        meaning: >-
+          Building a robot from existing robot descriptions without modifying
+          them — here, mounting the arm on the base.
+      - term: Joint prefix
+        meaning: >-
+          A namespace applied to a component's joint names in a composed
+          robot, so two components cannot collide.
+      - term: Tipping margin
+        meaning: >-
+          How far inside the wheel contacts the centre of mass stays, across
+          every reachable arm pose with a payload.
+    quiz:
+      - q: Why does the composed robot keep its controller names unprefixed while the joints change?
+        a: >-
+          So every topic and action stays the same as on the components — the
+          interface clients depend on does not change.
+      - q: Why sweep the whole workspace rather than check one pose for tipping?
+        a: >-
+          The arm moves, so the centre of mass moves. The worst case is
+          wherever it is, not at the pose you happened to check.
+    exercise:
+      task: >-
+        The long-reach composition has 94 mm more reach and 8.8 mm less
+        margin. Find both numbers in `docs/mobile-manipulator.md`, then argue
+        how much payload you would allow on it — and what you would need to
+        weigh before you trusted your answer.
+    read:
+      - mobile-manipulator.md
+
+project:
+  title: How far can the base be trusted?
+  minutes: 60
+  brief: |
+    Turn the three lessons into one honest page about the mobile
+    manipulator: how wrong its wheels are about heading, how much better
+    the fused estimate is, how much margin it has before it tips, and how
+    much each of those numbers moves between runs.
+
+    A figure from one run is a memory, not a measurement, so every number
+    in your page comes from a script you ran at least three times.
+  tasks:
+    - do: Start the base on its own, and measure wheel odometry against ground truth three times.
+      run: |
+        make base-sim
+        make base-drive
+    - do: >-
+        Stop it, start the base three more times from fresh, and run
+        `make base-drive` once against each. Note how far apart the six
+        heading errors are.
+    - do: Start the mobile manipulator with the target bench, and compare the fused heading with the wheels alone.
+      run: |
+        make mm-sim WORLD=bench_with_target
+        make fused-odom
+        make heading
+    - do: Start the mobile manipulator, and run its composition checks, including the one that it cannot tip over.
+      run: |
+        make mm-sim
+        make mm-verify
+    - do: >-
+        Write the page: the wheel heading error and its spread, the fused
+        heading error, the tip margin, and the one thing you would measure
+        first on a real base before you trusted any of them.
+  done_when:
+    - Every number on the page names the command that produced it.
+    - The wheel heading error is given as a range over at least three runs, not as one figure.
+    - The page says what you would measure first on real hardware, and why that one.
+  hints:
+    - title: The six runs disagree
+      body: >-
+        They will. That is the result, not a mistake: report the range, and
+        say whether fresh simulators and a reused one disagree in the same
+        way.
+  read:
+    - mobile-base.md
+    - navigation.md
+    - mobile-manipulator.md

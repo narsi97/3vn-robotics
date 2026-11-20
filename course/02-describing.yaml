@@ -129,7 +129,7 @@ lessons:
       | type | moves | here |
       |---|---|---|
       | revolute | rotates, between limits | the four arm joints |
-      | continuous | rotates forever | the wheels, in Tier 6 |
+      | continuous | rotates forever | the wheels, in the *Put it on wheels* side track |
       | prismatic | slides, between limits | the gripper fingers |
       | fixed | not at all | reference frames like `tool0` |
 
@@ -704,7 +704,7 @@ lessons:
 
       - **`base_footprint`**, a weightless root on the ground. Attaching a
         mobile base becomes one joint rather than a restructuring — which is
-        exactly what happens in Tier 6.
+        exactly what happens in the *Put it on wheels* side track.
       - **`tool0`**, the conventional name for the tool flange. Every
         inverse-kinematics tutorial and motion planner expects it, so the
         convention is free if you adopt it early.
