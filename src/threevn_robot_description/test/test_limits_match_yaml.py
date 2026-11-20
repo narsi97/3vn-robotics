@@ -99,12 +99,16 @@ def test_ros2_control_limits_agree_with_urdf_limits(expanded, profile):
 
     <command_interface> min/max params. They must not diverge, or the
     controller will happily command a pose the URDF forbids.
+
+    The gripper is the exception, on purpose: it is commanded through
+    its travel, inside its stops. The next test holds it to that.
     """
     import xml.etree.ElementTree as ET
 
     xml = expanded(profile=profile, target='mock')
     robot = URDF.from_xml_string(xml)
     rc = next(ET.fromstring(xml).iter('ros2_control'))
+    gripper = _cfg(profile)['gripper']['joint']
 
     for joint_el in rc.iter('joint'):
         name = joint_el.get('name')
@@ -112,9 +116,62 @@ def test_ros2_control_limits_agree_with_urdf_limits(expanded, profile):
         assert cmd is not None, f'{name}: no position command interface'
         params = {p.get('name'): float(p.text) for p in cmd.findall('param')}
         assert 'min' in params and 'max' in params, f'{name}: missing min/max'
+        if name == gripper:
+            continue
 
         limit = robot.joint_map[name].limit
         assert params['min'] == pytest.approx(limit.lower, abs=1e-9), \
             f'{name}: command_interface min disagrees with <limit> lower'
         assert params['max'] == pytest.approx(limit.upper, abs=1e-9), \
             f'{name}: command_interface max disagrees with <limit> upper'
+
+
+#: How far inside its hard stops the gripper's travel must stay, in the
+#: joint's own unit (metres: this gripper is prismatic). Half of what the
+#: profiles ship, so the margin can be tuned but not removed.
+GRIPPER_STOP_CLEARANCE = 0.0005
+
+
+@pytest.mark.parametrize('profile', PROFILES, ids=lambda p: p.stem)
+def test_the_gripper_is_commanded_through_its_travel_not_onto_its_stops(
+        expanded, profile):
+    """
+    The gripper's command range is its travel, and the travel clears its stops.
+
+    In Gazebo a joint at or past its stop is held there by the stop and
+    is not driven by its servo. This gripper's travel used to BE its
+    limits: it spawned on the lower stop and was commanded onto both, and
+    whether it moved came down to rounding. Measured at -5.4e-21 m, every
+    command stalled. A real servo wants the same gap, since one driven
+    into a hard stop is a stalled servo. See docs/manipulation.md.
+
+    ros2_control enforces the tighter of <limit> and these min/max, so a
+    command range equal to the travel means no command can reach a stop.
+    """
+    import xml.etree.ElementTree as ET
+
+    cfg = _cfg(profile)
+    gripper = cfg['gripper']
+    xml = expanded(profile=profile, target='mock')
+    limit = URDF.from_xml_string(xml).joint_map[gripper['joint']].limit
+    rc = next(ET.fromstring(xml).iter('ros2_control'))
+    joint_el = next(j for j in rc.iter('joint') if j.get('name') == gripper['joint'])
+    cmd = joint_el.find("command_interface[@name='position']")
+    params = {p.get('name'): float(p.text) for p in cmd.findall('param')}
+
+    assert params['min'] == pytest.approx(gripper['closed'], abs=1e-9), \
+        'the gripper is commanded below gripper.closed'
+    assert params['max'] == pytest.approx(gripper['open'], abs=1e-9), \
+        'the gripper is commanded beyond gripper.open'
+    assert gripper['closed'] - limit.lower >= GRIPPER_STOP_CLEARANCE, (
+        f"gripper.closed {gripper['closed']} is on or near its hard stop "
+        f'{limit.lower}: a finger closed onto its stop is not driven')
+    assert limit.upper - gripper['open'] >= GRIPPER_STOP_CLEARANCE, (
+        f"gripper.open {gripper['open']} is on or near its hard stop "
+        f'{limit.upper}: a finger opened onto its stop is not driven')
+
+    initial = float(joint_el.find(
+        "state_interface[@name='position']/param[@name='initial_value']").text)
+    assert gripper['closed'] <= initial <= gripper['open'], (
+        f'the gripper starts at {initial}, outside its travel: it spawns '
+        'on or beyond the point it is meant to be driven from')

@@ -38,16 +38,28 @@
     same YAML that produced the <limit> tags. Defined at FILE scope, not
     nested inside the macro below: nested xacro macro definitions have
     surprising scope behaviour.
+
+    One exception: the GRIPPER joint is commanded through its travel,
+    gripper.closed to gripper.open, which sits inside its <limit> stops.
+    ros2_control enforces the tighter of the two, so no command, not even
+    a raw action goal at the stop, can park the finger on a hard stop. In
+    Gazebo a finger on its stop is held by the stop and not driven by its
+    servo, and the gripper stops working. See docs/manipulation.md.
   -->
   <xacro:macro name="threevn_joint_ifaces" params="name prefix">
     <xacro:property name="j" value="${cfg['joints'][name]}"/>
+    <xacro:property name="is_gripper" value="${name == cfg['gripper']['joint']}"/>
     <joint name="${prefix}${name}">
       <command_interface name="position">
-        <xacro:if value="${j['type'] == 'revolute'}">
+        <xacro:if value="${is_gripper}">
+          <param name="min">${cfg['gripper']['closed']}</param>
+          <param name="max">${cfg['gripper']['open']}</param>
+        </xacro:if>
+        <xacro:if value="${not is_gripper and j['type'] == 'revolute'}">
           <param name="min">${radians(j['limit']['lower_deg'])}</param>
           <param name="max">${radians(j['limit']['upper_deg'])}</param>
         </xacro:if>
-        <xacro:if value="${j['type'] == 'prismatic'}">
+        <xacro:if value="${not is_gripper and j['type'] == 'prismatic'}">
           <param name="min">${j['limit']['lower']}</param>
           <param name="max">${j['limit']['upper']}</param>
         </xacro:if>

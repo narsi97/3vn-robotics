@@ -218,6 +218,15 @@ def send_arm_goal(positions, seconds=2):
                timeout=60)
 
 
+def send_gripper_goal(position, effort=5.0):
+    """Send one gripper goal straight to the action, by CLI."""
+    goal = f'{{command: {{position: {position}, max_effort: {effort}}}}}'
+    return run(['ros2', 'action', 'send_goal',
+                '/gripper_controller/gripper_cmd',
+                'control_msgs/action/GripperCommand', goal],
+               timeout=60)
+
+
 def joint_positions(attempts=3):
     """
     Read the live joint positions from /joint_states, by CLI.

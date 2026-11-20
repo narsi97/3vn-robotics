@@ -162,7 +162,22 @@ joints:
     # Deliberately below the ~14.7 N ceiling (sg90 stall through a
     # 12 mm horn): a gripper configured at stall crushes what it
     # picks up and cooks the servo holding it closed.
-    limit: {lower: 0.0, upper: 0.018, effort: 10.0, velocity: 0.05}
+    #
+    # lower/upper are the finger's HARD STOPS, and they sit 1 mm
+    # OUTSIDE the travel the servo is commanded through (gripper.open
+    # and gripper.closed, below). They used to be the same numbers,
+    # and the gripper did not move in Gazebo.
+    #
+    # The physics engine drives each joint with ONE constraint per
+    # step, and a joint at or past a stop gets the stop, not its
+    # servo. A finger spawned at 0.0 sat on its stop to within
+    # 1e-11 m, and which side of it rounding left it on decided
+    # whether the gripper worked: -5.4e-21 m and every command
+    # stalled, for good. The ros2_control command range is the
+    # travel, so nothing can command the finger onto a stop either.
+    # A real servo wants the same gap: one driven into a hard stop
+    # is a stalled servo. See docs/manipulation.md.
+    limit: {lower: -0.001, upper: 0.019, effort: 10.0, velocity: 0.05}
     initial_position: 0.0
   gripper_right_finger_joint:
     type: prismatic
@@ -173,12 +188,19 @@ joints:
     # Deliberately below the ~14.7 N ceiling (sg90 stall through a
     # 12 mm horn): a gripper configured at stall crushes what it
     # picks up and cooks the servo holding it closed.
-    limit: {lower: 0.0, upper: 0.018, effort: 10.0, velocity: 0.05}
+    # The same stops as the left finger, 1 mm outside the travel.
+    limit: {lower: -0.001, upper: 0.019, effort: 10.0, velocity: 0.05}
     initial_position: 0.0
-    # The right finger follows the left through the URDF <mimic> tag, which
-    # both mock_components and gz_ros2_control parse. It therefore gets no
-    # <joint> entry in the ros2_control block -- it is not independently
-    # commanded.
+    # The right finger follows the left through the URDF <mimic> tag. It
+    # therefore gets no <joint> entry in the ros2_control block -- it is
+    # not independently commanded.
+    #
+    # In GAZEBO IT DOES NOT FOLLOW. robot_state_publisher honours the
+    # mimic, so RViz and TF show both jaws moving, but gz-sim's DART
+    # engine logs "the chosen physics engine does not support mimic
+    # constraints" at spawn and creates none. In physics this finger is
+    # passive: it slides freely between its stops and pushes nothing.
+    # See docs/manipulation.md, "It does not close yet".
     mimic: {joint: gripper_left_finger_joint, multiplier: 1.0, offset: 0.0}
 
 # What the APPLICATION needs to know about this robot, and a URDF has no
@@ -212,6 +234,11 @@ gripper:
   joint: gripper_left_finger_joint
   # Metres: this gripper is prismatic. Another robot's may be revolute,
   # and radians; nothing above the profile needs to know which.
+  #
+  # The TRAVEL: the ends of what the servo is commanded through, and
+  # the ros2_control command range for this joint. Both sit 1 mm inside
+  # the finger's hard stops (joints.gripper_left_finger_joint.limit),
+  # never on them.
   open: 0.018
   closed: 0.0
 

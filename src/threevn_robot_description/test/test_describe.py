@@ -163,11 +163,18 @@ def test_every_named_pose_fits_the_arm(expanded, profile):
 @pytest.mark.parametrize('profile', ARM_PROFILES + COMPOSED_PROFILES,
                          ids=lambda p: p.stem)
 def test_gripper_travel_is_inside_its_joint_limits(expanded, profile):
-    """Open and closed are positions the gripper joint can actually reach."""
+    """
+    Open and closed are positions the gripper joint can reach, off its stops.
+
+    STRICTLY inside, by half a millimetre at least: in Gazebo a joint on
+    its stop is held by the stop and not driven, and a travel equal to
+    the limits is how the 3VN gripper stopped moving. Checked on the
+    composed robots too, where the arm's joints are prefixed.
+    """
     urdf = expanded(profile)
     gripper = describing.parse_semantics(urdf)['gripper']
     lower, upper = _limits(urdf)[gripper['joint']]
-    assert lower <= gripper['closed'] < gripper['open'] <= upper
+    assert lower + 0.0005 <= gripper['closed'] < gripper['open'] <= upper - 0.0005
 
 
 @pytest.mark.parametrize('target', TARGETS)

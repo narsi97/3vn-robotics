@@ -34,7 +34,14 @@ Asymmetric ranges are deliberate — the arm cannot fold back through its
 own base.
 
 The right gripper finger follows the left through a URDF `<mimic>` tag,
-which is what a single-servo gripper physically does.
+which is what a single-servo gripper physically does. (Gazebo does not
+enforce it; see [gazebo.md](gazebo.md).)
+
+Each finger's `<limit>` is its hard stop, and it sits 1 mm outside the
+travel the servo is commanded through: 0 to 18 mm commanded, −1 to 19 mm
+of slide. A servo driven into a hard stop is a stalled servo, and in
+Gazebo a finger on its stop does not move at all. The printed guide has
+to allow the 20 mm.
 
 ## Where the software meets the hardware
 

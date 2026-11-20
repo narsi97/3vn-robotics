@@ -32,6 +32,7 @@ from conftest import (
     ROBOT,
     run as _run,
     send_arm_goal,
+    send_gripper_goal,
 )
 import pytest
 
@@ -185,6 +186,40 @@ def test_in_limit_command_is_not_clamped(robot):
         got = positions[joint]
         assert abs(got - want) < 0.02, \
             f'{joint}: commanded {want:+.3f}, reached {got:+.3f}'
+
+
+def test_the_gripper_cannot_be_commanded_onto_its_stops(robot):
+    """
+    A gripper goal AT a hard stop ends at the end of the travel instead.
+
+    The gripper's ros2_control command range is its travel, which sits
+    inside its <limit> stops, and ros2_control enforces the tighter of
+    the two. Gazebo is why: a joint on its stop is held by the stop and
+    not driven by its servo, and this gripper, commanded onto both stops,
+    did not reliably move. See docs/manipulation.md.
+
+    Straight to the action, like the arm clamp test above, so the
+    client's own travel cannot mask whether the limit holds.
+    """
+    if ROBOT['kind'] == 'vendor_arm':
+        pytest.skip('a vendor arm is commanded to its raw limits; '
+                    'see docs/so101.md, "It gives the joints friction"')
+    joint = ROBOT['gripper_joint']
+    lower, upper = ROBOT['limits'][joint]
+    closed, opened = ROBOT['gripper']['closed'], ROBOT['gripper']['open']
+    assert lower < closed < opened < upper, (
+        f'the travel [{closed}, {opened}] is not inside the stops '
+        f'[{lower}, {upper}]')
+
+    for stop, end in ((upper, opened), (lower, closed)):
+        code, out = send_gripper_goal(stop)
+        assert code == 0, out
+        time.sleep(1.5)
+        actual = joint_positions()[joint]
+        assert actual == pytest.approx(end, abs=1e-4), (
+            f'sent to its stop at {stop}, {joint} went to {actual:.5f}, not '
+            f'to the end of its travel at {end}: the command range is not '
+            'the travel')
 
 
 # -- the robot's own facts, through the client -------------------------

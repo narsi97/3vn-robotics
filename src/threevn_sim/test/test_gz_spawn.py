@@ -19,105 +19,22 @@ Marked `slow` and excluded from `make test`; `make test-sim` runs it.
 Starting a simulator takes the better part of a minute, and a suite that
 slow is a suite nobody runs before committing.
 
-The simulator is managed as a subprocess rather than through
-launch_testing. That is a deliberate trade: launch_testing is the
-idiomatic choice, but wrapping a process that forks Gazebo, an ROS bridge
-and three controller spawners makes failures hard to attribute. A plain
-subprocess with explicit polling and unconditional teardown produces
-diagnosable failures, which matters more for a test that only runs on
-demand and in CI.
+The simulator fixture, and why it is a plain subprocess rather than
+launch_testing, are in conftest.py.
 """
 
-import os
-import signal
-import subprocess
-import time
-
+from conftest import all_controllers_active as _all_controllers_active
+from conftest import PROFILE
+from conftest import run as _run
 import pytest
 from threevn_robot_description.describe import robot_facts
 
 pytestmark = pytest.mark.slow
 
-#: The robot under test, chosen by `make test-sim PROFILE=...`, and what
-#: its description says about it. Nothing below names a joint.
-PROFILE = os.environ.get('THREEVN_PROFILE', 'threevn_arm_v1')
+#: What the description of the robot under test says about it. Nothing
+#: below names a joint. The simulator fixture is in conftest.py, shared
+#: with test_gz_gripper.py.
 ROBOT = robot_facts(PROFILE, target='gz')
-
-#: Gazebo, the bridge and three spawners have to come up in sequence.
-STARTUP_TIMEOUT = 120.0
-POLL = 2.0
-
-EXPECTED_CONTROLLERS = {
-    'joint_state_broadcaster',
-    'arm_controller',
-    'gripper_controller',
-}
-
-
-def _run(args, timeout=30.0):
-    """Run a command and return (returncode, stdout)."""
-    proc = subprocess.run(
-        args, capture_output=True, text=True, timeout=timeout, check=False)
-    return proc.returncode, proc.stdout
-
-
-def _all_controllers_active():
-    """Return True when every expected controller reports active."""
-    code, out = _run(['ros2', 'control', 'list_controllers'])
-    if code != 0:
-        return False
-    active = {
-        line.split()[0] for line in out.splitlines()
-        if line.strip().endswith('active')
-    }
-    return EXPECTED_CONTROLLERS <= active
-
-
-@pytest.fixture(scope='module')
-def simulator():
-    """
-    Start the Gazebo stack, yield once controllers are active, tear down.
-
-    Teardown kills the whole process group: `ros2 launch` forks Gazebo and
-    several spawners, and killing only the parent leaves a Gazebo holding
-    the ROS graph, which makes every subsequent test fail for reasons that
-    have nothing to do with the code under test.
-    """
-    env = dict(os.environ)
-    proc = subprocess.Popen(
-        ['ros2', 'launch', 'threevn_sim', 'sim.launch.py',
-         f'profile:={PROFILE}'],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, env=env, start_new_session=True)
-
-    try:
-        deadline = time.monotonic() + STARTUP_TIMEOUT
-        while time.monotonic() < deadline:
-            if proc.poll() is not None:
-                pytest.fail(
-                    f'simulator exited early with code {proc.returncode}')
-            if _all_controllers_active():
-                break
-            time.sleep(POLL)
-        else:
-            pytest.fail(
-                f'controllers not active within {STARTUP_TIMEOUT:.0f}s; '
-                f'expected {sorted(EXPECTED_CONTROLLERS)}')
-        yield proc
-    finally:
-        try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGINT)
-            proc.wait(timeout=20)
-        except Exception:                              # noqa: BLE001
-            try:
-                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-            except Exception:                          # noqa: BLE001
-                pass
-        # gz forks its own server; make sure nothing survives to poison
-        # the ROS graph for the next test run.
-        subprocess.run(['pkill', '-9', '-f', 'gz sim'], check=False)
-        subprocess.run(['pkill', '-9', '-f', 'ruby.*gz'], check=False)
-        time.sleep(3)
 
 
 def test_controllers_are_active(simulator):
