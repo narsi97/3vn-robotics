@@ -425,6 +425,66 @@ lessons:
     title: The decision everything else rests on
     tags: [architecture, ros2, simulation]
     minutes: 30
+    flavors:
+      so101:
+        note: >-
+          the right-hand box in the diagram is `FeetechSystemInterface`,
+          talking to six bus servos, and its target is `feetech` rather than
+          `esp32`. Because the SO-101's description is somebody else's URDF
+          plus an overlay, the choice is made in Python, in `describe.py`,
+          not in a xacro file. Everything else is the same: three targets,
+          one argument, and only one of them may mention the simulator.
+        steps:
+          - do: Expand the SO-101's description for Gazebo and count the simulator plugin.
+            run: make urdf PROFILE=so101_follower TARGET=gz 2>/dev/null | grep -c GazeboSimSystem
+            expect: >-
+              `1`. If this prints `0`, run it again without `2>/dev/null`
+              and read what it hid. A description that has not been fetched
+              yet is an error, and an error also counts as zero.
+          - do: Expand it for the mock and count any reference to the Gazebo bridge.
+            run: make urdf PROFILE=so101_follower TARGET=mock 2>/dev/null | grep -c gz_ros2_control
+            expect: >-
+              `0`. As on the 3VN arm, the mock build cannot reach the
+              simulator.
+          - do: Do the same for the real-hardware target, and find its plugin.
+            run: |
+              make urdf PROFILE=so101_follower TARGET=feetech 2>/dev/null | grep -c "<gazebo"
+              make urdf PROFILE=so101_follower TARGET=feetech 2>/dev/null | grep -c FeetechSystemInterface
+            expect: '`0`, then `1`.'
+          - do: >-
+              Find where the choice is made. Two plugins are fixed in code;
+              the third is named by the robot's profile.
+            run: |
+              grep -n -A3 "^VENDOR_PLUGINS" src/threevn_robot_description/threevn_robot_description/describe.py
+              grep -n -A1 "^  feetech:" src/threevn_robot_description/config/so101_follower.yaml
+            expect: >-
+              `mock` and `gz` in the code, then `plugin:
+              threevn_hardware/FeetechSystemInterface` in the profile.
+              Swapping in a community driver would be a one-line change to
+              the profile, and no code would change.
+          - do: Ask for a target this robot does not have.
+            run: make urdf PROFILE=so101_follower TARGET=esp32
+            expect: >-
+              A refusal naming the targets that do exist: `gz`, `mock` and
+              `feetech`. A mistyped target stops here rather than becoming a
+              robot with no hardware behind it.
+          - do: Read the boundary test. The package rule is the same for every robot.
+            run: less src/threevn_bringup/test/test_package_dependencies.py
+        checkpoint: >-
+          The Gazebo count is `1`, the mock and `feetech` counts of Gazebo
+          are `0`, and you can say where the SO-101's plugin is named and
+          why it is named there rather than in code.
+        pitfalls:
+          - symptom: '`make urdf PROFILE=so101_follower` fails, saying `so101.urdf` is missing.'
+            cause: >-
+              The SO-101's description is Apache-2.0 upstream and is not
+              committed to this repository. It is fetched, pinned to one
+              upstream commit and checksummed.
+            fix: Run `make so101-fetch` once. The error message names the same command.
+        read:
+          - architecture.md
+          - decisions/0003-hardware-seam.md
+          - so101.md
     objective: Understand — and prove — why the same code can drive a simulator, a mock or a motor.
     body: |
       The application does not know what it is driving. A physics
